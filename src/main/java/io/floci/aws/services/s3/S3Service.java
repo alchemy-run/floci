@@ -29,6 +29,7 @@ import io.floci.aws.core.storage.StorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
 import io.floci.aws.core.storage.WriteProfile;
 import io.floci.aws.services.eventbridge.EventBridgeService;
+import io.floci.aws.services.iam.AccessDeniedMessages;
 import io.floci.aws.services.iam.IamPolicyEvaluator;
 import io.floci.aws.services.iam.IamPolicyEvaluator.ResourcePolicyDecision;
 import io.floci.aws.services.iam.IamService;
@@ -283,6 +284,10 @@ public class S3Service implements Resettable, ResourceProvider {
     private final IamService iamService;
     private final boolean globalBucketNamespace;
     private final IamPolicyEvaluator policyEvaluator;
+
+    /** What can keep a bucket from being deleted. Absent when the service is built outside CDI. */
+    @Inject
+    Instance<S3BucketDeletionGuard> deletionGuards;
 
     @Inject
     public S3Service(StorageFactory storageFactory, EmulatorConfig config,
@@ -577,6 +582,14 @@ public class S3Service implements Resettable, ResourceProvider {
             Bucket bucket = bucketStore.get(bucketName)
                     .orElseThrow(() -> new AwsException("NoSuchBucket",
                             "The specified bucket does not exist.", 404));
+            if (deletionGuards != null) {
+                for (S3BucketDeletionGuard guard : deletionGuards) {
+                    Optional<AwsException> refusal = guard.refuseDeletion(bucketName);
+                    if (refusal.isPresent()) {
+                        throw refusal.get();
+                    }
+                }
+            }
 
             // Multipart operations take the stripe before the bucket monitor, so a delete cannot
             // sweep their temporary parts or miss an upload created just after its scan.
@@ -1607,6 +1620,13 @@ public class S3Service implements Resettable, ResourceProvider {
                 bucketPolicyContext(caller, requestConditions));
 
         if (decision == ResourcePolicyDecision.EXPLICIT_DENY) {
+            // S3 names a same-account caller's denial; a cross-account one stays "Access Denied".
+            if (sameAccountAsOwner && principalArn != null) {
+                throw new AwsException("AccessDenied", AccessDeniedMessages.notAuthorized(principalArn, action,
+                        "\"" + resourceArn + "\"", AccessDeniedMessages.PolicyType.RESOURCE_BASED_POLICY
+                                .explicitDeny()), 403, Map.of("Resource", key != null ? "/" + bucketName + "/" + key
+                        : "/" + bucketName));
+            }
             throw accessDeniedException(bucketName, key);
         }
         if (decision == ResourcePolicyDecision.ALLOW || decision == ResourcePolicyDecision.ALLOW_DIRECT_IAM_USER
@@ -7210,6 +7230,8 @@ public class S3Service implements Resettable, ResourceProvider {
                 entry.put("Source", "aws.s3");
                 entry.put("DetailType", detailType);
                 entry.put("Detail", buildS3EventBridgeDetail(bucketName, key, eventName, obj, region));
+                entry.put("Resources", objectMapper.createArrayNode().add(
+                        S3PublicAccessEvaluator.bucketArn(bucketPartition(bucketName), bucketName)));
                 eventBridgeService.putEvents(List.of(entry), region);
                 LOG.debugv("Fired S3 event {0} to EventBridge default bus", eventName);
             } catch (Exception e) {

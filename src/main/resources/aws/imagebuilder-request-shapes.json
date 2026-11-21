@@ -1,0 +1,2187 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_imagebuilder_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CancelImageCreation": "CancelImageCreationRequest",
+    "CancelLifecycleExecution": "CancelLifecycleExecutionRequest",
+    "CreateComponent": "CreateComponentRequest",
+    "CreateContainerRecipe": "CreateContainerRecipeRequest",
+    "CreateDistributionConfiguration": "CreateDistributionConfigurationRequest",
+    "CreateImage": "CreateImageRequest",
+    "CreateImagePipeline": "CreateImagePipelineRequest",
+    "CreateImageRecipe": "CreateImageRecipeRequest",
+    "CreateInfrastructureConfiguration": "CreateInfrastructureConfigurationRequest",
+    "CreateLifecyclePolicy": "CreateLifecyclePolicyRequest",
+    "CreateWorkflow": "CreateWorkflowRequest",
+    "DeleteComponent": "DeleteComponentRequest",
+    "DeleteContainerRecipe": "DeleteContainerRecipeRequest",
+    "DeleteDistributionConfiguration": "DeleteDistributionConfigurationRequest",
+    "DeleteImage": "DeleteImageRequest",
+    "DeleteImagePipeline": "DeleteImagePipelineRequest",
+    "DeleteImageRecipe": "DeleteImageRecipeRequest",
+    "DeleteInfrastructureConfiguration": "DeleteInfrastructureConfigurationRequest",
+    "DeleteLifecyclePolicy": "DeleteLifecyclePolicyRequest",
+    "DeleteWorkflow": "DeleteWorkflowRequest",
+    "DistributeImage": "DistributeImageRequest",
+    "GetComponent": "GetComponentRequest",
+    "GetComponentPolicy": "GetComponentPolicyRequest",
+    "GetContainerRecipe": "GetContainerRecipeRequest",
+    "GetContainerRecipePolicy": "GetContainerRecipePolicyRequest",
+    "GetDistributionConfiguration": "GetDistributionConfigurationRequest",
+    "GetImage": "GetImageRequest",
+    "GetImagePipeline": "GetImagePipelineRequest",
+    "GetImagePolicy": "GetImagePolicyRequest",
+    "GetImageRecipe": "GetImageRecipeRequest",
+    "GetImageRecipePolicy": "GetImageRecipePolicyRequest",
+    "GetInfrastructureConfiguration": "GetInfrastructureConfigurationRequest",
+    "GetLifecycleExecution": "GetLifecycleExecutionRequest",
+    "GetLifecyclePolicy": "GetLifecyclePolicyRequest",
+    "GetMarketplaceResource": "GetMarketplaceResourceRequest",
+    "GetWorkflow": "GetWorkflowRequest",
+    "GetWorkflowExecution": "GetWorkflowExecutionRequest",
+    "GetWorkflowStepExecution": "GetWorkflowStepExecutionRequest",
+    "ImportComponent": "ImportComponentRequest",
+    "ImportDiskImage": "ImportDiskImageRequest",
+    "ImportVmImage": "ImportVmImageRequest",
+    "ListComponentBuildVersions": "ListComponentBuildVersionsRequest",
+    "ListComponents": "ListComponentsRequest",
+    "ListContainerRecipes": "ListContainerRecipesRequest",
+    "ListDistributionConfigurations": "ListDistributionConfigurationsRequest",
+    "ListImageBuildVersions": "ListImageBuildVersionsRequest",
+    "ListImagePackages": "ListImagePackagesRequest",
+    "ListImagePipelineImages": "ListImagePipelineImagesRequest",
+    "ListImagePipelines": "ListImagePipelinesRequest",
+    "ListImageRecipes": "ListImageRecipesRequest",
+    "ListImageScanFindingAggregations": "ListImageScanFindingAggregationsRequest",
+    "ListImageScanFindings": "ListImageScanFindingsRequest",
+    "ListImages": "ListImagesRequest",
+    "ListInfrastructureConfigurations": "ListInfrastructureConfigurationsRequest",
+    "ListLifecycleExecutionResources": "ListLifecycleExecutionResourcesRequest",
+    "ListLifecycleExecutions": "ListLifecycleExecutionsRequest",
+    "ListLifecyclePolicies": "ListLifecyclePoliciesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListWaitingWorkflowSteps": "ListWaitingWorkflowStepsRequest",
+    "ListWorkflowBuildVersions": "ListWorkflowBuildVersionsRequest",
+    "ListWorkflowExecutions": "ListWorkflowExecutionsRequest",
+    "ListWorkflowStepExecutions": "ListWorkflowStepExecutionsRequest",
+    "ListWorkflows": "ListWorkflowsRequest",
+    "PutComponentPolicy": "PutComponentPolicyRequest",
+    "PutContainerRecipePolicy": "PutContainerRecipePolicyRequest",
+    "PutImagePolicy": "PutImagePolicyRequest",
+    "PutImageRecipePolicy": "PutImageRecipePolicyRequest",
+    "RetryImage": "RetryImageRequest",
+    "SendWorkflowStepAction": "SendWorkflowStepActionRequest",
+    "StartImagePipelineExecution": "StartImagePipelineExecutionRequest",
+    "StartResourceStateUpdate": "StartResourceStateUpdateRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDistributionConfiguration": "UpdateDistributionConfigurationRequest",
+    "UpdateImagePipeline": "UpdateImagePipelineRequest",
+    "UpdateInfrastructureConfiguration": "UpdateInfrastructureConfigurationRequest",
+    "UpdateLifecyclePolicy": "UpdateLifecyclePolicyRequest"
+  },
+  "shapes": {
+    "AccountId": {
+      "type": "string",
+      "pattern": "^[0-9]{12}$"
+    },
+    "AccountList": {
+      "type": "list",
+      "min": 1,
+      "max": 1536,
+      "member": "AccountId"
+    },
+    "AdditionalInstanceConfiguration": {
+      "type": "structure",
+      "members": {
+        "systemsManagerAgent": "SystemsManagerAgent",
+        "userDataOverride": "UserDataOverride"
+      }
+    },
+    "AmiDistributionConfiguration": {
+      "type": "structure",
+      "members": {
+        "name": "AmiNameString",
+        "description": "NonEmptyString",
+        "targetAccountIds": "AccountList",
+        "amiTags": "TagMap",
+        "kmsKeyId": "NonEmptyString",
+        "launchPermission": "LaunchPermissionConfiguration"
+      }
+    },
+    "AmiNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "^[-_A-Za-z0-9{][-_A-Za-z0-9\\s:{}\\.]+[-_A-Za-z0-9}]$"
+    },
+    "AmiWatermarkName": {
+      "type": "string",
+      "min": 3,
+      "max": 128,
+      "pattern": "^[A-Za-z0-9()\\[\\]./'@_\\-][A-Za-z0-9 ()\\[\\]./'@_\\-]{1,126}[A-Za-z0-9()\\[\\]./'@_\\-]$"
+    },
+    "AmiWatermarksList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AmiWatermarkName"
+    },
+    "AutoDisableFailureCount": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "AutoDisablePolicy": {
+      "type": "structure",
+      "required": [
+        "failureCount"
+      ],
+      "members": {
+        "failureCount": "AutoDisableFailureCount"
+      }
+    },
+    "AutoScalingGroupConfiguration": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "NonEmptyString",
+        "capacityWaitTimeoutSeconds": "CapacityWaitTimeoutSeconds"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CancelImageCreationRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn",
+        "clientToken"
+      ],
+      "members": {
+        "imageBuildVersionArn": "ImageBuildVersionArn",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CancelLifecycleExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "lifecycleExecutionId",
+        "clientToken"
+      ],
+      "members": {
+        "lifecycleExecutionId": "LifecycleExecutionId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CapacityWaitTimeoutSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 3600
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ComponentBuildVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?|third-party):component/[a-z0-9-_]+/[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"
+    },
+    "ComponentConfiguration": {
+      "type": "structure",
+      "required": [
+        "componentArn"
+      ],
+      "members": {
+        "componentArn": "ComponentVersionArnOrBuildVersionArn",
+        "parameters": "ComponentParameterList"
+      }
+    },
+    "ComponentConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "ComponentConfiguration"
+    },
+    "ComponentFormat": {
+      "type": "string",
+      "enum": [
+        "SHELL"
+      ]
+    },
+    "ComponentParameter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "ComponentParameterName",
+        "value": "ComponentParameterValueList"
+      }
+    },
+    "ComponentParameterList": {
+      "type": "list",
+      "min": 1,
+      "member": "ComponentParameter"
+    },
+    "ComponentParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\x00]+"
+    },
+    "ComponentParameterValue": {
+      "type": "string",
+      "min": 0,
+      "pattern": "[^\\x00]*"
+    },
+    "ComponentParameterValueList": {
+      "type": "list",
+      "member": "ComponentParameterValue"
+    },
+    "ComponentType": {
+      "type": "string",
+      "enum": [
+        "BUILD",
+        "TEST"
+      ]
+    },
+    "ComponentVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?|third-party):component/[a-z0-9-_]+/[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "ComponentVersionArnOrBuildVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?|third-party):component/[a-z0-9-_]+/(?:(?:([0-9]+|x)\\.([0-9]+|x)\\.([0-9]+|x))|(?:[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+))$"
+    },
+    "ContainerDistributionConfiguration": {
+      "type": "structure",
+      "required": [
+        "targetRepository"
+      ],
+      "members": {
+        "description": "NonEmptyString",
+        "containerTags": "StringList",
+        "targetRepository": "TargetContainerRepository"
+      }
+    },
+    "ContainerRecipeArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws):container-recipe/[a-z0-9-_]+/(?:[0-9]+|x)\\.(?:[0-9]+|x)\\.(?:[0-9]+|x)$"
+    },
+    "ContainerRepositoryService": {
+      "type": "string",
+      "enum": [
+        "ECR"
+      ]
+    },
+    "ContainerType": {
+      "type": "string",
+      "enum": [
+        "DOCKER"
+      ]
+    },
+    "CreateComponentRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "platform",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "semanticVersion": "VersionNumber",
+        "description": "NonEmptyString",
+        "changeDescription": "NonEmptyString",
+        "platform": "Platform",
+        "supportedOsVersions": "OsVersionList",
+        "data": "InlineComponentData",
+        "uri": "Uri",
+        "kmsKeyId": "NonEmptyString",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateContainerRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "containerType",
+        "name",
+        "semanticVersion",
+        "parentImage",
+        "targetRepository",
+        "clientToken"
+      ],
+      "members": {
+        "containerType": "ContainerType",
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "semanticVersion": "WildcardVersionNumber",
+        "components": "ComponentConfigurationList",
+        "instanceConfiguration": "InstanceConfiguration",
+        "dockerfileTemplateData": "InlineDockerFileTemplate",
+        "dockerfileTemplateUri": "Uri",
+        "platformOverride": "Platform",
+        "imageOsVersionOverride": "NonEmptyString",
+        "parentImage": "NonEmptyString",
+        "tags": "TagMap",
+        "workingDirectory": "NonEmptyString",
+        "targetRepository": "TargetContainerRepository",
+        "kmsKeyId": "NonEmptyString",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateDistributionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "distributions",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "distributions": "DistributionList",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateImagePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "infrastructureConfigurationArn",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "imageRecipeArn": "ImageRecipeArn",
+        "containerRecipeArn": "ContainerRecipeArn",
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn",
+        "distributionConfigurationArn": "DistributionConfigurationArn",
+        "imageTestsConfiguration": "ImageTestsConfiguration",
+        "enhancedImageMetadataEnabled": "NullableBoolean",
+        "schedule": "Schedule",
+        "status": "PipelineStatus",
+        "tags": "TagMap",
+        "imageTags": "TagMap",
+        "clientToken": "ClientToken",
+        "imageScanningConfiguration": "ImageScanningConfiguration",
+        "workflows": "WorkflowConfigurationList",
+        "executionRole": "RoleNameOrArn",
+        "loggingConfiguration": "PipelineLoggingConfiguration",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateImageRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "parentImage",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "semanticVersion": "WildcardVersionNumber",
+        "components": "ComponentConfigurationList",
+        "parentImage": "NonEmptyString",
+        "blockDeviceMappings": "InstanceBlockDeviceMappings",
+        "tags": "TagMap",
+        "workingDirectory": "NonEmptyString",
+        "additionalInstanceConfiguration": "AdditionalInstanceConfiguration",
+        "amiTags": "TagMap",
+        "amiWatermarks": "AmiWatermarksList",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateImageRequest": {
+      "type": "structure",
+      "required": [
+        "infrastructureConfigurationArn",
+        "clientToken"
+      ],
+      "members": {
+        "imageRecipeArn": "ImageRecipeArn",
+        "containerRecipeArn": "ContainerRecipeArn",
+        "distributionConfigurationArn": "DistributionConfigurationArn",
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn",
+        "imageTestsConfiguration": "ImageTestsConfiguration",
+        "enhancedImageMetadataEnabled": "NullableBoolean",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "imageScanningConfiguration": "ImageScanningConfiguration",
+        "workflows": "WorkflowConfigurationList",
+        "executionRole": "RoleNameOrArn",
+        "loggingConfiguration": "ImageLoggingConfiguration"
+      }
+    },
+    "CreateInfrastructureConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "instanceProfileName",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "instanceTypes": "InstanceTypeList",
+        "instanceProfileName": "InstanceProfileNameType",
+        "securityGroupIds": "SecurityGroupIds",
+        "subnetId": "NonEmptyString",
+        "logging": "Logging",
+        "keyPair": "NonEmptyString",
+        "terminateInstanceOnFailure": "NullableBoolean",
+        "terminateInstanceOnCompletion": "NullableBoolean",
+        "snsTopicArn": "SnsTopicArn",
+        "resourceTags": "ResourceTagMap",
+        "instanceMetadataOptions": "InstanceMetadataOptions",
+        "tags": "TagMap",
+        "placement": "Placement",
+        "parentInstance": "ParentInstanceConfiguration",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "executionRole",
+        "resourceType",
+        "policyDetails",
+        "resourceSelection",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "description": "NonEmptyString",
+        "status": "LifecyclePolicyStatus",
+        "executionRole": "RoleNameOrArn",
+        "resourceType": "LifecyclePolicyResourceType",
+        "policyDetails": "LifecyclePolicyDetails",
+        "resourceSelection": "LifecyclePolicyResourceSelection",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "dryRun": "Boolean"
+      }
+    },
+    "CreateWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "clientToken",
+        "type"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "semanticVersion": "VersionNumber",
+        "description": "NonEmptyString",
+        "changeDescription": "NonEmptyString",
+        "data": "InlineWorkflowData",
+        "uri": "Uri",
+        "kmsKeyId": "NonEmptyString",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "type": "WorkflowType",
+        "dryRun": "Boolean"
+      }
+    },
+    "DateTimeTimestamp": {
+      "type": "timestamp"
+    },
+    "DeleteComponentRequest": {
+      "type": "structure",
+      "required": [
+        "componentBuildVersionArn"
+      ],
+      "members": {
+        "componentBuildVersionArn": "ComponentBuildVersionArn"
+      }
+    },
+    "DeleteContainerRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "containerRecipeArn"
+      ],
+      "members": {
+        "containerRecipeArn": "ContainerRecipeArn"
+      }
+    },
+    "DeleteDistributionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "distributionConfigurationArn"
+      ],
+      "members": {
+        "distributionConfigurationArn": "DistributionConfigurationArn"
+      }
+    },
+    "DeleteImagePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "imagePipelineArn"
+      ],
+      "members": {
+        "imagePipelineArn": "ImagePipelineArn"
+      }
+    },
+    "DeleteImageRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "imageRecipeArn"
+      ],
+      "members": {
+        "imageRecipeArn": "ImageRecipeArn"
+      }
+    },
+    "DeleteImageRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn"
+      ],
+      "members": {
+        "imageBuildVersionArn": "ImageBuildVersionArn"
+      }
+    },
+    "DeleteInfrastructureConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "infrastructureConfigurationArn"
+      ],
+      "members": {
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn"
+      }
+    },
+    "DeleteLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "lifecyclePolicyArn"
+      ],
+      "members": {
+        "lifecyclePolicyArn": "LifecyclePolicyArn"
+      }
+    },
+    "DeleteWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "workflowBuildVersionArn"
+      ],
+      "members": {
+        "workflowBuildVersionArn": "WorkflowBuildVersionArn"
+      }
+    },
+    "DiskImageFormat": {
+      "type": "string",
+      "enum": [
+        "VMDK",
+        "RAW",
+        "VHD"
+      ]
+    },
+    "DistributeImageRequest": {
+      "type": "structure",
+      "required": [
+        "sourceImage",
+        "distributionConfigurationArn",
+        "executionRole",
+        "clientToken"
+      ],
+      "members": {
+        "sourceImage": "NonEmptyString",
+        "distributionConfigurationArn": "DistributionConfigurationArn",
+        "executionRole": "RoleNameOrArn",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "loggingConfiguration": "ImageLoggingConfiguration"
+      }
+    },
+    "Distribution": {
+      "type": "structure",
+      "required": [
+        "region"
+      ],
+      "members": {
+        "region": "NonEmptyString",
+        "amiDistributionConfiguration": "AmiDistributionConfiguration",
+        "containerDistributionConfiguration": "ContainerDistributionConfiguration",
+        "licenseConfigurationArns": "LicenseConfigurationArnList",
+        "launchTemplateConfigurations": "LaunchTemplateConfigurationList",
+        "s3ExportConfiguration": "S3ExportConfiguration",
+        "fastLaunchConfigurations": "FastLaunchConfigurationList",
+        "ssmParameterConfigurations": "SsmParameterConfigurationList"
+      }
+    },
+    "DistributionConfigurationArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws):distribution-configuration/[a-z0-9-_]+$"
+    },
+    "DistributionList": {
+      "type": "list",
+      "member": "Distribution"
+    },
+    "EbsInstanceBlockDeviceSpecification": {
+      "type": "structure",
+      "members": {
+        "encrypted": "NullableBoolean",
+        "deleteOnTermination": "NullableBoolean",
+        "iops": "EbsIopsInteger",
+        "kmsKeyId": "NonEmptyString",
+        "snapshotId": "NonEmptyString",
+        "volumeSize": "EbsVolumeSizeInteger",
+        "volumeType": "EbsVolumeType",
+        "throughput": "EbsVolumeThroughput"
+      }
+    },
+    "EbsIopsInteger": {
+      "type": "integer",
+      "min": 100,
+      "max": 64000
+    },
+    "EbsVolumeSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 16000
+    },
+    "EbsVolumeThroughput": {
+      "type": "integer",
+      "min": 125,
+      "max": 1000
+    },
+    "EbsVolumeType": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "io1",
+        "io2",
+        "gp2",
+        "gp3",
+        "sc1",
+        "st1"
+      ]
+    },
+    "EcrConfiguration": {
+      "type": "structure",
+      "members": {
+        "repositoryName": "NonEmptyString",
+        "containerTags": "StringList"
+      }
+    },
+    "EmptyString": {
+      "type": "string",
+      "min": 0,
+      "max": 0
+    },
+    "FastLaunchConfiguration": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "snapshotConfiguration": "FastLaunchSnapshotConfiguration",
+        "maxParallelLaunches": "MaxParallelLaunches",
+        "launchTemplate": "FastLaunchLaunchTemplateSpecification",
+        "accountId": "AccountId"
+      }
+    },
+    "FastLaunchConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "FastLaunchConfiguration"
+    },
+    "FastLaunchLaunchTemplateSpecification": {
+      "type": "structure",
+      "members": {
+        "launchTemplateId": "LaunchTemplateId",
+        "launchTemplateName": "NonEmptyString",
+        "launchTemplateVersion": "NonEmptyString"
+      }
+    },
+    "FastLaunchSnapshotConfiguration": {
+      "type": "structure",
+      "members": {
+        "targetResourceCount": "TargetResourceCount"
+      }
+    },
+    "Filter": {
+      "type": "structure",
+      "members": {
+        "name": "FilterName",
+        "values": "FilterValues"
+      }
+    },
+    "FilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Filter"
+    },
+    "FilterName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z]{1,1024}$"
+    },
+    "FilterValue": {
+      "type": "string",
+      "pattern": "^[0-9a-zA-Z./_ :,{}\"-]{1,1024}$"
+    },
+    "FilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FilterValue"
+    },
+    "GetComponentPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "componentArn"
+      ],
+      "members": {
+        "componentArn": "ComponentBuildVersionArn"
+      }
+    },
+    "GetComponentRequest": {
+      "type": "structure",
+      "required": [
+        "componentBuildVersionArn"
+      ],
+      "members": {
+        "componentBuildVersionArn": "ComponentVersionArnOrBuildVersionArn"
+      }
+    },
+    "GetContainerRecipePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "containerRecipeArn"
+      ],
+      "members": {
+        "containerRecipeArn": "ContainerRecipeArn"
+      }
+    },
+    "GetContainerRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "containerRecipeArn"
+      ],
+      "members": {
+        "containerRecipeArn": "ContainerRecipeArn"
+      }
+    },
+    "GetDistributionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "distributionConfigurationArn"
+      ],
+      "members": {
+        "distributionConfigurationArn": "DistributionConfigurationArn"
+      }
+    },
+    "GetImagePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "imagePipelineArn"
+      ],
+      "members": {
+        "imagePipelineArn": "ImagePipelineArn"
+      }
+    },
+    "GetImagePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "imageArn"
+      ],
+      "members": {
+        "imageArn": "ImageBuildVersionArn"
+      }
+    },
+    "GetImageRecipePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "imageRecipeArn"
+      ],
+      "members": {
+        "imageRecipeArn": "ImageRecipeArn"
+      }
+    },
+    "GetImageRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "imageRecipeArn"
+      ],
+      "members": {
+        "imageRecipeArn": "ImageRecipeArn"
+      }
+    },
+    "GetImageRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn"
+      ],
+      "members": {
+        "imageBuildVersionArn": "ImageVersionArnOrBuildVersionArn"
+      }
+    },
+    "GetInfrastructureConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "infrastructureConfigurationArn"
+      ],
+      "members": {
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn"
+      }
+    },
+    "GetLifecycleExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "lifecycleExecutionId"
+      ],
+      "members": {
+        "lifecycleExecutionId": "LifecycleExecutionId"
+      }
+    },
+    "GetLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "lifecyclePolicyArn"
+      ],
+      "members": {
+        "lifecyclePolicyArn": "LifecyclePolicyArn"
+      }
+    },
+    "GetMarketplaceResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceType",
+        "resourceArn"
+      ],
+      "members": {
+        "resourceType": "MarketplaceResourceType",
+        "resourceArn": "ImageBuilderArn",
+        "resourceLocation": "MarketplaceResourceLocation"
+      }
+    },
+    "GetWorkflowExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "workflowExecutionId"
+      ],
+      "members": {
+        "workflowExecutionId": "WorkflowExecutionId"
+      }
+    },
+    "GetWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "workflowBuildVersionArn"
+      ],
+      "members": {
+        "workflowBuildVersionArn": "WorkflowVersionArnOrBuildVersionArn"
+      }
+    },
+    "GetWorkflowStepExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "stepExecutionId"
+      ],
+      "members": {
+        "stepExecutionId": "WorkflowStepExecutionId"
+      }
+    },
+    "HttpPutResponseHopLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 64
+    },
+    "HttpTokens": {
+      "type": "string",
+      "pattern": "optional|required"
+    },
+    "ImageBuildVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):image/[a-z0-9-_]+/[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"
+    },
+    "ImageBuilderArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?|third-party):(?:image-recipe|container-recipe|infrastructure-configuration|distribution-configuration|component|image|image-pipeline|lifecycle-policy|workflow\\/(?:build|test|distribution))/[a-z0-9-_]+(?:/(?:(?:x|[0-9]+)\\.(?:x|[0-9]+)\\.(?:x|[0-9]+))(?:/[0-9]+)?)?$"
+    },
+    "ImageLoggingConfiguration": {
+      "type": "structure",
+      "members": {
+        "logGroupName": "LogGroupName"
+      }
+    },
+    "ImagePipelineArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws):image-pipeline/[a-z0-9-_]+$"
+    },
+    "ImageRecipeArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws):image-recipe/[a-z0-9-_]+/(?:[0-9]+|x)\\.(?:[0-9]+|x)\\.(?:[0-9]+|x)$"
+    },
+    "ImageScanFindingsFilter": {
+      "type": "structure",
+      "members": {
+        "name": "FilterName",
+        "values": "ImageScanFindingsFilterValues"
+      }
+    },
+    "ImageScanFindingsFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ImageScanFindingsFilter"
+    },
+    "ImageScanFindingsFilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "FilterValue"
+    },
+    "ImageScanningConfiguration": {
+      "type": "structure",
+      "members": {
+        "imageScanningEnabled": "NullableBoolean",
+        "ecrConfiguration": "EcrConfiguration"
+      }
+    },
+    "ImageTestsConfiguration": {
+      "type": "structure",
+      "members": {
+        "imageTestsEnabled": "NullableBoolean",
+        "timeoutMinutes": "ImageTestsTimeoutMinutes"
+      }
+    },
+    "ImageTestsTimeoutMinutes": {
+      "type": "integer",
+      "min": 60,
+      "max": 1440
+    },
+    "ImageVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):image/[a-z0-9-_]+/[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "ImageVersionArnOrBuildVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):image/[a-z0-9-_]+/(?:(?:([0-9]+|x)\\.([0-9]+|x)\\.([0-9]+|x))|(?:[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+))$"
+    },
+    "ImportComponentRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "type",
+        "format",
+        "platform",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "semanticVersion": "VersionNumber",
+        "description": "NonEmptyString",
+        "changeDescription": "NonEmptyString",
+        "type": "ComponentType",
+        "format": "ComponentFormat",
+        "platform": "Platform",
+        "data": "NonEmptyString",
+        "uri": "Uri",
+        "kmsKeyId": "NonEmptyString",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "ImportDiskImageRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "platform",
+        "osVersion",
+        "infrastructureConfigurationArn",
+        "uri",
+        "clientToken"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "semanticVersion": "VersionNumber",
+        "description": "NonEmptyString",
+        "platform": "NonEmptyString",
+        "osVersion": "OsVersion",
+        "executionRole": "RoleNameOrArn",
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn",
+        "uri": "Uri",
+        "loggingConfiguration": "ImageLoggingConfiguration",
+        "tags": "TagMap",
+        "registerImageOptions": "RegisterImageOptions",
+        "windowsConfiguration": "WindowsConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "ImportVmImageRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion",
+        "platform",
+        "vmImportTaskId",
+        "clientToken"
+      ],
+      "members": {
+        "name": "NonEmptyString",
+        "semanticVersion": "VersionNumber",
+        "description": "NonEmptyString",
+        "platform": "Platform",
+        "osVersion": "OsVersion",
+        "vmImportTaskId": "NonEmptyString",
+        "loggingConfiguration": "ImageLoggingConfiguration",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "InfrastructureConfigurationArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:imagebuilder:[^:]+:(?:[0-9]{12}|aws):infrastructure-configuration/[a-z0-9-_]+$"
+    },
+    "InlineComponentData": {
+      "type": "string",
+      "min": 1,
+      "max": 16000,
+      "pattern": "[^\\x00]+"
+    },
+    "InlineDockerFileTemplate": {
+      "type": "string",
+      "min": 1,
+      "max": 16000,
+      "pattern": "[^\\x00]+"
+    },
+    "InlineWorkflowData": {
+      "type": "string",
+      "min": 1,
+      "max": 16000,
+      "pattern": "[^\\x00]+"
+    },
+    "InstanceBlockDeviceMapping": {
+      "type": "structure",
+      "members": {
+        "deviceName": "NonEmptyString",
+        "ebs": "EbsInstanceBlockDeviceSpecification",
+        "virtualName": "NonEmptyString",
+        "noDevice": "EmptyString"
+      }
+    },
+    "InstanceBlockDeviceMappings": {
+      "type": "list",
+      "member": "InstanceBlockDeviceMapping"
+    },
+    "InstanceConfiguration": {
+      "type": "structure",
+      "members": {
+        "image": "NonEmptyString",
+        "blockDeviceMappings": "InstanceBlockDeviceMappings"
+      }
+    },
+    "InstanceMetadataOptions": {
+      "type": "structure",
+      "members": {
+        "httpTokens": "HttpTokens",
+        "httpPutResponseHopLimit": "HttpPutResponseHopLimit"
+      }
+    },
+    "InstanceProfileNameType": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[\\w+=,.@-]+$"
+    },
+    "InstanceType": {
+      "type": "string"
+    },
+    "InstanceTypeList": {
+      "type": "list",
+      "member": "InstanceType"
+    },
+    "LaunchPermissionConfiguration": {
+      "type": "structure",
+      "members": {
+        "userIds": "AccountList",
+        "userGroups": "StringList",
+        "organizationArns": "OrganizationArnList",
+        "organizationalUnitArns": "OrganizationalUnitArnList"
+      }
+    },
+    "LaunchTemplateConfiguration": {
+      "type": "structure",
+      "required": [
+        "launchTemplateId"
+      ],
+      "members": {
+        "launchTemplateId": "LaunchTemplateId",
+        "accountId": "AccountId",
+        "setDefaultVersion": "Boolean"
+      }
+    },
+    "LaunchTemplateConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "LaunchTemplateConfiguration"
+    },
+    "LaunchTemplateId": {
+      "type": "string",
+      "pattern": "^lt-[a-z0-9-_]{17}$"
+    },
+    "LicenseConfigurationArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:license-manager:[^:]+:[0-9]{12}:license-configuration:lic-[a-z0-9-_]{32}$"
+    },
+    "LicenseConfigurationArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "LicenseConfigurationArn"
+    },
+    "LifecycleExecutionId": {
+      "type": "string",
+      "pattern": "^lce-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "LifecyclePolicyArn": {
+      "type": "string",
+      "max": 1024,
+      "pattern": "^arn:aws(?:-[a-z]+)*:imagebuilder:[a-z]{2,}(?:-[a-z]+)+-[0-9]+:(?:[0-9]{12}|aws):lifecycle-policy/[a-z0-9-_]+$"
+    },
+    "LifecyclePolicyDetail": {
+      "type": "structure",
+      "required": [
+        "action",
+        "filter"
+      ],
+      "members": {
+        "action": "LifecyclePolicyDetailAction",
+        "filter": "LifecyclePolicyDetailFilter",
+        "exclusionRules": "LifecyclePolicyDetailExclusionRules"
+      }
+    },
+    "LifecyclePolicyDetailAction": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "LifecyclePolicyDetailActionType",
+        "includeResources": "LifecyclePolicyDetailActionIncludeResources"
+      }
+    },
+    "LifecyclePolicyDetailActionIncludeResources": {
+      "type": "structure",
+      "members": {
+        "amis": "Boolean",
+        "snapshots": "Boolean",
+        "containers": "Boolean"
+      }
+    },
+    "LifecyclePolicyDetailActionType": {
+      "type": "string",
+      "enum": [
+        "DELETE",
+        "DEPRECATE",
+        "DISABLE"
+      ]
+    },
+    "LifecyclePolicyDetailExclusionRules": {
+      "type": "structure",
+      "members": {
+        "tagMap": "TagMap",
+        "amis": "LifecyclePolicyDetailExclusionRulesAmis"
+      }
+    },
+    "LifecyclePolicyDetailExclusionRulesAmis": {
+      "type": "structure",
+      "members": {
+        "isPublic": "Boolean",
+        "regions": "StringList",
+        "sharedAccounts": "AccountList",
+        "lastLaunched": "LifecyclePolicyDetailExclusionRulesAmisLastLaunched",
+        "tagMap": "TagMap"
+      }
+    },
+    "LifecyclePolicyDetailExclusionRulesAmisLastLaunched": {
+      "type": "structure",
+      "required": [
+        "value",
+        "unit"
+      ],
+      "members": {
+        "value": "LifecyclePolicyDetailExclusionRulesAmisLastLaunchedValue",
+        "unit": "LifecyclePolicyTimeUnit"
+      }
+    },
+    "LifecyclePolicyDetailExclusionRulesAmisLastLaunchedValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 365
+    },
+    "LifecyclePolicyDetailFilter": {
+      "type": "structure",
+      "required": [
+        "type",
+        "value"
+      ],
+      "members": {
+        "type": "LifecyclePolicyDetailFilterType",
+        "value": "LifecyclePolicyDetailFilterValue",
+        "unit": "LifecyclePolicyTimeUnit",
+        "retainAtLeast": "LifecyclePolicyDetailFilterRetainAtLeast"
+      }
+    },
+    "LifecyclePolicyDetailFilterRetainAtLeast": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "LifecyclePolicyDetailFilterType": {
+      "type": "string",
+      "enum": [
+        "AGE",
+        "COUNT"
+      ]
+    },
+    "LifecyclePolicyDetailFilterValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "LifecyclePolicyDetails": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "LifecyclePolicyDetail"
+    },
+    "LifecyclePolicyResourceSelection": {
+      "type": "structure",
+      "members": {
+        "recipes": "LifecyclePolicyResourceSelectionRecipes",
+        "tagMap": "TagMap"
+      }
+    },
+    "LifecyclePolicyResourceSelectionRecipe": {
+      "type": "structure",
+      "required": [
+        "name",
+        "semanticVersion"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "semanticVersion": "WildcardVersionNumber"
+      }
+    },
+    "LifecyclePolicyResourceSelectionRecipes": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "LifecyclePolicyResourceSelectionRecipe"
+    },
+    "LifecyclePolicyResourceType": {
+      "type": "string",
+      "enum": [
+        "AMI_IMAGE",
+        "CONTAINER_IMAGE"
+      ]
+    },
+    "LifecyclePolicyStatus": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "LifecyclePolicyTimeUnit": {
+      "type": "string",
+      "enum": [
+        "DAYS",
+        "WEEKS",
+        "MONTHS",
+        "YEARS"
+      ]
+    },
+    "ListComponentBuildVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "componentVersionArn": "ComponentVersionArn",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListComponentsRequest": {
+      "type": "structure",
+      "members": {
+        "owner": "Ownership",
+        "filters": "FilterList",
+        "byName": "Boolean",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListContainerRecipesRequest": {
+      "type": "structure",
+      "members": {
+        "owner": "Ownership",
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListDistributionConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImageBuildVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "imageVersionArn": "ImageVersionArn",
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImagePackagesRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn"
+      ],
+      "members": {
+        "imageBuildVersionArn": "ImageBuildVersionArn",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImagePipelineImagesRequest": {
+      "type": "structure",
+      "required": [
+        "imagePipelineArn"
+      ],
+      "members": {
+        "imagePipelineArn": "ImagePipelineArn",
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImagePipelinesRequest": {
+      "type": "structure",
+      "members": {
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImageRecipesRequest": {
+      "type": "structure",
+      "members": {
+        "owner": "Ownership",
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImageScanFindingAggregationsRequest": {
+      "type": "structure",
+      "members": {
+        "filter": "Filter",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImageScanFindingsRequest": {
+      "type": "structure",
+      "members": {
+        "filters": "ImageScanFindingsFilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListImagesRequest": {
+      "type": "structure",
+      "members": {
+        "owner": "Ownership",
+        "filters": "FilterList",
+        "byName": "Boolean",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken",
+        "includeDeprecated": "NullableBoolean"
+      }
+    },
+    "ListInfrastructureConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListLifecycleExecutionResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "lifecycleExecutionId"
+      ],
+      "members": {
+        "lifecycleExecutionId": "LifecycleExecutionId",
+        "parentResourceId": "NonEmptyString",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListLifecycleExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken",
+        "resourceArn": "ImageBuilderArn"
+      }
+    },
+    "ListLifecyclePoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "filters": "FilterList",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ImageBuilderArn"
+      }
+    },
+    "ListWaitingWorkflowStepsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListWorkflowBuildVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "workflowVersionArn": "WorkflowWildcardVersionArn",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListWorkflowExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn"
+      ],
+      "members": {
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken",
+        "imageBuildVersionArn": "ImageBuildVersionArn"
+      }
+    },
+    "ListWorkflowStepExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "workflowExecutionId"
+      ],
+      "members": {
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken",
+        "workflowExecutionId": "WorkflowExecutionId"
+      }
+    },
+    "ListWorkflowsRequest": {
+      "type": "structure",
+      "members": {
+        "owner": "Ownership",
+        "filters": "FilterList",
+        "byName": "Boolean",
+        "maxResults": "RestrictedInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "LogGroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "^[a-zA-Z0-9\\-_/\\.]{1,512}$"
+    },
+    "Logging": {
+      "type": "structure",
+      "members": {
+        "s3Logs": "S3Logs"
+      }
+    },
+    "MarketplaceResourceLocation": {
+      "type": "string",
+      "max": 1024,
+      "pattern": "^s3://[^/]+/.+[^/]$"
+    },
+    "MarketplaceResourceType": {
+      "type": "string",
+      "enum": [
+        "COMPONENT_DATA",
+        "COMPONENT_ARTIFACT"
+      ]
+    },
+    "MaxParallelLaunches": {
+      "type": "integer",
+      "min": 1
+    },
+    "NonEmptyString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "NullableBoolean": {
+      "type": "boolean"
+    },
+    "OnWorkflowFailure": {
+      "type": "string",
+      "enum": [
+        "CONTINUE",
+        "ABORT"
+      ]
+    },
+    "OrganizationArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}$"
+    },
+    "OrganizationArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "OrganizationArn"
+    },
+    "OrganizationalUnitArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:organizations::[0-9]{12}:ou/o-[a-z0-9]{10,32}/ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}"
+    },
+    "OrganizationalUnitArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "OrganizationalUnitArn"
+    },
+    "OsVersion": {
+      "type": "string",
+      "min": 1
+    },
+    "OsVersionList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "OsVersion"
+    },
+    "Ownership": {
+      "type": "string",
+      "enum": [
+        "Self",
+        "Shared",
+        "Amazon",
+        "ThirdParty",
+        "AWSMarketplace"
+      ]
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 65535
+    },
+    "ParallelGroup": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-_+#]{0,99}$"
+    },
+    "ParentInstanceConfiguration": {
+      "type": "structure",
+      "required": [
+        "autoScalingGroup"
+      ],
+      "members": {
+        "autoScalingGroup": "AutoScalingGroupConfiguration"
+      }
+    },
+    "PipelineExecutionStartCondition": {
+      "type": "string",
+      "enum": [
+        "EXPRESSION_MATCH_ONLY",
+        "EXPRESSION_MATCH_AND_DEPENDENCY_UPDATES_AVAILABLE"
+      ]
+    },
+    "PipelineLoggingConfiguration": {
+      "type": "structure",
+      "members": {
+        "imageLogGroupName": "LogGroupName",
+        "pipelineLogGroupName": "LogGroupName"
+      }
+    },
+    "PipelineStatus": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Placement": {
+      "type": "structure",
+      "members": {
+        "availabilityZone": "NonEmptyString",
+        "tenancy": "TenancyType",
+        "hostId": "NonEmptyString",
+        "hostResourceGroupArn": "NonEmptyString"
+      }
+    },
+    "Platform": {
+      "type": "string",
+      "enum": [
+        "Windows",
+        "Linux",
+        "macOS"
+      ]
+    },
+    "PutComponentPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "componentArn",
+        "policy"
+      ],
+      "members": {
+        "componentArn": "ComponentBuildVersionArn",
+        "policy": "ResourcePolicyDocument"
+      }
+    },
+    "PutContainerRecipePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "containerRecipeArn",
+        "policy"
+      ],
+      "members": {
+        "containerRecipeArn": "ContainerRecipeArn",
+        "policy": "ResourcePolicyDocument"
+      }
+    },
+    "PutImagePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "imageArn",
+        "policy"
+      ],
+      "members": {
+        "imageArn": "ImageBuildVersionArn",
+        "policy": "ResourcePolicyDocument"
+      }
+    },
+    "PutImageRecipePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "imageRecipeArn",
+        "policy"
+      ],
+      "members": {
+        "imageRecipeArn": "ImageRecipeArn",
+        "policy": "ResourcePolicyDocument"
+      }
+    },
+    "RegisterImageOptions": {
+      "type": "structure",
+      "members": {
+        "secureBootEnabled": "NullableBoolean",
+        "uefiData": "UefiData"
+      }
+    },
+    "ResourceName": {
+      "type": "string",
+      "pattern": "^[-_A-Za-z-0-9][-_A-Za-z0-9 ]{1,126}[-_A-Za-z-0-9]$"
+    },
+    "ResourcePolicyDocument": {
+      "type": "string",
+      "min": 1,
+      "max": 30000
+    },
+    "ResourceState": {
+      "type": "structure",
+      "members": {
+        "status": "ResourceStatus"
+      }
+    },
+    "ResourceStateUpdateExclusionRules": {
+      "type": "structure",
+      "members": {
+        "amis": "LifecyclePolicyDetailExclusionRulesAmis"
+      }
+    },
+    "ResourceStateUpdateIncludeResources": {
+      "type": "structure",
+      "members": {
+        "amis": "Boolean",
+        "snapshots": "Boolean",
+        "containers": "Boolean"
+      }
+    },
+    "ResourceStatus": {
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "DELETED",
+        "DEPRECATED",
+        "DISABLED"
+      ]
+    },
+    "ResourceTagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 30,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "RestrictedInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "RetryImageRequest": {
+      "type": "structure",
+      "required": [
+        "imageBuildVersionArn",
+        "clientToken"
+      ],
+      "members": {
+        "imageBuildVersionArn": "ImageBuildVersionArn",
+        "clientToken": "ClientToken"
+      }
+    },
+    "RoleNameOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(?:arn:aws(?:-[a-z]+)*:iam::[0-9]{12}:role/)?[a-zA-Z_0-9+=,.@\\-_/]+$"
+    },
+    "S3ExportConfiguration": {
+      "type": "structure",
+      "required": [
+        "roleName",
+        "diskImageFormat",
+        "s3Bucket"
+      ],
+      "members": {
+        "roleName": "NonEmptyString",
+        "diskImageFormat": "DiskImageFormat",
+        "s3Bucket": "NonEmptyString",
+        "s3Prefix": "NonEmptyString"
+      }
+    },
+    "S3Logs": {
+      "type": "structure",
+      "members": {
+        "s3BucketName": "NonEmptyString",
+        "s3KeyPrefix": "NonEmptyString"
+      }
+    },
+    "Schedule": {
+      "type": "structure",
+      "members": {
+        "scheduleExpression": "NonEmptyString",
+        "timezone": "Timezone",
+        "pipelineExecutionStartCondition": "PipelineExecutionStartCondition",
+        "autoDisablePolicy": "AutoDisablePolicy"
+      }
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "member": "NonEmptyString"
+    },
+    "SendWorkflowStepActionRequest": {
+      "type": "structure",
+      "required": [
+        "stepExecutionId",
+        "imageBuildVersionArn",
+        "action",
+        "clientToken"
+      ],
+      "members": {
+        "stepExecutionId": "WorkflowStepExecutionId",
+        "imageBuildVersionArn": "ImageBuildVersionArn",
+        "action": "WorkflowStepActionType",
+        "reason": "NonEmptyString",
+        "clientToken": "ClientToken"
+      }
+    },
+    "SnsTopicArn": {
+      "type": "string",
+      "pattern": "^arn:aws[^:]*:sns:[^:]+:[0-9]{12}:[a-zA-Z0-9-_]{1,256}$"
+    },
+    "SsmParameterConfiguration": {
+      "type": "structure",
+      "required": [
+        "parameterName"
+      ],
+      "members": {
+        "amiAccountId": "AccountId",
+        "parameterName": "SsmParameterName",
+        "dataType": "SsmParameterDataType"
+      }
+    },
+    "SsmParameterConfigurationList": {
+      "type": "list",
+      "member": "SsmParameterConfiguration"
+    },
+    "SsmParameterDataType": {
+      "type": "string",
+      "enum": [
+        "text",
+        "aws:ec2:image"
+      ]
+    },
+    "SsmParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "^[a-zA-Z0-9_.\\-\\/]+$"
+    },
+    "StartImagePipelineExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "imagePipelineArn",
+        "clientToken"
+      ],
+      "members": {
+        "imagePipelineArn": "ImagePipelineArn",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "StartResourceStateUpdateRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "state",
+        "clientToken"
+      ],
+      "members": {
+        "resourceArn": "ImageBuildVersionArn",
+        "state": "ResourceState",
+        "executionRole": "RoleNameOrArn",
+        "includeResources": "ResourceStateUpdateIncludeResources",
+        "exclusionRules": "ResourceStateUpdateExclusionRules",
+        "updateAt": "DateTimeTimestamp",
+        "clientToken": "ClientToken"
+      }
+    },
+    "StringList": {
+      "type": "list",
+      "member": "NonEmptyString"
+    },
+    "SystemsManagerAgent": {
+      "type": "structure",
+      "members": {
+        "uninstallAfterBuild": "NullableBoolean"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z0-9\\s_.:/=+\\-@]*$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ImageBuilderArn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256
+    },
+    "TargetContainerRepository": {
+      "type": "structure",
+      "required": [
+        "service",
+        "repositoryName"
+      ],
+      "members": {
+        "service": "ContainerRepositoryService",
+        "repositoryName": "NonEmptyString"
+      }
+    },
+    "TargetResourceCount": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "TenancyType": {
+      "type": "string",
+      "enum": [
+        "default",
+        "dedicated",
+        "host"
+      ]
+    },
+    "Timezone": {
+      "type": "string",
+      "min": 3,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9]{2,}(?:\\/[a-zA-Z0-9-_+]+)*"
+    },
+    "UefiData": {
+      "type": "string",
+      "min": 0,
+      "max": 64000
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "ImageBuilderArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDistributionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "distributionConfigurationArn",
+        "distributions",
+        "clientToken"
+      ],
+      "members": {
+        "distributionConfigurationArn": "DistributionConfigurationArn",
+        "description": "NonEmptyString",
+        "distributions": "DistributionList",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateImagePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "imagePipelineArn",
+        "infrastructureConfigurationArn",
+        "clientToken"
+      ],
+      "members": {
+        "imagePipelineArn": "ImagePipelineArn",
+        "description": "NonEmptyString",
+        "imageRecipeArn": "ImageRecipeArn",
+        "containerRecipeArn": "ContainerRecipeArn",
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn",
+        "distributionConfigurationArn": "DistributionConfigurationArn",
+        "imageTestsConfiguration": "ImageTestsConfiguration",
+        "enhancedImageMetadataEnabled": "NullableBoolean",
+        "schedule": "Schedule",
+        "status": "PipelineStatus",
+        "clientToken": "ClientToken",
+        "imageScanningConfiguration": "ImageScanningConfiguration",
+        "workflows": "WorkflowConfigurationList",
+        "loggingConfiguration": "PipelineLoggingConfiguration",
+        "executionRole": "RoleNameOrArn",
+        "imageTags": "TagMap"
+      }
+    },
+    "UpdateInfrastructureConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "infrastructureConfigurationArn",
+        "instanceProfileName",
+        "clientToken"
+      ],
+      "members": {
+        "infrastructureConfigurationArn": "InfrastructureConfigurationArn",
+        "description": "NonEmptyString",
+        "instanceTypes": "InstanceTypeList",
+        "instanceProfileName": "InstanceProfileNameType",
+        "securityGroupIds": "SecurityGroupIds",
+        "subnetId": "NonEmptyString",
+        "logging": "Logging",
+        "keyPair": "NonEmptyString",
+        "terminateInstanceOnFailure": "NullableBoolean",
+        "terminateInstanceOnCompletion": "NullableBoolean",
+        "snsTopicArn": "SnsTopicArn",
+        "resourceTags": "ResourceTagMap",
+        "instanceMetadataOptions": "InstanceMetadataOptions",
+        "placement": "Placement",
+        "parentInstance": "ParentInstanceConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "lifecyclePolicyArn",
+        "executionRole",
+        "resourceType",
+        "policyDetails",
+        "resourceSelection",
+        "clientToken"
+      ],
+      "members": {
+        "lifecyclePolicyArn": "LifecyclePolicyArn",
+        "description": "NonEmptyString",
+        "status": "LifecyclePolicyStatus",
+        "executionRole": "RoleNameOrArn",
+        "resourceType": "LifecyclePolicyResourceType",
+        "policyDetails": "LifecyclePolicyDetails",
+        "resourceSelection": "LifecyclePolicyResourceSelection",
+        "clientToken": "ClientToken"
+      }
+    },
+    "Uri": {
+      "type": "string"
+    },
+    "UserDataOverride": {
+      "type": "string",
+      "min": 1,
+      "max": 21847,
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+    },
+    "VersionNumber": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "WildcardVersionNumber": {
+      "type": "string",
+      "pattern": "^(?:[0-9]+|x)\\.(?:[0-9]+|x)\\.(?:[0-9]+|x)$"
+    },
+    "WindowsConfiguration": {
+      "type": "structure",
+      "required": [
+        "imageIndex"
+      ],
+      "members": {
+        "imageIndex": "WindowsConfigurationImageIndex"
+      }
+    },
+    "WindowsConfigurationImageIndex": {
+      "type": "long",
+      "min": 1,
+      "max": 4294967295
+    },
+    "WorkflowBuildVersionArn": {
+      "type": "string",
+      "max": 1024,
+      "pattern": "^arn:aws(?:-[a-z]+)*:imagebuilder:[a-z]{2,}(?:-[a-z]+)+-[0-9]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):workflow/(build|test|distribution)/[a-z0-9-_]+/[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"
+    },
+    "WorkflowConfiguration": {
+      "type": "structure",
+      "required": [
+        "workflowArn"
+      ],
+      "members": {
+        "workflowArn": "WorkflowVersionArnOrBuildVersionArn",
+        "parameters": "WorkflowParameterList",
+        "parallelGroup": "ParallelGroup",
+        "onFailure": "OnWorkflowFailure"
+      }
+    },
+    "WorkflowConfigurationList": {
+      "type": "list",
+      "member": "WorkflowConfiguration"
+    },
+    "WorkflowExecutionId": {
+      "type": "string",
+      "pattern": "^wf-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "WorkflowParameter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "WorkflowParameterName",
+        "value": "WorkflowParameterValueList"
+      }
+    },
+    "WorkflowParameterList": {
+      "type": "list",
+      "min": 1,
+      "member": "WorkflowParameter"
+    },
+    "WorkflowParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[^\\x00]+"
+    },
+    "WorkflowParameterValue": {
+      "type": "string",
+      "min": 0,
+      "pattern": "[^\\x00]*"
+    },
+    "WorkflowParameterValueList": {
+      "type": "list",
+      "member": "WorkflowParameterValue"
+    },
+    "WorkflowStepActionType": {
+      "type": "string",
+      "enum": [
+        "RESUME",
+        "STOP"
+      ]
+    },
+    "WorkflowStepExecutionId": {
+      "type": "string",
+      "pattern": "^step-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "WorkflowType": {
+      "type": "string",
+      "enum": [
+        "BUILD",
+        "TEST",
+        "DISTRIBUTION"
+      ]
+    },
+    "WorkflowVersionArnOrBuildVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws(?:-[a-z]+)*:imagebuilder:[a-z]{2,}(?:-[a-z]+)+-[0-9]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):workflow/(build|test|distribution)/[a-z0-9-_]+/(?:(?:([0-9]+|x)\\.([0-9]+|x)\\.([0-9]+|x))|(?:[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+))$"
+    },
+    "WorkflowWildcardVersionArn": {
+      "type": "string",
+      "pattern": "^arn:aws(?:-[a-z]+)*:imagebuilder:[a-z]{2,}(?:-[a-z]+)+-[0-9]+:(?:[0-9]{12}|aws(?:-[a-z-]+)?):workflow/(build|test|distribution)/[a-z0-9-_]+/(?:[0-9]+|x)\\.(?:[0-9]+|x)\\.(?:[0-9]+|x)$"
+    }
+  }
+}

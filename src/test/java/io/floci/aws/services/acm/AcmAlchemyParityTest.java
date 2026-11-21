@@ -1,6 +1,7 @@
 package io.floci.aws.services.acm;
 
 import io.floci.aws.testing.AcmDnsRecordValidationProfile;
+import io.floci.aws.testing.PrivateCaFixture;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -19,6 +20,16 @@ import static org.hamcrest.Matchers.*;
 @QuarkusTest
 @TestProfile(AcmDnsRecordValidationProfile.class)
 class AcmAlchemyParityTest {
+
+    private static String privateCa;
+
+    /** An ACTIVE AWS Private CA the class's private certificates are signed by. */
+    private static synchronized String privateCa() {
+        if (privateCa == null) {
+            privateCa = PrivateCaFixture.activeRoot("acm-tests.floci.test");
+        }
+        return privateCa;
+    }
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
 
@@ -258,9 +269,9 @@ class AcmAlchemyParityTest {
         String arn = requestCertificate("""
             {
                 "DomainName": "revoke-exported.example.com",
-                "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+                "CertificateAuthorityArn": "PRIVATE_CA_ARN"
             }
-            """);
+            """.replace("PRIVATE_CA_ARN", privateCa()));
 
         String passphrase = Base64.getEncoder().encodeToString("testpassphrase".getBytes());
         given()

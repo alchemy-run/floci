@@ -49,7 +49,7 @@ final class RequestResourceMembers {
     private static final Pattern ONE_VARIABLE = Pattern.compile("[^$]*\\$\\{\\w+}");
     /** A member a REST request carries outside its body, by its name, and where: a path label or a query parameter. */
     private static final Pattern LOCATED_MEMBER = Pattern.compile("[A-Za-z][A-Za-z0-9_]*");
-    private static final Pattern LOCATION = Pattern.compile("\\{[A-Za-z0-9_]+}|\\?[A-Za-z0-9_.-]+");
+    private static final Pattern LOCATION = Pattern.compile("\\{[A-Za-z0-9_-]+}|\\?[A-Za-z0-9_.-]+");
     /** The one id a child type's format appends to its parent's. */
     private static final Pattern APPENDED_ID = Pattern.compile("[/:]\\$\\{\\w+}");
     /** The keys a resource found by members does not take: it is read no other way, in the caller's account. */

@@ -1,0 +1,7123 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "mediaconvert",
+ "apiVersion": "2017-08-29",
+ "operations": {
+  "AssociateCertificate": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/certificates",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "AssociateCertificateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AssociateCertificateResponse"
+   }
+  },
+  "CancelJob": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/jobs/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "id"
+     }
+    },
+    "shape": "CancelJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CancelJobResponse"
+   }
+  },
+  "CreateJob": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/jobs",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "ClientRequestToken": {
+      "location": "body",
+      "name": "clientRequestToken",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateJobResponse"
+   }
+  },
+  "CreateJobTemplate": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/jobTemplates",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateJobTemplateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateJobTemplateResponse"
+   }
+  },
+  "CreatePreset": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/presets",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreatePresetRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreatePresetResponse"
+   }
+  },
+  "CreateQueue": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/queues",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateQueueRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateQueueResponse"
+   }
+  },
+  "CreateResourceShare": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/resourceShares",
+   "responseCode": 202,
+   "input": {
+    "members": {},
+    "shape": "CreateResourceShareRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateResourceShareResponse"
+   }
+  },
+  "DeleteJobTemplate": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/jobTemplates/{name}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "DeleteJobTemplateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteJobTemplateResponse"
+   }
+  },
+  "DeletePolicy": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "DeletePolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeletePolicyResponse"
+   }
+  },
+  "DeletePreset": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/presets/{name}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "DeletePresetRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeletePresetResponse"
+   }
+  },
+  "DeleteQueue": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/queues/{name}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "DeleteQueueRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteQueueResponse"
+   }
+  },
+  "DescribeEndpoints": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/endpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "DescribeEndpointsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeEndpointsResponse"
+   }
+  },
+  "DisassociateCertificate": {
+   "method": "DELETE",
+   "requestUri": "/2017-08-29/certificates/{arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    },
+    "shape": "DisassociateCertificateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DisassociateCertificateResponse"
+   }
+  },
+  "GetJob": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/jobs/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "id"
+     }
+    },
+    "shape": "GetJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetJobResponse"
+   }
+  },
+  "GetJobTemplate": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/jobTemplates/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "GetJobTemplateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetJobTemplateResponse"
+   }
+  },
+  "GetJobsQueryResults": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/jobsQueries/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "id"
+     }
+    },
+    "shape": "GetJobsQueryResultsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetJobsQueryResultsResponse"
+   }
+  },
+  "GetPolicy": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "GetPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetPolicyResponse"
+   }
+  },
+  "GetPreset": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/presets/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "GetPresetRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetPresetResponse"
+   }
+  },
+  "GetQueue": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/queues/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "GetQueueRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetQueueResponse"
+   }
+  },
+  "ListJobTemplates": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/jobTemplates",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Category": {
+      "location": "querystring",
+      "name": "category"
+     },
+     "ListBy": {
+      "location": "querystring",
+      "name": "listBy"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Order": {
+      "location": "querystring",
+      "name": "order"
+     }
+    },
+    "shape": "ListJobTemplatesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListJobTemplatesResponse"
+   }
+  },
+  "ListJobs": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Order": {
+      "location": "querystring",
+      "name": "order"
+     },
+     "Queue": {
+      "location": "querystring",
+      "name": "queue"
+     },
+     "Status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    },
+    "shape": "ListJobsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListJobsResponse"
+   }
+  },
+  "ListPresets": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/presets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Category": {
+      "location": "querystring",
+      "name": "category"
+     },
+     "ListBy": {
+      "location": "querystring",
+      "name": "listBy"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Order": {
+      "location": "querystring",
+      "name": "order"
+     }
+    },
+    "shape": "ListPresetsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListPresetsResponse"
+   }
+  },
+  "ListQueues": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/queues",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ListBy": {
+      "location": "querystring",
+      "name": "listBy"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Order": {
+      "location": "querystring",
+      "name": "order"
+     }
+    },
+    "shape": "ListQueuesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListQueuesResponse"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    },
+    "shape": "ListTagsForResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceResponse"
+   }
+  },
+  "ListVersions": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/versions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListVersionsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListVersionsResponse"
+   }
+  },
+  "Probe": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/probe",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "ProbeRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ProbeResponse"
+   }
+  },
+  "PutPolicy": {
+   "method": "PUT",
+   "requestUri": "/2017-08-29/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "PutPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutPolicyResponse"
+   }
+  },
+  "SearchJobs": {
+   "method": "GET",
+   "requestUri": "/2017-08-29/search",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "InputFile": {
+      "location": "querystring",
+      "name": "inputFile"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Order": {
+      "location": "querystring",
+      "name": "order"
+     },
+     "Queue": {
+      "location": "querystring",
+      "name": "queue"
+     },
+     "Status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    },
+    "shape": "SearchJobsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "SearchJobsResponse"
+   }
+  },
+  "StartJobsQuery": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/jobsQueries",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "StartJobsQueryRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartJobsQueryResponse"
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/2017-08-29/tags",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "TagResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "TagResourceResponse"
+   }
+  },
+  "UntagResource": {
+   "method": "PUT",
+   "requestUri": "/2017-08-29/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    },
+    "shape": "UntagResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UntagResourceResponse"
+   }
+  },
+  "UpdateJobTemplate": {
+   "method": "PUT",
+   "requestUri": "/2017-08-29/jobTemplates/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "UpdateJobTemplateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateJobTemplateResponse"
+   }
+  },
+  "UpdatePreset": {
+   "method": "PUT",
+   "requestUri": "/2017-08-29/presets/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "UpdatePresetRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdatePresetResponse"
+   }
+  },
+  "UpdateQueue": {
+   "method": "PUT",
+   "requestUri": "/2017-08-29/queues/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    },
+    "shape": "UpdateQueueRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateQueueResponse"
+   }
+  }
+ },
+ "shapes": {
+  "AacSettings": {
+   "members": {
+    "AudioDescriptionBroadcasterMix": {
+     "name": "audioDescriptionBroadcasterMix"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "CodingMode": {
+     "name": "codingMode"
+    },
+    "LoudnessMeasurementMode": {
+     "name": "loudnessMeasurementMode"
+    },
+    "PassthroughControl": {
+     "name": "passthroughControl"
+    },
+    "RapInterval": {
+     "name": "rapInterval"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "RawFormat": {
+     "name": "rawFormat"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "Specification": {
+     "name": "specification"
+    },
+    "TargetLoudnessRange": {
+     "name": "targetLoudnessRange"
+    },
+    "VbrQuality": {
+     "name": "vbrQuality"
+    }
+   }
+  },
+  "Ac3Settings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "BitstreamMode": {
+     "name": "bitstreamMode"
+    },
+    "CodingMode": {
+     "name": "codingMode"
+    },
+    "Dialnorm": {
+     "name": "dialnorm"
+    },
+    "DynamicRangeCompressionLine": {
+     "name": "dynamicRangeCompressionLine"
+    },
+    "DynamicRangeCompressionProfile": {
+     "name": "dynamicRangeCompressionProfile"
+    },
+    "DynamicRangeCompressionRf": {
+     "name": "dynamicRangeCompressionRf"
+    },
+    "LfeFilter": {
+     "name": "lfeFilter"
+    },
+    "MetadataControl": {
+     "name": "metadataControl"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "Ac4Settings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "BitstreamMode": {
+     "name": "bitstreamMode"
+    },
+    "CodingMode": {
+     "name": "codingMode"
+    },
+    "DynamicRangeCompressionFlatPanelTv": {
+     "name": "dynamicRangeCompressionFlatPanelTv"
+    },
+    "DynamicRangeCompressionHomeTheater": {
+     "name": "dynamicRangeCompressionHomeTheater"
+    },
+    "DynamicRangeCompressionPortableHeadphones": {
+     "name": "dynamicRangeCompressionPortableHeadphones"
+    },
+    "DynamicRangeCompressionPortableSpeakers": {
+     "name": "dynamicRangeCompressionPortableSpeakers"
+    },
+    "LoRoCenterMixLevel": {
+     "name": "loRoCenterMixLevel"
+    },
+    "LoRoSurroundMixLevel": {
+     "name": "loRoSurroundMixLevel"
+    },
+    "LtRtCenterMixLevel": {
+     "name": "ltRtCenterMixLevel"
+    },
+    "LtRtSurroundMixLevel": {
+     "name": "ltRtSurroundMixLevel"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "StereoDownmix": {
+     "name": "stereoDownmix"
+    }
+   }
+  },
+  "AccelerationSettings": {
+   "members": {
+    "Mode": {
+     "name": "mode"
+    }
+   }
+  },
+  "AdvancedInputFilterSettings": {
+   "members": {
+    "AddTexture": {
+     "name": "addTexture"
+    },
+    "Sharpening": {
+     "name": "sharpening"
+    }
+   }
+  },
+  "AiffSettings": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "AllowedRenditionSize": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Required": {
+     "name": "required"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "AncillarySourceSettings": {
+   "members": {
+    "Convert608To708": {
+     "name": "convert608To708"
+    },
+    "SourceAncillaryChannelNumber": {
+     "name": "sourceAncillaryChannelNumber"
+    },
+    "TerminateCaptions": {
+     "name": "terminateCaptions"
+    }
+   }
+  },
+  "AspectRatio": {
+   "members": {
+    "Denominator": {
+     "name": "denominator"
+    },
+    "Numerator": {
+     "name": "numerator"
+    }
+   }
+  },
+  "AssociateCertificateRequest": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    }
+   }
+  },
+  "AssociateCertificateResponse": {
+   "members": {}
+  },
+  "AudioChannelTaggingSettings": {
+   "members": {
+    "ChannelTag": {
+     "name": "channelTag"
+    },
+    "ChannelTags": {
+     "name": "channelTags",
+     "shape": "__listOfAudioChannelTag"
+    }
+   }
+  },
+  "AudioCodecSettings": {
+   "members": {
+    "AacSettings": {
+     "name": "aacSettings",
+     "shape": "AacSettings"
+    },
+    "Ac3Settings": {
+     "name": "ac3Settings",
+     "shape": "Ac3Settings"
+    },
+    "Ac4Settings": {
+     "name": "ac4Settings",
+     "shape": "Ac4Settings"
+    },
+    "AiffSettings": {
+     "name": "aiffSettings",
+     "shape": "AiffSettings"
+    },
+    "Codec": {
+     "name": "codec"
+    },
+    "Eac3AtmosSettings": {
+     "name": "eac3AtmosSettings",
+     "shape": "Eac3AtmosSettings"
+    },
+    "Eac3Settings": {
+     "name": "eac3Settings",
+     "shape": "Eac3Settings"
+    },
+    "FlacSettings": {
+     "name": "flacSettings",
+     "shape": "FlacSettings"
+    },
+    "Mp2Settings": {
+     "name": "mp2Settings",
+     "shape": "Mp2Settings"
+    },
+    "Mp3Settings": {
+     "name": "mp3Settings",
+     "shape": "Mp3Settings"
+    },
+    "OpusSettings": {
+     "name": "opusSettings",
+     "shape": "OpusSettings"
+    },
+    "VorbisSettings": {
+     "name": "vorbisSettings",
+     "shape": "VorbisSettings"
+    },
+    "WavSettings": {
+     "name": "wavSettings",
+     "shape": "WavSettings"
+    }
+   }
+  },
+  "AudioDescription": {
+   "members": {
+    "AudioChannelTaggingSettings": {
+     "name": "audioChannelTaggingSettings",
+     "shape": "AudioChannelTaggingSettings"
+    },
+    "AudioNormalizationSettings": {
+     "name": "audioNormalizationSettings",
+     "shape": "AudioNormalizationSettings"
+    },
+    "AudioPitchCorrectionSettings": {
+     "name": "audioPitchCorrectionSettings",
+     "shape": "AudioPitchCorrectionSettings"
+    },
+    "AudioSourceName": {
+     "name": "audioSourceName"
+    },
+    "AudioType": {
+     "name": "audioType"
+    },
+    "AudioTypeControl": {
+     "name": "audioTypeControl"
+    },
+    "CodecSettings": {
+     "name": "codecSettings",
+     "shape": "AudioCodecSettings"
+    },
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "LanguageCodeControl": {
+     "name": "languageCodeControl"
+    },
+    "RemixSettings": {
+     "name": "remixSettings",
+     "shape": "RemixSettings"
+    },
+    "StreamName": {
+     "name": "streamName"
+    }
+   }
+  },
+  "AudioNormalizationSettings": {
+   "members": {
+    "Algorithm": {
+     "name": "algorithm"
+    },
+    "AlgorithmControl": {
+     "name": "algorithmControl"
+    },
+    "CorrectionGateLevel": {
+     "name": "correctionGateLevel"
+    },
+    "LoudnessLogging": {
+     "name": "loudnessLogging"
+    },
+    "PeakCalculation": {
+     "name": "peakCalculation"
+    },
+    "TargetLkfs": {
+     "name": "targetLkfs"
+    },
+    "TruePeakLimiterThreshold": {
+     "name": "truePeakLimiterThreshold"
+    }
+   }
+  },
+  "AudioPitchCorrectionSettings": {
+   "members": {
+    "SlowPalPitchCorrection": {
+     "name": "slowPalPitchCorrection"
+    }
+   }
+  },
+  "AudioProperties": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "BitRate": {
+     "name": "bitRate"
+    },
+    "ChannelLayout": {
+     "name": "channelLayout"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "FrameRate": {
+     "name": "frameRate",
+     "shape": "FrameRate"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "ObjectCount": {
+     "name": "objectCount"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "AudioSelector": {
+   "members": {
+    "AudioDurationCorrection": {
+     "name": "audioDurationCorrection"
+    },
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "DefaultSelection": {
+     "name": "defaultSelection"
+    },
+    "ExternalAudioFileInput": {
+     "name": "externalAudioFileInput"
+    },
+    "HlsRenditionGroupSettings": {
+     "name": "hlsRenditionGroupSettings",
+     "shape": "HlsRenditionGroupSettings"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "Offset": {
+     "name": "offset"
+    },
+    "Pids": {
+     "name": "pids",
+     "shape": "__listOf__integerMin1Max2147483647"
+    },
+    "ProgramSelection": {
+     "name": "programSelection"
+    },
+    "RemixSettings": {
+     "name": "remixSettings",
+     "shape": "RemixSettings"
+    },
+    "SelectorType": {
+     "name": "selectorType"
+    },
+    "Smpte337Passthrough": {
+     "name": "smpte337Passthrough"
+    },
+    "Streams": {
+     "name": "streams",
+     "shape": "__listOf__integerMin1Max2147483647"
+    },
+    "Tracks": {
+     "name": "tracks",
+     "shape": "__listOf__integerMin1Max2147483647"
+    }
+   }
+  },
+  "AudioSelectorGroup": {
+   "members": {
+    "AudioSelectorNames": {
+     "name": "audioSelectorNames",
+     "shape": "__listOf__stringMin1"
+    }
+   }
+  },
+  "AutomatedAbrRule": {
+   "members": {
+    "AllowedRenditions": {
+     "name": "allowedRenditions",
+     "shape": "__listOfAllowedRenditionSize"
+    },
+    "ForceIncludeRenditions": {
+     "name": "forceIncludeRenditions",
+     "shape": "__listOfForceIncludeRenditionSize"
+    },
+    "MinBottomRenditionSize": {
+     "name": "minBottomRenditionSize",
+     "shape": "MinBottomRenditionSize"
+    },
+    "MinTopRenditionSize": {
+     "name": "minTopRenditionSize",
+     "shape": "MinTopRenditionSize"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "AutomatedAbrSettings": {
+   "members": {
+    "MaxAbrBitrate": {
+     "name": "maxAbrBitrate"
+    },
+    "MaxQualityLevel": {
+     "name": "maxQualityLevel"
+    },
+    "MaxRenditions": {
+     "name": "maxRenditions"
+    },
+    "MinAbrBitrate": {
+     "name": "minAbrBitrate"
+    },
+    "Rules": {
+     "name": "rules",
+     "shape": "__listOfAutomatedAbrRule"
+    }
+   }
+  },
+  "AutomatedEncodingSettings": {
+   "members": {
+    "AbrSettings": {
+     "name": "abrSettings",
+     "shape": "AutomatedAbrSettings"
+    }
+   }
+  },
+  "Av1QvbrSettings": {
+   "members": {
+    "QvbrQualityLevel": {
+     "name": "qvbrQualityLevel"
+    },
+    "QvbrQualityLevelFineTune": {
+     "name": "qvbrQualityLevelFineTune"
+    }
+   }
+  },
+  "Av1Settings": {
+   "members": {
+    "AdaptiveQuantization": {
+     "name": "adaptiveQuantization"
+    },
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "FilmGrainSynthesis": {
+     "name": "filmGrainSynthesis"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "NumberBFramesBetweenReferenceFrames": {
+     "name": "numberBFramesBetweenReferenceFrames"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "QvbrSettings": {
+     "name": "qvbrSettings",
+     "shape": "Av1QvbrSettings"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "SceneChangeDetect": {
+     "name": "sceneChangeDetect"
+    },
+    "Slices": {
+     "name": "slices"
+    },
+    "SlidingWindowMs": {
+     "name": "slidingWindowMs"
+    },
+    "SlidingWindowPeakBitrate": {
+     "name": "slidingWindowPeakBitrate"
+    },
+    "SpatialAdaptiveQuantization": {
+     "name": "spatialAdaptiveQuantization"
+    }
+   }
+  },
+  "AvailBlanking": {
+   "members": {
+    "AvailBlankingImage": {
+     "name": "availBlankingImage"
+    }
+   }
+  },
+  "AvcIntraSettings": {
+   "members": {
+    "AvcIntraClass": {
+     "name": "avcIntraClass"
+    },
+    "AvcIntraUhdSettings": {
+     "name": "avcIntraUhdSettings",
+     "shape": "AvcIntraUhdSettings"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Telecine": {
+     "name": "telecine"
+    }
+   }
+  },
+  "AvcIntraUhdSettings": {
+   "members": {
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    }
+   }
+  },
+  "BadRequestException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "BandwidthReductionFilter": {
+   "members": {
+    "Sharpening": {
+     "name": "sharpening"
+    },
+    "Strength": {
+     "name": "strength"
+    }
+   }
+  },
+  "BurninDestinationSettings": {
+   "members": {
+    "Alignment": {
+     "name": "alignment"
+    },
+    "ApplyFontColor": {
+     "name": "applyFontColor"
+    },
+    "BackgroundColor": {
+     "name": "backgroundColor"
+    },
+    "BackgroundOpacity": {
+     "name": "backgroundOpacity"
+    },
+    "FallbackFont": {
+     "name": "fallbackFont"
+    },
+    "FontColor": {
+     "name": "fontColor"
+    },
+    "FontFileBold": {
+     "name": "fontFileBold"
+    },
+    "FontFileBoldItalic": {
+     "name": "fontFileBoldItalic"
+    },
+    "FontFileItalic": {
+     "name": "fontFileItalic"
+    },
+    "FontFileRegular": {
+     "name": "fontFileRegular"
+    },
+    "FontOpacity": {
+     "name": "fontOpacity"
+    },
+    "FontResolution": {
+     "name": "fontResolution"
+    },
+    "FontScript": {
+     "name": "fontScript"
+    },
+    "FontSize": {
+     "name": "fontSize"
+    },
+    "HexFontColor": {
+     "name": "hexFontColor"
+    },
+    "OutlineColor": {
+     "name": "outlineColor"
+    },
+    "OutlineSize": {
+     "name": "outlineSize"
+    },
+    "RemoveRubyReserveAttributes": {
+     "name": "removeRubyReserveAttributes"
+    },
+    "ShadowColor": {
+     "name": "shadowColor"
+    },
+    "ShadowOpacity": {
+     "name": "shadowOpacity"
+    },
+    "ShadowXOffset": {
+     "name": "shadowXOffset"
+    },
+    "ShadowYOffset": {
+     "name": "shadowYOffset"
+    },
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    },
+    "TeletextSpacing": {
+     "name": "teletextSpacing"
+    },
+    "XPosition": {
+     "name": "xPosition"
+    },
+    "YPosition": {
+     "name": "yPosition"
+    }
+   }
+  },
+  "CancelJobRequest": {
+   "members": {}
+  },
+  "CancelJobResponse": {
+   "members": {}
+  },
+  "CaptionDescription": {
+   "members": {
+    "CaptionSelectorName": {
+     "name": "captionSelectorName"
+    },
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "CaptionDestinationSettings"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "LanguageDescription": {
+     "name": "languageDescription"
+    }
+   }
+  },
+  "CaptionDescriptionPreset": {
+   "members": {
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "CaptionDestinationSettings"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "LanguageDescription": {
+     "name": "languageDescription"
+    }
+   }
+  },
+  "CaptionDestinationSettings": {
+   "members": {
+    "BurninDestinationSettings": {
+     "name": "burninDestinationSettings",
+     "shape": "BurninDestinationSettings"
+    },
+    "DestinationType": {
+     "name": "destinationType"
+    },
+    "DvbSubDestinationSettings": {
+     "name": "dvbSubDestinationSettings",
+     "shape": "DvbSubDestinationSettings"
+    },
+    "EmbeddedDestinationSettings": {
+     "name": "embeddedDestinationSettings",
+     "shape": "EmbeddedDestinationSettings"
+    },
+    "ImscDestinationSettings": {
+     "name": "imscDestinationSettings",
+     "shape": "ImscDestinationSettings"
+    },
+    "SccDestinationSettings": {
+     "name": "sccDestinationSettings",
+     "shape": "SccDestinationSettings"
+    },
+    "SrtDestinationSettings": {
+     "name": "srtDestinationSettings",
+     "shape": "SrtDestinationSettings"
+    },
+    "TeletextDestinationSettings": {
+     "name": "teletextDestinationSettings",
+     "shape": "TeletextDestinationSettings"
+    },
+    "TtmlDestinationSettings": {
+     "name": "ttmlDestinationSettings",
+     "shape": "TtmlDestinationSettings"
+    },
+    "WebvttDestinationSettings": {
+     "name": "webvttDestinationSettings",
+     "shape": "WebvttDestinationSettings"
+    }
+   }
+  },
+  "CaptionSelector": {
+   "members": {
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "SourceSettings": {
+     "name": "sourceSettings",
+     "shape": "CaptionSourceSettings"
+    }
+   }
+  },
+  "CaptionSourceFramerate": {
+   "members": {
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    }
+   }
+  },
+  "CaptionSourceSettings": {
+   "members": {
+    "AncillarySourceSettings": {
+     "name": "ancillarySourceSettings",
+     "shape": "AncillarySourceSettings"
+    },
+    "DvbSubSourceSettings": {
+     "name": "dvbSubSourceSettings",
+     "shape": "DvbSubSourceSettings"
+    },
+    "EmbeddedSourceSettings": {
+     "name": "embeddedSourceSettings",
+     "shape": "EmbeddedSourceSettings"
+    },
+    "FileSourceSettings": {
+     "name": "fileSourceSettings",
+     "shape": "FileSourceSettings"
+    },
+    "SourceType": {
+     "name": "sourceType"
+    },
+    "TeletextSourceSettings": {
+     "name": "teletextSourceSettings",
+     "shape": "TeletextSourceSettings"
+    },
+    "TrackSourceSettings": {
+     "name": "trackSourceSettings",
+     "shape": "TrackSourceSettings"
+    },
+    "WebvttHlsSourceSettings": {
+     "name": "webvttHlsSourceSettings",
+     "shape": "WebvttHlsSourceSettings"
+    }
+   }
+  },
+  "ChannelMapping": {
+   "members": {
+    "OutputChannels": {
+     "name": "outputChannels",
+     "shape": "__listOfOutputChannelMapping"
+    }
+   }
+  },
+  "ClipLimits": {
+   "members": {
+    "MaximumRGBTolerance": {
+     "name": "maximumRGBTolerance"
+    },
+    "MaximumYUV": {
+     "name": "maximumYUV"
+    },
+    "MinimumRGBTolerance": {
+     "name": "minimumRGBTolerance"
+    },
+    "MinimumYUV": {
+     "name": "minimumYUV"
+    }
+   }
+  },
+  "CmafAdditionalManifest": {
+   "members": {
+    "ManifestNameModifier": {
+     "name": "manifestNameModifier"
+    },
+    "SelectedOutputs": {
+     "name": "selectedOutputs",
+     "shape": "__listOf__stringMin1"
+    }
+   }
+  },
+  "CmafEncryptionSettings": {
+   "members": {
+    "ClearLeadSegments": {
+     "name": "clearLeadSegments"
+    },
+    "ConstantInitializationVector": {
+     "name": "constantInitializationVector"
+    },
+    "EncryptionMethod": {
+     "name": "encryptionMethod"
+    },
+    "InitializationVectorInManifest": {
+     "name": "initializationVectorInManifest"
+    },
+    "SpekeKeyProvider": {
+     "name": "spekeKeyProvider",
+     "shape": "SpekeKeyProviderCmaf"
+    },
+    "StaticKeyProvider": {
+     "name": "staticKeyProvider",
+     "shape": "StaticKeyProvider"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "CmafGroupSettings": {
+   "members": {
+    "AdditionalManifests": {
+     "name": "additionalManifests",
+     "shape": "__listOfCmafAdditionalManifest"
+    },
+    "BaseUrl": {
+     "name": "baseUrl"
+    },
+    "ClientCache": {
+     "name": "clientCache"
+    },
+    "CodecSpecification": {
+     "name": "codecSpecification"
+    },
+    "DashAdaptationSetGrouping": {
+     "name": "dashAdaptationSetGrouping",
+     "shape": "__listOfDashAdaptationSetGrouping"
+    },
+    "DashIFrameTrickPlayNameModifier": {
+     "name": "dashIFrameTrickPlayNameModifier"
+    },
+    "DashManifestStyle": {
+     "name": "dashManifestStyle"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "DestinationSettings"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "CmafEncryptionSettings"
+    },
+    "FragmentLength": {
+     "name": "fragmentLength"
+    },
+    "ImageBasedTrickPlay": {
+     "name": "imageBasedTrickPlay"
+    },
+    "ImageBasedTrickPlaySettings": {
+     "name": "imageBasedTrickPlaySettings",
+     "shape": "CmafImageBasedTrickPlaySettings"
+    },
+    "ImageBasedTrickPlayVariants": {
+     "name": "imageBasedTrickPlayVariants",
+     "shape": "__listOfCmafImageBasedTrickPlayVariant"
+    },
+    "ManifestCompression": {
+     "name": "manifestCompression"
+    },
+    "ManifestDurationFormat": {
+     "name": "manifestDurationFormat"
+    },
+    "MinBufferTime": {
+     "name": "minBufferTime"
+    },
+    "MinFinalSegmentLength": {
+     "name": "minFinalSegmentLength"
+    },
+    "MpdManifestBandwidthType": {
+     "name": "mpdManifestBandwidthType"
+    },
+    "MpdProfile": {
+     "name": "mpdProfile"
+    },
+    "PtsOffsetHandlingForBFrames": {
+     "name": "ptsOffsetHandlingForBFrames"
+    },
+    "SegmentControl": {
+     "name": "segmentControl"
+    },
+    "SegmentLength": {
+     "name": "segmentLength"
+    },
+    "SegmentLengthControl": {
+     "name": "segmentLengthControl"
+    },
+    "StreamInfResolution": {
+     "name": "streamInfResolution"
+    },
+    "TargetDurationCompatibilityMode": {
+     "name": "targetDurationCompatibilityMode"
+    },
+    "VideoCompositionOffsets": {
+     "name": "videoCompositionOffsets"
+    },
+    "WriteDashManifest": {
+     "name": "writeDashManifest"
+    },
+    "WriteHlsManifest": {
+     "name": "writeHlsManifest"
+    },
+    "WriteSegmentTimelineInRepresentation": {
+     "name": "writeSegmentTimelineInRepresentation"
+    }
+   }
+  },
+  "CmafImageBasedTrickPlaySettings": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "CmafImageBasedTrickPlayVariant": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "CmfcSettings": {
+   "members": {
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "AudioGroupId": {
+     "name": "audioGroupId"
+    },
+    "AudioRenditionSets": {
+     "name": "audioRenditionSets"
+    },
+    "AudioTrackType": {
+     "name": "audioTrackType"
+    },
+    "C2paManifest": {
+     "name": "c2paManifest"
+    },
+    "CertificateSecret": {
+     "name": "certificateSecret"
+    },
+    "DescriptiveVideoServiceFlag": {
+     "name": "descriptiveVideoServiceFlag"
+    },
+    "IFrameOnlyManifest": {
+     "name": "iFrameOnlyManifest"
+    },
+    "KlvMetadata": {
+     "name": "klvMetadata"
+    },
+    "ManifestMetadataSignaling": {
+     "name": "manifestMetadataSignaling"
+    },
+    "Scte35Esam": {
+     "name": "scte35Esam"
+    },
+    "Scte35Source": {
+     "name": "scte35Source"
+    },
+    "SigningKmsKey": {
+     "name": "signingKmsKey"
+    },
+    "TimedMetadata": {
+     "name": "timedMetadata"
+    },
+    "TimedMetadataBoxVersion": {
+     "name": "timedMetadataBoxVersion"
+    },
+    "TimedMetadataSchemeIdUri": {
+     "name": "timedMetadataSchemeIdUri"
+    },
+    "TimedMetadataValue": {
+     "name": "timedMetadataValue"
+    }
+   }
+  },
+  "CodecMetadata": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "ChromaSubsampling": {
+     "name": "chromaSubsampling"
+    },
+    "CodedFrameRate": {
+     "name": "codedFrameRate",
+     "shape": "FrameRate"
+    },
+    "ColorPrimaries": {
+     "name": "colorPrimaries"
+    },
+    "ContentLightLevel": {
+     "name": "contentLightLevel",
+     "shape": "ContentLightLevel"
+    },
+    "DisplayAspectRatio": {
+     "name": "displayAspectRatio",
+     "shape": "AspectRatio"
+    },
+    "DolbyVision": {
+     "name": "dolbyVision",
+     "shape": "DolbyVisionMetadata"
+    },
+    "FieldOrder": {
+     "name": "fieldOrder"
+    },
+    "Hdr10PlusPresence": {
+     "name": "hdr10PlusPresence"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "Level": {
+     "name": "level"
+    },
+    "MatrixCoefficients": {
+     "name": "matrixCoefficients"
+    },
+    "Profile": {
+     "name": "profile"
+    },
+    "Rotation": {
+     "name": "rotation"
+    },
+    "SampleAspectRatio": {
+     "name": "sampleAspectRatio",
+     "shape": "AspectRatio"
+    },
+    "ScanType": {
+     "name": "scanType"
+    },
+    "TransferCharacteristics": {
+     "name": "transferCharacteristics"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "ColorConversion3DLUTSetting": {
+   "members": {
+    "FileInput": {
+     "name": "fileInput"
+    },
+    "InputColorSpace": {
+     "name": "inputColorSpace"
+    },
+    "InputMasteringLuminance": {
+     "name": "inputMasteringLuminance"
+    },
+    "OutputColorSpace": {
+     "name": "outputColorSpace"
+    },
+    "OutputMasteringLuminance": {
+     "name": "outputMasteringLuminance"
+    }
+   }
+  },
+  "ColorCorrector": {
+   "members": {
+    "Brightness": {
+     "name": "brightness"
+    },
+    "ClipLimits": {
+     "name": "clipLimits",
+     "shape": "ClipLimits"
+    },
+    "ColorSpaceConversion": {
+     "name": "colorSpaceConversion"
+    },
+    "Contrast": {
+     "name": "contrast"
+    },
+    "Hdr10Metadata": {
+     "name": "hdr10Metadata",
+     "shape": "Hdr10Metadata"
+    },
+    "HdrToSdrToneMapper": {
+     "name": "hdrToSdrToneMapper"
+    },
+    "Hue": {
+     "name": "hue"
+    },
+    "MaxLuminance": {
+     "name": "maxLuminance"
+    },
+    "SampleRangeConversion": {
+     "name": "sampleRangeConversion"
+    },
+    "Saturation": {
+     "name": "saturation"
+    },
+    "SdrReferenceWhiteLevel": {
+     "name": "sdrReferenceWhiteLevel"
+    }
+   }
+  },
+  "ConflictException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "Container": {
+   "members": {
+    "BitRate": {
+     "name": "bitRate"
+    },
+    "Duration": {
+     "name": "duration"
+    },
+    "Format": {
+     "name": "format"
+    },
+    "StartTimecode": {
+     "name": "startTimecode"
+    },
+    "Tracks": {
+     "name": "tracks",
+     "shape": "__listOfTrack"
+    }
+   }
+  },
+  "ContainerSettings": {
+   "members": {
+    "CmfcSettings": {
+     "name": "cmfcSettings",
+     "shape": "CmfcSettings"
+    },
+    "Container": {
+     "name": "container"
+    },
+    "F4vSettings": {
+     "name": "f4vSettings",
+     "shape": "F4vSettings"
+    },
+    "M2tsSettings": {
+     "name": "m2tsSettings",
+     "shape": "M2tsSettings"
+    },
+    "M3u8Settings": {
+     "name": "m3u8Settings",
+     "shape": "M3u8Settings"
+    },
+    "MovSettings": {
+     "name": "movSettings",
+     "shape": "MovSettings"
+    },
+    "Mp4Settings": {
+     "name": "mp4Settings",
+     "shape": "Mp4Settings"
+    },
+    "MpdSettings": {
+     "name": "mpdSettings",
+     "shape": "MpdSettings"
+    },
+    "MxfSettings": {
+     "name": "mxfSettings",
+     "shape": "MxfSettings"
+    }
+   }
+  },
+  "ContentLightLevel": {
+   "members": {
+    "MaxContentLightLevel": {
+     "name": "maxContentLightLevel"
+    },
+    "MaxFrameAverageLightLevel": {
+     "name": "maxFrameAverageLightLevel"
+    }
+   }
+  },
+  "CreateJobRequest": {
+   "members": {
+    "AccelerationSettings": {
+     "name": "accelerationSettings",
+     "shape": "AccelerationSettings"
+    },
+    "BillingTagsSource": {
+     "name": "billingTagsSource"
+    },
+    "ClientRequestToken": {
+     "name": "clientRequestToken"
+    },
+    "HopDestinations": {
+     "name": "hopDestinations",
+     "shape": "__listOfHopDestination"
+    },
+    "JobEngineVersion": {
+     "name": "jobEngineVersion"
+    },
+    "JobTemplate": {
+     "name": "jobTemplate"
+    },
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "Role": {
+     "name": "role"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "JobSettings"
+    },
+    "SimulateReservedQueue": {
+     "name": "simulateReservedQueue"
+    },
+    "StatusUpdateInterval": {
+     "name": "statusUpdateInterval"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "UserMetadata": {
+     "name": "userMetadata",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateJobResponse": {
+   "members": {
+    "Job": {
+     "name": "job",
+     "shape": "Job"
+    }
+   }
+  },
+  "CreateJobTemplateRequest": {
+   "members": {
+    "AccelerationSettings": {
+     "name": "accelerationSettings",
+     "shape": "AccelerationSettings"
+    },
+    "Category": {
+     "name": "category"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "HopDestinations": {
+     "name": "hopDestinations",
+     "shape": "__listOfHopDestination"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "JobTemplateSettings"
+    },
+    "StatusUpdateInterval": {
+     "name": "statusUpdateInterval"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateJobTemplateResponse": {
+   "members": {
+    "JobTemplate": {
+     "name": "jobTemplate",
+     "shape": "JobTemplate"
+    }
+   }
+  },
+  "CreatePresetRequest": {
+   "members": {
+    "Category": {
+     "name": "category"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "PresetSettings"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreatePresetResponse": {
+   "members": {
+    "Preset": {
+     "name": "preset",
+     "shape": "Preset"
+    }
+   }
+  },
+  "CreateQueueRequest": {
+   "members": {
+    "ConcurrentJobs": {
+     "name": "concurrentJobs"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "MaximumConcurrentFeeds": {
+     "name": "maximumConcurrentFeeds"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "PricingPlan": {
+     "name": "pricingPlan"
+    },
+    "ReservationPlanSettings": {
+     "name": "reservationPlanSettings",
+     "shape": "ReservationPlanSettings"
+    },
+    "Status": {
+     "name": "status"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateQueueResponse": {
+   "members": {
+    "Queue": {
+     "name": "queue",
+     "shape": "Queue"
+    }
+   }
+  },
+  "CreateResourceShareRequest": {
+   "members": {
+    "JobId": {
+     "name": "jobId"
+    },
+    "SupportCaseId": {
+     "name": "supportCaseId"
+    }
+   }
+  },
+  "CreateResourceShareResponse": {
+   "members": {}
+  },
+  "DashAdditionalManifest": {
+   "members": {
+    "ManifestNameModifier": {
+     "name": "manifestNameModifier"
+    },
+    "SelectedOutputs": {
+     "name": "selectedOutputs",
+     "shape": "__listOf__stringMin1"
+    }
+   }
+  },
+  "DashIsoEncryptionSettings": {
+   "members": {
+    "PlaybackDeviceCompatibility": {
+     "name": "playbackDeviceCompatibility"
+    },
+    "SpekeKeyProvider": {
+     "name": "spekeKeyProvider",
+     "shape": "SpekeKeyProvider"
+    }
+   }
+  },
+  "DashIsoGroupSettings": {
+   "members": {
+    "AdditionalManifests": {
+     "name": "additionalManifests",
+     "shape": "__listOfDashAdditionalManifest"
+    },
+    "AudioChannelConfigSchemeIdUri": {
+     "name": "audioChannelConfigSchemeIdUri"
+    },
+    "BaseUrl": {
+     "name": "baseUrl"
+    },
+    "DashAdaptationSetGrouping": {
+     "name": "dashAdaptationSetGrouping",
+     "shape": "__listOfDashAdaptationSetGrouping"
+    },
+    "DashIFrameTrickPlayNameModifier": {
+     "name": "dashIFrameTrickPlayNameModifier"
+    },
+    "DashManifestStyle": {
+     "name": "dashManifestStyle"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "DestinationSettings"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "DashIsoEncryptionSettings"
+    },
+    "FragmentLength": {
+     "name": "fragmentLength"
+    },
+    "HbbtvCompliance": {
+     "name": "hbbtvCompliance"
+    },
+    "ImageBasedTrickPlay": {
+     "name": "imageBasedTrickPlay"
+    },
+    "ImageBasedTrickPlaySettings": {
+     "name": "imageBasedTrickPlaySettings",
+     "shape": "DashIsoImageBasedTrickPlaySettings"
+    },
+    "ImageBasedTrickPlayVariants": {
+     "name": "imageBasedTrickPlayVariants",
+     "shape": "__listOfDashIsoImageBasedTrickPlayVariant"
+    },
+    "MinBufferTime": {
+     "name": "minBufferTime"
+    },
+    "MinFinalSegmentLength": {
+     "name": "minFinalSegmentLength"
+    },
+    "MpdManifestBandwidthType": {
+     "name": "mpdManifestBandwidthType"
+    },
+    "MpdProfile": {
+     "name": "mpdProfile"
+    },
+    "PtsOffsetHandlingForBFrames": {
+     "name": "ptsOffsetHandlingForBFrames"
+    },
+    "SegmentControl": {
+     "name": "segmentControl"
+    },
+    "SegmentLength": {
+     "name": "segmentLength"
+    },
+    "SegmentLengthControl": {
+     "name": "segmentLengthControl"
+    },
+    "VideoCompositionOffsets": {
+     "name": "videoCompositionOffsets"
+    },
+    "WriteSegmentTimelineInRepresentation": {
+     "name": "writeSegmentTimelineInRepresentation"
+    }
+   }
+  },
+  "DashIsoImageBasedTrickPlaySettings": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "DashIsoImageBasedTrickPlayVariant": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "DataProperties": {
+   "members": {
+    "LanguageCode": {
+     "name": "languageCode"
+    }
+   }
+  },
+  "Deinterlacer": {
+   "members": {
+    "Algorithm": {
+     "name": "algorithm"
+    },
+    "Control": {
+     "name": "control"
+    },
+    "Mode": {
+     "name": "mode"
+    }
+   }
+  },
+  "DeleteJobTemplateRequest": {
+   "members": {}
+  },
+  "DeleteJobTemplateResponse": {
+   "members": {}
+  },
+  "DeletePolicyRequest": {
+   "members": {}
+  },
+  "DeletePolicyResponse": {
+   "members": {}
+  },
+  "DeletePresetRequest": {
+   "members": {}
+  },
+  "DeletePresetResponse": {
+   "members": {}
+  },
+  "DeleteQueueRequest": {
+   "members": {}
+  },
+  "DeleteQueueResponse": {
+   "members": {}
+  },
+  "DescribeEndpointsRequest": {
+   "members": {
+    "MaxResults": {
+     "name": "maxResults"
+    },
+    "Mode": {
+     "name": "mode"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "DescribeEndpointsResponse": {
+   "members": {
+    "Endpoints": {
+     "name": "endpoints",
+     "shape": "__listOfEndpoint"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "DestinationSettings": {
+   "members": {
+    "S3Settings": {
+     "name": "s3Settings",
+     "shape": "S3DestinationSettings"
+    }
+   }
+  },
+  "DisassociateCertificateRequest": {
+   "members": {}
+  },
+  "DisassociateCertificateResponse": {
+   "members": {}
+  },
+  "DolbyVision": {
+   "members": {
+    "Compatibility": {
+     "name": "compatibility"
+    },
+    "L6Metadata": {
+     "name": "l6Metadata",
+     "shape": "DolbyVisionLevel6Metadata"
+    },
+    "L6Mode": {
+     "name": "l6Mode"
+    },
+    "Mapping": {
+     "name": "mapping"
+    },
+    "Profile": {
+     "name": "profile"
+    }
+   }
+  },
+  "DolbyVisionLevel6Metadata": {
+   "members": {
+    "MaxCll": {
+     "name": "maxCll"
+    },
+    "MaxFall": {
+     "name": "maxFall"
+    }
+   }
+  },
+  "DolbyVisionMetadata": {
+   "members": {
+    "BaseLayer": {
+     "name": "baseLayer"
+    },
+    "EnhancementLayer": {
+     "name": "enhancementLayer"
+    },
+    "Level": {
+     "name": "level"
+    },
+    "Profile": {
+     "name": "profile"
+    },
+    "Rpu": {
+     "name": "rpu"
+    }
+   }
+  },
+  "DurationControl": {
+   "members": {
+    "IntegerDurationMaximumCompressionDenominator": {
+     "name": "integerDurationMaximumCompressionDenominator"
+    },
+    "IntegerDurationMaximumCompressionNumerator": {
+     "name": "integerDurationMaximumCompressionNumerator"
+    },
+    "IntegerDurationTrimThresholdMilliseconds": {
+     "name": "integerDurationTrimThresholdMilliseconds"
+    }
+   }
+  },
+  "DvbNitSettings": {
+   "members": {
+    "NetworkId": {
+     "name": "networkId"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "NitInterval": {
+     "name": "nitInterval"
+    }
+   }
+  },
+  "DvbSdtSettings": {
+   "members": {
+    "OutputSdt": {
+     "name": "outputSdt"
+    },
+    "SdtInterval": {
+     "name": "sdtInterval"
+    },
+    "ServiceName": {
+     "name": "serviceName"
+    },
+    "ServiceProviderName": {
+     "name": "serviceProviderName"
+    }
+   }
+  },
+  "DvbSubDestinationSettings": {
+   "members": {
+    "Alignment": {
+     "name": "alignment"
+    },
+    "ApplyFontColor": {
+     "name": "applyFontColor"
+    },
+    "BackgroundColor": {
+     "name": "backgroundColor"
+    },
+    "BackgroundOpacity": {
+     "name": "backgroundOpacity"
+    },
+    "DdsHandling": {
+     "name": "ddsHandling"
+    },
+    "DdsXCoordinate": {
+     "name": "ddsXCoordinate"
+    },
+    "DdsYCoordinate": {
+     "name": "ddsYCoordinate"
+    },
+    "FallbackFont": {
+     "name": "fallbackFont"
+    },
+    "FontColor": {
+     "name": "fontColor"
+    },
+    "FontFileBold": {
+     "name": "fontFileBold"
+    },
+    "FontFileBoldItalic": {
+     "name": "fontFileBoldItalic"
+    },
+    "FontFileItalic": {
+     "name": "fontFileItalic"
+    },
+    "FontFileRegular": {
+     "name": "fontFileRegular"
+    },
+    "FontOpacity": {
+     "name": "fontOpacity"
+    },
+    "FontResolution": {
+     "name": "fontResolution"
+    },
+    "FontScript": {
+     "name": "fontScript"
+    },
+    "FontSize": {
+     "name": "fontSize"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "HexFontColor": {
+     "name": "hexFontColor"
+    },
+    "OutlineColor": {
+     "name": "outlineColor"
+    },
+    "OutlineSize": {
+     "name": "outlineSize"
+    },
+    "ShadowColor": {
+     "name": "shadowColor"
+    },
+    "ShadowOpacity": {
+     "name": "shadowOpacity"
+    },
+    "ShadowXOffset": {
+     "name": "shadowXOffset"
+    },
+    "ShadowYOffset": {
+     "name": "shadowYOffset"
+    },
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    },
+    "SubtitlingType": {
+     "name": "subtitlingType"
+    },
+    "TeletextSpacing": {
+     "name": "teletextSpacing"
+    },
+    "Width": {
+     "name": "width"
+    },
+    "XPosition": {
+     "name": "xPosition"
+    },
+    "YPosition": {
+     "name": "yPosition"
+    }
+   }
+  },
+  "DvbSubSourceSettings": {
+   "members": {
+    "Pid": {
+     "name": "pid"
+    }
+   }
+  },
+  "DvbTdtSettings": {
+   "members": {
+    "TdtInterval": {
+     "name": "tdtInterval"
+    }
+   }
+  },
+  "DynamicAudioSelector": {
+   "members": {
+    "AudioDurationCorrection": {
+     "name": "audioDurationCorrection"
+    },
+    "ExternalAudioFileInput": {
+     "name": "externalAudioFileInput"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "Offset": {
+     "name": "offset"
+    },
+    "SelectorType": {
+     "name": "selectorType"
+    }
+   }
+  },
+  "Eac3AtmosSettings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "BitstreamMode": {
+     "name": "bitstreamMode"
+    },
+    "CodingMode": {
+     "name": "codingMode"
+    },
+    "DialogueIntelligence": {
+     "name": "dialogueIntelligence"
+    },
+    "DownmixControl": {
+     "name": "downmixControl"
+    },
+    "DynamicRangeCompressionLine": {
+     "name": "dynamicRangeCompressionLine"
+    },
+    "DynamicRangeCompressionRf": {
+     "name": "dynamicRangeCompressionRf"
+    },
+    "DynamicRangeControl": {
+     "name": "dynamicRangeControl"
+    },
+    "LoRoCenterMixLevel": {
+     "name": "loRoCenterMixLevel"
+    },
+    "LoRoSurroundMixLevel": {
+     "name": "loRoSurroundMixLevel"
+    },
+    "LtRtCenterMixLevel": {
+     "name": "ltRtCenterMixLevel"
+    },
+    "LtRtSurroundMixLevel": {
+     "name": "ltRtSurroundMixLevel"
+    },
+    "MeteringMode": {
+     "name": "meteringMode"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "SpeechThreshold": {
+     "name": "speechThreshold"
+    },
+    "StereoDownmix": {
+     "name": "stereoDownmix"
+    },
+    "SurroundExMode": {
+     "name": "surroundExMode"
+    }
+   }
+  },
+  "Eac3Settings": {
+   "members": {
+    "AttenuationControl": {
+     "name": "attenuationControl"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "BitstreamMode": {
+     "name": "bitstreamMode"
+    },
+    "CodingMode": {
+     "name": "codingMode"
+    },
+    "DcFilter": {
+     "name": "dcFilter"
+    },
+    "Dialnorm": {
+     "name": "dialnorm"
+    },
+    "DynamicRangeCompressionLine": {
+     "name": "dynamicRangeCompressionLine"
+    },
+    "DynamicRangeCompressionRf": {
+     "name": "dynamicRangeCompressionRf"
+    },
+    "LfeControl": {
+     "name": "lfeControl"
+    },
+    "LfeFilter": {
+     "name": "lfeFilter"
+    },
+    "LoRoCenterMixLevel": {
+     "name": "loRoCenterMixLevel"
+    },
+    "LoRoSurroundMixLevel": {
+     "name": "loRoSurroundMixLevel"
+    },
+    "LtRtCenterMixLevel": {
+     "name": "ltRtCenterMixLevel"
+    },
+    "LtRtSurroundMixLevel": {
+     "name": "ltRtSurroundMixLevel"
+    },
+    "MetadataControl": {
+     "name": "metadataControl"
+    },
+    "PassthroughControl": {
+     "name": "passthroughControl"
+    },
+    "PhaseControl": {
+     "name": "phaseControl"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "StereoDownmix": {
+     "name": "stereoDownmix"
+    },
+    "SurroundExMode": {
+     "name": "surroundExMode"
+    },
+    "SurroundMode": {
+     "name": "surroundMode"
+    }
+   }
+  },
+  "ElementalInferenceConfiguration": {
+   "members": {
+    "Features": {
+     "name": "features",
+     "shape": "__listOfElementalInferenceFeature"
+    },
+    "Feeds": {
+     "name": "feeds",
+     "shape": "__listOfElementalInferenceFeed"
+    }
+   }
+  },
+  "ElementalInferenceFeed": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "FeedManagementState": {
+     "name": "feedManagementState"
+    }
+   }
+  },
+  "EmbeddedDestinationSettings": {
+   "members": {
+    "Destination608ChannelNumber": {
+     "name": "destination608ChannelNumber"
+    },
+    "Destination708ServiceNumber": {
+     "name": "destination708ServiceNumber"
+    }
+   }
+  },
+  "EmbeddedSourceSettings": {
+   "members": {
+    "Convert608To708": {
+     "name": "convert608To708"
+    },
+    "Source608ChannelNumber": {
+     "name": "source608ChannelNumber"
+    },
+    "Source608TrackNumber": {
+     "name": "source608TrackNumber"
+    },
+    "TerminateCaptions": {
+     "name": "terminateCaptions"
+    }
+   }
+  },
+  "EncryptionContractConfiguration": {
+   "members": {
+    "SpekeAudioPreset": {
+     "name": "spekeAudioPreset"
+    },
+    "SpekeVideoPreset": {
+     "name": "spekeVideoPreset"
+    }
+   }
+  },
+  "Endpoint": {
+   "members": {
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "EsamManifestConfirmConditionNotification": {
+   "members": {
+    "MccXml": {
+     "name": "mccXml"
+    }
+   }
+  },
+  "EsamSettings": {
+   "members": {
+    "ManifestConfirmConditionNotification": {
+     "name": "manifestConfirmConditionNotification",
+     "shape": "EsamManifestConfirmConditionNotification"
+    },
+    "ResponseSignalPreroll": {
+     "name": "responseSignalPreroll"
+    },
+    "SignalProcessingNotification": {
+     "name": "signalProcessingNotification",
+     "shape": "EsamSignalProcessingNotification"
+    }
+   }
+  },
+  "EsamSignalProcessingNotification": {
+   "members": {
+    "SccXml": {
+     "name": "sccXml"
+    }
+   }
+  },
+  "ExceptionBody": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "ExtendedDataServices": {
+   "members": {
+    "CopyProtectionAction": {
+     "name": "copyProtectionAction"
+    },
+    "VchipAction": {
+     "name": "vchipAction"
+    }
+   }
+  },
+  "F4vSettings": {
+   "members": {
+    "MoovPlacement": {
+     "name": "moovPlacement"
+    }
+   }
+  },
+  "FileGroupSettings": {
+   "members": {
+    "Destination": {
+     "name": "destination"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "DestinationSettings"
+    }
+   }
+  },
+  "FileSourceSettings": {
+   "members": {
+    "ByteRateLimit": {
+     "name": "byteRateLimit"
+    },
+    "Convert608To708": {
+     "name": "convert608To708"
+    },
+    "ConvertPaintToPop": {
+     "name": "convertPaintToPop"
+    },
+    "Framerate": {
+     "name": "framerate",
+     "shape": "CaptionSourceFramerate"
+    },
+    "SourceFile": {
+     "name": "sourceFile"
+    },
+    "TimeDelta": {
+     "name": "timeDelta"
+    },
+    "TimeDeltaUnits": {
+     "name": "timeDeltaUnits"
+    },
+    "UpconvertSTLToTeletext": {
+     "name": "upconvertSTLToTeletext"
+    }
+   }
+  },
+  "FlacSettings": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "ForbiddenException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "ForceIncludeRenditionSize": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "FrameCaptureSettings": {
+   "members": {
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "MaxCaptures": {
+     "name": "maxCaptures"
+    },
+    "Quality": {
+     "name": "quality"
+    }
+   }
+  },
+  "FrameRate": {
+   "members": {
+    "Denominator": {
+     "name": "denominator"
+    },
+    "Numerator": {
+     "name": "numerator"
+    }
+   }
+  },
+  "GetJobRequest": {
+   "members": {}
+  },
+  "GetJobResponse": {
+   "members": {
+    "Job": {
+     "name": "job",
+     "shape": "Job"
+    }
+   }
+  },
+  "GetJobTemplateRequest": {
+   "members": {}
+  },
+  "GetJobTemplateResponse": {
+   "members": {
+    "JobTemplate": {
+     "name": "jobTemplate",
+     "shape": "JobTemplate"
+    }
+   }
+  },
+  "GetJobsQueryResultsRequest": {
+   "members": {}
+  },
+  "GetJobsQueryResultsResponse": {
+   "members": {
+    "Jobs": {
+     "name": "jobs",
+     "shape": "__listOfJob"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "GetPolicyRequest": {
+   "members": {}
+  },
+  "GetPolicyResponse": {
+   "members": {
+    "Policy": {
+     "name": "policy",
+     "shape": "Policy"
+    }
+   }
+  },
+  "GetPresetRequest": {
+   "members": {}
+  },
+  "GetPresetResponse": {
+   "members": {
+    "Preset": {
+     "name": "preset",
+     "shape": "Preset"
+    }
+   }
+  },
+  "GetQueueRequest": {
+   "members": {}
+  },
+  "GetQueueResponse": {
+   "members": {
+    "Queue": {
+     "name": "queue",
+     "shape": "Queue"
+    }
+   }
+  },
+  "GifSettings": {
+   "members": {
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    }
+   }
+  },
+  "H264QvbrSettings": {
+   "members": {
+    "MaxAverageBitrate": {
+     "name": "maxAverageBitrate"
+    },
+    "QvbrQualityLevel": {
+     "name": "qvbrQualityLevel"
+    },
+    "QvbrQualityLevelFineTune": {
+     "name": "qvbrQualityLevelFineTune"
+    }
+   }
+  },
+  "H264Settings": {
+   "members": {
+    "AdaptiveQuantization": {
+     "name": "adaptiveQuantization"
+    },
+    "BandwidthReductionFilter": {
+     "name": "bandwidthReductionFilter",
+     "shape": "BandwidthReductionFilter"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "CodecLevel": {
+     "name": "codecLevel"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "DynamicSubGop": {
+     "name": "dynamicSubGop"
+    },
+    "EndOfStreamMarkers": {
+     "name": "endOfStreamMarkers"
+    },
+    "EntropyEncoding": {
+     "name": "entropyEncoding"
+    },
+    "ExplicitWeightedPrediction": {
+     "name": "explicitWeightedPrediction"
+    },
+    "FieldEncoding": {
+     "name": "fieldEncoding"
+    },
+    "FlickerAdaptiveQuantization": {
+     "name": "flickerAdaptiveQuantization"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopBReference": {
+     "name": "gopBReference"
+    },
+    "GopClosedCadence": {
+     "name": "gopClosedCadence"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "GopSizeUnits": {
+     "name": "gopSizeUnits"
+    },
+    "HrdBufferFinalFillPercentage": {
+     "name": "hrdBufferFinalFillPercentage"
+    },
+    "HrdBufferInitialFillPercentage": {
+     "name": "hrdBufferInitialFillPercentage"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MinIInterval": {
+     "name": "minIInterval"
+    },
+    "NumberBFramesBetweenReferenceFrames": {
+     "name": "numberBFramesBetweenReferenceFrames"
+    },
+    "NumberReferenceFrames": {
+     "name": "numberReferenceFrames"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "QvbrSettings": {
+     "name": "qvbrSettings",
+     "shape": "H264QvbrSettings"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "RepeatPps": {
+     "name": "repeatPps"
+    },
+    "SaliencyAwareEncoding": {
+     "name": "saliencyAwareEncoding"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SceneChangeDetect": {
+     "name": "sceneChangeDetect"
+    },
+    "Slices": {
+     "name": "slices"
+    },
+    "SlidingWindowMs": {
+     "name": "slidingWindowMs"
+    },
+    "SlidingWindowPeakBitrate": {
+     "name": "slidingWindowPeakBitrate"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Softness": {
+     "name": "softness"
+    },
+    "SpatialAdaptiveQuantization": {
+     "name": "spatialAdaptiveQuantization"
+    },
+    "Syntax": {
+     "name": "syntax"
+    },
+    "Telecine": {
+     "name": "telecine"
+    },
+    "TemporalAdaptiveQuantization": {
+     "name": "temporalAdaptiveQuantization"
+    },
+    "UnregisteredSeiTimecode": {
+     "name": "unregisteredSeiTimecode"
+    },
+    "WriteMp4PackagingType": {
+     "name": "writeMp4PackagingType"
+    }
+   }
+  },
+  "H265QvbrSettings": {
+   "members": {
+    "MaxAverageBitrate": {
+     "name": "maxAverageBitrate"
+    },
+    "QvbrQualityLevel": {
+     "name": "qvbrQualityLevel"
+    },
+    "QvbrQualityLevelFineTune": {
+     "name": "qvbrQualityLevelFineTune"
+    }
+   }
+  },
+  "H265Settings": {
+   "members": {
+    "AdaptiveQuantization": {
+     "name": "adaptiveQuantization"
+    },
+    "AlternateTransferFunctionSei": {
+     "name": "alternateTransferFunctionSei"
+    },
+    "BandwidthReductionFilter": {
+     "name": "bandwidthReductionFilter",
+     "shape": "BandwidthReductionFilter"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "CodecLevel": {
+     "name": "codecLevel"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "Deblocking": {
+     "name": "deblocking"
+    },
+    "DynamicSubGop": {
+     "name": "dynamicSubGop"
+    },
+    "EndOfStreamMarkers": {
+     "name": "endOfStreamMarkers"
+    },
+    "FlickerAdaptiveQuantization": {
+     "name": "flickerAdaptiveQuantization"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopBReference": {
+     "name": "gopBReference"
+    },
+    "GopClosedCadence": {
+     "name": "gopClosedCadence"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "GopSizeUnits": {
+     "name": "gopSizeUnits"
+    },
+    "HrdBufferFinalFillPercentage": {
+     "name": "hrdBufferFinalFillPercentage"
+    },
+    "HrdBufferInitialFillPercentage": {
+     "name": "hrdBufferInitialFillPercentage"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MinIInterval": {
+     "name": "minIInterval"
+    },
+    "MvOverPictureBoundaries": {
+     "name": "mvOverPictureBoundaries"
+    },
+    "MvTemporalPredictor": {
+     "name": "mvTemporalPredictor"
+    },
+    "NumberBFramesBetweenReferenceFrames": {
+     "name": "numberBFramesBetweenReferenceFrames"
+    },
+    "NumberReferenceFrames": {
+     "name": "numberReferenceFrames"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "QvbrSettings": {
+     "name": "qvbrSettings",
+     "shape": "H265QvbrSettings"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "SampleAdaptiveOffsetFilterMode": {
+     "name": "sampleAdaptiveOffsetFilterMode"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SceneChangeDetect": {
+     "name": "sceneChangeDetect"
+    },
+    "Slices": {
+     "name": "slices"
+    },
+    "SlidingWindowMs": {
+     "name": "slidingWindowMs"
+    },
+    "SlidingWindowPeakBitrate": {
+     "name": "slidingWindowPeakBitrate"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "SpatialAdaptiveQuantization": {
+     "name": "spatialAdaptiveQuantization"
+    },
+    "Telecine": {
+     "name": "telecine"
+    },
+    "TemporalAdaptiveQuantization": {
+     "name": "temporalAdaptiveQuantization"
+    },
+    "TemporalIds": {
+     "name": "temporalIds"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TilePadding": {
+     "name": "tilePadding"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    },
+    "Tiles": {
+     "name": "tiles"
+    },
+    "TreeBlockSize": {
+     "name": "treeBlockSize"
+    },
+    "UnregisteredSeiTimecode": {
+     "name": "unregisteredSeiTimecode"
+    },
+    "WriteMp4PackagingType": {
+     "name": "writeMp4PackagingType"
+    }
+   }
+  },
+  "Hdr10Metadata": {
+   "members": {
+    "BluePrimaryX": {
+     "name": "bluePrimaryX"
+    },
+    "BluePrimaryY": {
+     "name": "bluePrimaryY"
+    },
+    "GreenPrimaryX": {
+     "name": "greenPrimaryX"
+    },
+    "GreenPrimaryY": {
+     "name": "greenPrimaryY"
+    },
+    "MaxContentLightLevel": {
+     "name": "maxContentLightLevel"
+    },
+    "MaxFrameAverageLightLevel": {
+     "name": "maxFrameAverageLightLevel"
+    },
+    "MaxLuminance": {
+     "name": "maxLuminance"
+    },
+    "MinLuminance": {
+     "name": "minLuminance"
+    },
+    "RedPrimaryX": {
+     "name": "redPrimaryX"
+    },
+    "RedPrimaryY": {
+     "name": "redPrimaryY"
+    },
+    "WhitePointX": {
+     "name": "whitePointX"
+    },
+    "WhitePointY": {
+     "name": "whitePointY"
+    }
+   }
+  },
+  "Hdr10Plus": {
+   "members": {
+    "MasteringMonitorNits": {
+     "name": "masteringMonitorNits"
+    },
+    "TargetMonitorNits": {
+     "name": "targetMonitorNits"
+    }
+   }
+  },
+  "HdrMetadata": {
+   "members": {
+    "ContentLightLevel": {
+     "name": "contentLightLevel",
+     "shape": "ContentLightLevel"
+    },
+    "MasteringDisplayColorVolume": {
+     "name": "masteringDisplayColorVolume",
+     "shape": "MasteringDisplayColorVolume"
+    }
+   }
+  },
+  "HlsAdditionalManifest": {
+   "members": {
+    "ManifestNameModifier": {
+     "name": "manifestNameModifier"
+    },
+    "SelectedOutputs": {
+     "name": "selectedOutputs",
+     "shape": "__listOf__stringMin1"
+    }
+   }
+  },
+  "HlsCaptionLanguageMapping": {
+   "members": {
+    "CaptionChannel": {
+     "name": "captionChannel"
+    },
+    "CustomLanguageCode": {
+     "name": "customLanguageCode"
+    },
+    "LanguageCode": {
+     "name": "languageCode"
+    },
+    "LanguageDescription": {
+     "name": "languageDescription"
+    }
+   }
+  },
+  "HlsEncryptionSettings": {
+   "members": {
+    "ConstantInitializationVector": {
+     "name": "constantInitializationVector"
+    },
+    "EncryptionMethod": {
+     "name": "encryptionMethod"
+    },
+    "InitializationVectorInManifest": {
+     "name": "initializationVectorInManifest"
+    },
+    "OfflineEncrypted": {
+     "name": "offlineEncrypted"
+    },
+    "SpekeKeyProvider": {
+     "name": "spekeKeyProvider",
+     "shape": "SpekeKeyProvider"
+    },
+    "StaticKeyProvider": {
+     "name": "staticKeyProvider",
+     "shape": "StaticKeyProvider"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "HlsGroupSettings": {
+   "members": {
+    "AdMarkers": {
+     "name": "adMarkers",
+     "shape": "__listOfHlsAdMarkers"
+    },
+    "AdditionalManifests": {
+     "name": "additionalManifests",
+     "shape": "__listOfHlsAdditionalManifest"
+    },
+    "AudioOnlyHeader": {
+     "name": "audioOnlyHeader"
+    },
+    "BaseUrl": {
+     "name": "baseUrl"
+    },
+    "CaptionLanguageMappings": {
+     "name": "captionLanguageMappings",
+     "shape": "__listOfHlsCaptionLanguageMapping"
+    },
+    "CaptionLanguageSetting": {
+     "name": "captionLanguageSetting"
+    },
+    "CaptionSegmentLengthControl": {
+     "name": "captionSegmentLengthControl"
+    },
+    "ClientCache": {
+     "name": "clientCache"
+    },
+    "CodecSpecification": {
+     "name": "codecSpecification"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "DestinationSettings"
+    },
+    "DirectoryStructure": {
+     "name": "directoryStructure"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "HlsEncryptionSettings"
+    },
+    "ImageBasedTrickPlay": {
+     "name": "imageBasedTrickPlay"
+    },
+    "ImageBasedTrickPlaySettings": {
+     "name": "imageBasedTrickPlaySettings",
+     "shape": "HlsImageBasedTrickPlaySettings"
+    },
+    "ImageBasedTrickPlayVariants": {
+     "name": "imageBasedTrickPlayVariants",
+     "shape": "__listOfHlsImageBasedTrickPlayVariant"
+    },
+    "ManifestCompression": {
+     "name": "manifestCompression"
+    },
+    "ManifestDurationFormat": {
+     "name": "manifestDurationFormat"
+    },
+    "MinFinalSegmentLength": {
+     "name": "minFinalSegmentLength"
+    },
+    "MinSegmentLength": {
+     "name": "minSegmentLength"
+    },
+    "OutputSelection": {
+     "name": "outputSelection"
+    },
+    "ProgramDateTime": {
+     "name": "programDateTime"
+    },
+    "ProgramDateTimePeriod": {
+     "name": "programDateTimePeriod"
+    },
+    "ProgressiveWriteHlsManifest": {
+     "name": "progressiveWriteHlsManifest"
+    },
+    "SegmentControl": {
+     "name": "segmentControl"
+    },
+    "SegmentLength": {
+     "name": "segmentLength"
+    },
+    "SegmentLengthControl": {
+     "name": "segmentLengthControl"
+    },
+    "SegmentsPerSubdirectory": {
+     "name": "segmentsPerSubdirectory"
+    },
+    "StreamInfResolution": {
+     "name": "streamInfResolution"
+    },
+    "TargetDurationCompatibilityMode": {
+     "name": "targetDurationCompatibilityMode"
+    },
+    "TimedMetadataId3Frame": {
+     "name": "timedMetadataId3Frame"
+    },
+    "TimedMetadataId3Period": {
+     "name": "timedMetadataId3Period"
+    },
+    "TimestampDeltaMilliseconds": {
+     "name": "timestampDeltaMilliseconds"
+    }
+   }
+  },
+  "HlsImageBasedTrickPlaySettings": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "HlsImageBasedTrickPlayVariant": {
+   "members": {
+    "IntervalCadence": {
+     "name": "intervalCadence"
+    },
+    "ThumbnailHeight": {
+     "name": "thumbnailHeight"
+    },
+    "ThumbnailInterval": {
+     "name": "thumbnailInterval"
+    },
+    "ThumbnailWidth": {
+     "name": "thumbnailWidth"
+    },
+    "TileHeight": {
+     "name": "tileHeight"
+    },
+    "TileWidth": {
+     "name": "tileWidth"
+    }
+   }
+  },
+  "HlsRenditionGroupSettings": {
+   "members": {
+    "RenditionGroupId": {
+     "name": "renditionGroupId"
+    },
+    "RenditionLanguageCode": {
+     "name": "renditionLanguageCode"
+    },
+    "RenditionName": {
+     "name": "renditionName"
+    }
+   }
+  },
+  "HlsSettings": {
+   "members": {
+    "AudioGroupId": {
+     "name": "audioGroupId"
+    },
+    "AudioOnlyContainer": {
+     "name": "audioOnlyContainer"
+    },
+    "AudioRenditionSets": {
+     "name": "audioRenditionSets"
+    },
+    "AudioTrackType": {
+     "name": "audioTrackType"
+    },
+    "DescriptiveVideoServiceFlag": {
+     "name": "descriptiveVideoServiceFlag"
+    },
+    "IFrameOnlyManifest": {
+     "name": "iFrameOnlyManifest"
+    },
+    "SegmentModifier": {
+     "name": "segmentModifier"
+    }
+   }
+  },
+  "HopDestination": {
+   "members": {
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "WaitMinutes": {
+     "name": "waitMinutes"
+    }
+   }
+  },
+  "Id3Insertion": {
+   "members": {
+    "Id3": {
+     "name": "id3"
+    },
+    "Timecode": {
+     "name": "timecode"
+    }
+   }
+  },
+  "ImageInserter": {
+   "members": {
+    "InsertableImages": {
+     "name": "insertableImages",
+     "shape": "__listOfInsertableImage"
+    },
+    "SdrReferenceWhiteLevel": {
+     "name": "sdrReferenceWhiteLevel"
+    }
+   }
+  },
+  "ImscDestinationSettings": {
+   "members": {
+    "Accessibility": {
+     "name": "accessibility"
+    },
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    }
+   }
+  },
+  "Input": {
+   "members": {
+    "AdvancedInputFilter": {
+     "name": "advancedInputFilter"
+    },
+    "AdvancedInputFilterSettings": {
+     "name": "advancedInputFilterSettings",
+     "shape": "AdvancedInputFilterSettings"
+    },
+    "AudioSelectorGroups": {
+     "name": "audioSelectorGroups",
+     "shape": "__mapOfAudioSelectorGroup"
+    },
+    "AudioSelectors": {
+     "name": "audioSelectors",
+     "shape": "__mapOfAudioSelector"
+    },
+    "CaptionSelectors": {
+     "name": "captionSelectors",
+     "shape": "__mapOfCaptionSelector"
+    },
+    "Crop": {
+     "name": "crop",
+     "shape": "Rectangle"
+    },
+    "DeblockFilter": {
+     "name": "deblockFilter"
+    },
+    "DecryptionSettings": {
+     "name": "decryptionSettings",
+     "shape": "InputDecryptionSettings"
+    },
+    "DenoiseFilter": {
+     "name": "denoiseFilter"
+    },
+    "DolbyVisionMetadataXml": {
+     "name": "dolbyVisionMetadataXml"
+    },
+    "DynamicAudioSelectors": {
+     "name": "dynamicAudioSelectors",
+     "shape": "__mapOfDynamicAudioSelector"
+    },
+    "FileInput": {
+     "name": "fileInput"
+    },
+    "FilterEnable": {
+     "name": "filterEnable"
+    },
+    "FilterStrength": {
+     "name": "filterStrength"
+    },
+    "ImageInserter": {
+     "name": "imageInserter",
+     "shape": "ImageInserter"
+    },
+    "InputClippings": {
+     "name": "inputClippings",
+     "shape": "__listOfInputClipping"
+    },
+    "InputScanType": {
+     "name": "inputScanType"
+    },
+    "MultiViewSettings": {
+     "name": "multiViewSettings",
+     "shape": "__listOfMultiViewSettings"
+    },
+    "Position": {
+     "name": "position",
+     "shape": "Rectangle"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "PsiControl": {
+     "name": "psiControl"
+    },
+    "SupplementalImps": {
+     "name": "supplementalImps",
+     "shape": "__listOf__stringPatternS3ASSETMAPXml"
+    },
+    "TamsSettings": {
+     "name": "tamsSettings",
+     "shape": "InputTamsSettings"
+    },
+    "TimecodeSource": {
+     "name": "timecodeSource"
+    },
+    "TimecodeStart": {
+     "name": "timecodeStart"
+    },
+    "VideoGenerator": {
+     "name": "videoGenerator",
+     "shape": "InputVideoGenerator"
+    },
+    "VideoOverlays": {
+     "name": "videoOverlays",
+     "shape": "__listOfVideoOverlay"
+    },
+    "VideoSelector": {
+     "name": "videoSelector",
+     "shape": "VideoSelector"
+    }
+   }
+  },
+  "InputClipping": {
+   "members": {
+    "EndTimecode": {
+     "name": "endTimecode"
+    },
+    "StartTimecode": {
+     "name": "startTimecode"
+    }
+   }
+  },
+  "InputDecryptionSettings": {
+   "members": {
+    "DecryptionMode": {
+     "name": "decryptionMode"
+    },
+    "EncryptedDecryptionKey": {
+     "name": "encryptedDecryptionKey"
+    },
+    "InitializationVector": {
+     "name": "initializationVector"
+    },
+    "KmsKeyRegion": {
+     "name": "kmsKeyRegion"
+    }
+   }
+  },
+  "InputTamsSettings": {
+   "members": {
+    "AuthConnectionArn": {
+     "name": "authConnectionArn"
+    },
+    "GapHandling": {
+     "name": "gapHandling"
+    },
+    "SourceId": {
+     "name": "sourceId"
+    },
+    "Timerange": {
+     "name": "timerange"
+    }
+   }
+  },
+  "InputTemplate": {
+   "members": {
+    "AdvancedInputFilter": {
+     "name": "advancedInputFilter"
+    },
+    "AdvancedInputFilterSettings": {
+     "name": "advancedInputFilterSettings",
+     "shape": "AdvancedInputFilterSettings"
+    },
+    "AudioSelectorGroups": {
+     "name": "audioSelectorGroups",
+     "shape": "__mapOfAudioSelectorGroup"
+    },
+    "AudioSelectors": {
+     "name": "audioSelectors",
+     "shape": "__mapOfAudioSelector"
+    },
+    "CaptionSelectors": {
+     "name": "captionSelectors",
+     "shape": "__mapOfCaptionSelector"
+    },
+    "Crop": {
+     "name": "crop",
+     "shape": "Rectangle"
+    },
+    "DeblockFilter": {
+     "name": "deblockFilter"
+    },
+    "DenoiseFilter": {
+     "name": "denoiseFilter"
+    },
+    "DolbyVisionMetadataXml": {
+     "name": "dolbyVisionMetadataXml"
+    },
+    "DynamicAudioSelectors": {
+     "name": "dynamicAudioSelectors",
+     "shape": "__mapOfDynamicAudioSelector"
+    },
+    "FilterEnable": {
+     "name": "filterEnable"
+    },
+    "FilterStrength": {
+     "name": "filterStrength"
+    },
+    "ImageInserter": {
+     "name": "imageInserter",
+     "shape": "ImageInserter"
+    },
+    "InputClippings": {
+     "name": "inputClippings",
+     "shape": "__listOfInputClipping"
+    },
+    "InputScanType": {
+     "name": "inputScanType"
+    },
+    "MultiViewSettings": {
+     "name": "multiViewSettings",
+     "shape": "__listOfMultiViewSettings"
+    },
+    "Position": {
+     "name": "position",
+     "shape": "Rectangle"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "PsiControl": {
+     "name": "psiControl"
+    },
+    "TimecodeSource": {
+     "name": "timecodeSource"
+    },
+    "TimecodeStart": {
+     "name": "timecodeStart"
+    },
+    "VideoOverlays": {
+     "name": "videoOverlays",
+     "shape": "__listOfVideoOverlay"
+    },
+    "VideoSelector": {
+     "name": "videoSelector",
+     "shape": "VideoSelector"
+    }
+   }
+  },
+  "InputVideoGenerator": {
+   "members": {
+    "Channels": {
+     "name": "channels"
+    },
+    "Duration": {
+     "name": "duration"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "ImageInput": {
+     "name": "imageInput"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "InsertableImage": {
+   "members": {
+    "Duration": {
+     "name": "duration"
+    },
+    "FadeIn": {
+     "name": "fadeIn"
+    },
+    "FadeOut": {
+     "name": "fadeOut"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "ImageInserterInput": {
+     "name": "imageInserterInput"
+    },
+    "ImageX": {
+     "name": "imageX"
+    },
+    "ImageY": {
+     "name": "imageY"
+    },
+    "Layer": {
+     "name": "layer"
+    },
+    "Opacity": {
+     "name": "opacity"
+    },
+    "StartTime": {
+     "name": "startTime"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "InternalServerErrorException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "Job": {
+   "members": {
+    "AccelerationSettings": {
+     "name": "accelerationSettings",
+     "shape": "AccelerationSettings"
+    },
+    "AccelerationStatus": {
+     "name": "accelerationStatus"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "BillingTagsSource": {
+     "name": "billingTagsSource"
+    },
+    "ClientRequestToken": {
+     "name": "clientRequestToken"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "CurrentPhase": {
+     "name": "currentPhase"
+    },
+    "ElementalInferenceConfiguration": {
+     "name": "elementalInferenceConfiguration",
+     "shape": "ElementalInferenceConfiguration"
+    },
+    "ErrorCode": {
+     "name": "errorCode"
+    },
+    "ErrorMessage": {
+     "name": "errorMessage"
+    },
+    "HopDestinations": {
+     "name": "hopDestinations",
+     "shape": "__listOfHopDestination"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "JobEngineVersionRequested": {
+     "name": "jobEngineVersionRequested"
+    },
+    "JobEngineVersionUsed": {
+     "name": "jobEngineVersionUsed"
+    },
+    "JobPercentComplete": {
+     "name": "jobPercentComplete"
+    },
+    "JobTemplate": {
+     "name": "jobTemplate"
+    },
+    "LastShareDetails": {
+     "name": "lastShareDetails"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "JobMessages"
+    },
+    "OutputGroupDetails": {
+     "name": "outputGroupDetails",
+     "shape": "__listOfOutputGroupDetail"
+    },
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "QueueTransitions": {
+     "name": "queueTransitions",
+     "shape": "__listOfQueueTransition"
+    },
+    "RetryCount": {
+     "name": "retryCount"
+    },
+    "Role": {
+     "name": "role"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "JobSettings"
+    },
+    "ShareStatus": {
+     "name": "shareStatus"
+    },
+    "SimulateReservedQueue": {
+     "name": "simulateReservedQueue"
+    },
+    "Status": {
+     "name": "status"
+    },
+    "StatusUpdateInterval": {
+     "name": "statusUpdateInterval"
+    },
+    "Timing": {
+     "name": "timing",
+     "shape": "Timing"
+    },
+    "UserMetadata": {
+     "name": "userMetadata",
+     "shape": "__mapOf__string"
+    },
+    "Warnings": {
+     "name": "warnings",
+     "shape": "__listOfWarningGroup"
+    }
+   }
+  },
+  "JobEngineVersion": {
+   "members": {
+    "ExpirationDate": {
+     "name": "expirationDate"
+    },
+    "Version": {
+     "name": "version"
+    }
+   }
+  },
+  "JobMessages": {
+   "members": {
+    "Info": {
+     "name": "info",
+     "shape": "__listOf__string"
+    },
+    "Warning": {
+     "name": "warning",
+     "shape": "__listOf__string"
+    }
+   }
+  },
+  "JobSettings": {
+   "members": {
+    "AdAvailOffset": {
+     "name": "adAvailOffset"
+    },
+    "AvailBlanking": {
+     "name": "availBlanking",
+     "shape": "AvailBlanking"
+    },
+    "ColorConversion3DLUTSettings": {
+     "name": "colorConversion3DLUTSettings",
+     "shape": "__listOfColorConversion3DLUTSetting"
+    },
+    "Esam": {
+     "name": "esam",
+     "shape": "EsamSettings"
+    },
+    "ExtendedDataServices": {
+     "name": "extendedDataServices",
+     "shape": "ExtendedDataServices"
+    },
+    "FollowSource": {
+     "name": "followSource"
+    },
+    "Inputs": {
+     "name": "inputs",
+     "shape": "__listOfInput"
+    },
+    "KantarWatermark": {
+     "name": "kantarWatermark",
+     "shape": "KantarWatermarkSettings"
+    },
+    "MotionImageInserter": {
+     "name": "motionImageInserter",
+     "shape": "MotionImageInserter"
+    },
+    "MotionImageInserters": {
+     "name": "motionImageInserters",
+     "shape": "__listOfMotionImageInserter"
+    },
+    "NielsenConfiguration": {
+     "name": "nielsenConfiguration",
+     "shape": "NielsenConfiguration"
+    },
+    "NielsenNonLinearWatermark": {
+     "name": "nielsenNonLinearWatermark",
+     "shape": "NielsenNonLinearWatermarkSettings"
+    },
+    "OutputGroups": {
+     "name": "outputGroups",
+     "shape": "__listOfOutputGroup"
+    },
+    "TimecodeConfig": {
+     "name": "timecodeConfig",
+     "shape": "TimecodeConfig"
+    },
+    "TimedMetadataInsertion": {
+     "name": "timedMetadataInsertion",
+     "shape": "TimedMetadataInsertion"
+    }
+   }
+  },
+  "JobTemplate": {
+   "members": {
+    "AccelerationSettings": {
+     "name": "accelerationSettings",
+     "shape": "AccelerationSettings"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Category": {
+     "name": "category"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "HopDestinations": {
+     "name": "hopDestinations",
+     "shape": "__listOfHopDestination"
+    },
+    "LastUpdated": {
+     "name": "lastUpdated"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "JobTemplateSettings"
+    },
+    "StatusUpdateInterval": {
+     "name": "statusUpdateInterval"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "JobTemplateSettings": {
+   "members": {
+    "AdAvailOffset": {
+     "name": "adAvailOffset"
+    },
+    "AvailBlanking": {
+     "name": "availBlanking",
+     "shape": "AvailBlanking"
+    },
+    "ColorConversion3DLUTSettings": {
+     "name": "colorConversion3DLUTSettings",
+     "shape": "__listOfColorConversion3DLUTSetting"
+    },
+    "Esam": {
+     "name": "esam",
+     "shape": "EsamSettings"
+    },
+    "ExtendedDataServices": {
+     "name": "extendedDataServices",
+     "shape": "ExtendedDataServices"
+    },
+    "FollowSource": {
+     "name": "followSource"
+    },
+    "Inputs": {
+     "name": "inputs",
+     "shape": "__listOfInputTemplate"
+    },
+    "KantarWatermark": {
+     "name": "kantarWatermark",
+     "shape": "KantarWatermarkSettings"
+    },
+    "MotionImageInserter": {
+     "name": "motionImageInserter",
+     "shape": "MotionImageInserter"
+    },
+    "MotionImageInserters": {
+     "name": "motionImageInserters",
+     "shape": "__listOfMotionImageInserter"
+    },
+    "NielsenConfiguration": {
+     "name": "nielsenConfiguration",
+     "shape": "NielsenConfiguration"
+    },
+    "NielsenNonLinearWatermark": {
+     "name": "nielsenNonLinearWatermark",
+     "shape": "NielsenNonLinearWatermarkSettings"
+    },
+    "OutputGroups": {
+     "name": "outputGroups",
+     "shape": "__listOfOutputGroup"
+    },
+    "TimecodeConfig": {
+     "name": "timecodeConfig",
+     "shape": "TimecodeConfig"
+    },
+    "TimedMetadataInsertion": {
+     "name": "timedMetadataInsertion",
+     "shape": "TimedMetadataInsertion"
+    }
+   }
+  },
+  "JobsQueryFilter": {
+   "members": {
+    "Key": {
+     "name": "key"
+    },
+    "Values": {
+     "name": "values",
+     "shape": "__listOf__stringMax100"
+    }
+   }
+  },
+  "KantarWatermarkSettings": {
+   "members": {
+    "ChannelName": {
+     "name": "channelName"
+    },
+    "ContentReference": {
+     "name": "contentReference"
+    },
+    "CredentialsSecretName": {
+     "name": "credentialsSecretName"
+    },
+    "FileOffset": {
+     "name": "fileOffset"
+    },
+    "KantarLicenseId": {
+     "name": "kantarLicenseId"
+    },
+    "KantarServerUrl": {
+     "name": "kantarServerUrl"
+    },
+    "LogDestination": {
+     "name": "logDestination"
+    },
+    "Metadata3": {
+     "name": "metadata3"
+    },
+    "Metadata4": {
+     "name": "metadata4"
+    },
+    "Metadata5": {
+     "name": "metadata5"
+    },
+    "Metadata6": {
+     "name": "metadata6"
+    },
+    "Metadata7": {
+     "name": "metadata7"
+    },
+    "Metadata8": {
+     "name": "metadata8"
+    }
+   }
+  },
+  "ListJobTemplatesRequest": {
+   "members": {}
+  },
+  "ListJobTemplatesResponse": {
+   "members": {
+    "JobTemplates": {
+     "name": "jobTemplates",
+     "shape": "__listOfJobTemplate"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListJobsRequest": {
+   "members": {}
+  },
+  "ListJobsResponse": {
+   "members": {
+    "Jobs": {
+     "name": "jobs",
+     "shape": "__listOfJob"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListPresetsRequest": {
+   "members": {}
+  },
+  "ListPresetsResponse": {
+   "members": {
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Presets": {
+     "name": "presets",
+     "shape": "__listOfPreset"
+    }
+   }
+  },
+  "ListQueuesRequest": {
+   "members": {}
+  },
+  "ListQueuesResponse": {
+   "members": {
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Queues": {
+     "name": "queues",
+     "shape": "__listOfQueue"
+    },
+    "TotalConcurrentJobs": {
+     "name": "totalConcurrentJobs"
+    },
+    "UnallocatedConcurrentJobs": {
+     "name": "unallocatedConcurrentJobs"
+    }
+   }
+  },
+  "ListTagsForResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForResourceResponse": {
+   "members": {
+    "ResourceTags": {
+     "name": "resourceTags",
+     "shape": "ResourceTags"
+    }
+   }
+  },
+  "ListVersionsRequest": {
+   "members": {}
+  },
+  "ListVersionsResponse": {
+   "members": {
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Versions": {
+     "name": "versions",
+     "shape": "__listOfJobEngineVersion"
+    }
+   }
+  },
+  "M2tsScte35Esam": {
+   "members": {
+    "Scte35EsamPid": {
+     "name": "scte35EsamPid"
+    }
+   }
+  },
+  "M2tsSettings": {
+   "members": {
+    "AudioBufferModel": {
+     "name": "audioBufferModel"
+    },
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "AudioFramesPerPes": {
+     "name": "audioFramesPerPes"
+    },
+    "AudioPids": {
+     "name": "audioPids",
+     "shape": "__listOf__integerMin32Max8182"
+    },
+    "AudioPtsOffsetDelta": {
+     "name": "audioPtsOffsetDelta"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "BufferModel": {
+     "name": "bufferModel"
+    },
+    "DataPTSControl": {
+     "name": "dataPTSControl"
+    },
+    "DvbNitSettings": {
+     "name": "dvbNitSettings",
+     "shape": "DvbNitSettings"
+    },
+    "DvbSdtSettings": {
+     "name": "dvbSdtSettings",
+     "shape": "DvbSdtSettings"
+    },
+    "DvbSubPids": {
+     "name": "dvbSubPids",
+     "shape": "__listOf__integerMin32Max8182"
+    },
+    "DvbTdtSettings": {
+     "name": "dvbTdtSettings",
+     "shape": "DvbTdtSettings"
+    },
+    "DvbTeletextPid": {
+     "name": "dvbTeletextPid"
+    },
+    "EbpAudioInterval": {
+     "name": "ebpAudioInterval"
+    },
+    "EbpPlacement": {
+     "name": "ebpPlacement"
+    },
+    "EsRateInPes": {
+     "name": "esRateInPes"
+    },
+    "ForceTsVideoEbpOrder": {
+     "name": "forceTsVideoEbpOrder"
+    },
+    "FragmentTime": {
+     "name": "fragmentTime"
+    },
+    "KlvMetadata": {
+     "name": "klvMetadata"
+    },
+    "MaxPcrInterval": {
+     "name": "maxPcrInterval"
+    },
+    "MinEbpInterval": {
+     "name": "minEbpInterval"
+    },
+    "NielsenId3": {
+     "name": "nielsenId3"
+    },
+    "NullPacketBitrate": {
+     "name": "nullPacketBitrate"
+    },
+    "PatInterval": {
+     "name": "patInterval"
+    },
+    "PcrControl": {
+     "name": "pcrControl"
+    },
+    "PcrPid": {
+     "name": "pcrPid"
+    },
+    "PmtInterval": {
+     "name": "pmtInterval"
+    },
+    "PmtPid": {
+     "name": "pmtPid"
+    },
+    "PreventBufferUnderflow": {
+     "name": "preventBufferUnderflow"
+    },
+    "PrivateMetadataPid": {
+     "name": "privateMetadataPid"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "PtsOffset": {
+     "name": "ptsOffset"
+    },
+    "PtsOffsetMode": {
+     "name": "ptsOffsetMode"
+    },
+    "RateMode": {
+     "name": "rateMode"
+    },
+    "Scte35Esam": {
+     "name": "scte35Esam",
+     "shape": "M2tsScte35Esam"
+    },
+    "Scte35Pid": {
+     "name": "scte35Pid"
+    },
+    "Scte35Source": {
+     "name": "scte35Source"
+    },
+    "SegmentationMarkers": {
+     "name": "segmentationMarkers"
+    },
+    "SegmentationStyle": {
+     "name": "segmentationStyle"
+    },
+    "SegmentationTime": {
+     "name": "segmentationTime"
+    },
+    "TimedMetadataPid": {
+     "name": "timedMetadataPid"
+    },
+    "TransportStreamId": {
+     "name": "transportStreamId"
+    },
+    "VideoPid": {
+     "name": "videoPid"
+    }
+   }
+  },
+  "M3u8Settings": {
+   "members": {
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "AudioFramesPerPes": {
+     "name": "audioFramesPerPes"
+    },
+    "AudioPids": {
+     "name": "audioPids",
+     "shape": "__listOf__integerMin32Max8182"
+    },
+    "AudioPtsOffsetDelta": {
+     "name": "audioPtsOffsetDelta"
+    },
+    "DataPTSControl": {
+     "name": "dataPTSControl"
+    },
+    "MaxPcrInterval": {
+     "name": "maxPcrInterval"
+    },
+    "NielsenId3": {
+     "name": "nielsenId3"
+    },
+    "PatInterval": {
+     "name": "patInterval"
+    },
+    "PcrControl": {
+     "name": "pcrControl"
+    },
+    "PcrPid": {
+     "name": "pcrPid"
+    },
+    "PmtInterval": {
+     "name": "pmtInterval"
+    },
+    "PmtPid": {
+     "name": "pmtPid"
+    },
+    "PrivateMetadataPid": {
+     "name": "privateMetadataPid"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "PtsOffset": {
+     "name": "ptsOffset"
+    },
+    "PtsOffsetMode": {
+     "name": "ptsOffsetMode"
+    },
+    "Scte35Pid": {
+     "name": "scte35Pid"
+    },
+    "Scte35Source": {
+     "name": "scte35Source"
+    },
+    "TimedMetadata": {
+     "name": "timedMetadata"
+    },
+    "TimedMetadataPid": {
+     "name": "timedMetadataPid"
+    },
+    "TransportStreamId": {
+     "name": "transportStreamId"
+    },
+    "VideoPid": {
+     "name": "videoPid"
+    }
+   }
+  },
+  "MasteringDisplayColorVolume": {
+   "members": {
+    "BluePrimaryX": {
+     "name": "bluePrimaryX"
+    },
+    "BluePrimaryY": {
+     "name": "bluePrimaryY"
+    },
+    "GreenPrimaryX": {
+     "name": "greenPrimaryX"
+    },
+    "GreenPrimaryY": {
+     "name": "greenPrimaryY"
+    },
+    "MaxLuminance": {
+     "name": "maxLuminance"
+    },
+    "MinLuminance": {
+     "name": "minLuminance"
+    },
+    "RedPrimaryX": {
+     "name": "redPrimaryX"
+    },
+    "RedPrimaryY": {
+     "name": "redPrimaryY"
+    },
+    "WhitePointX": {
+     "name": "whitePointX"
+    },
+    "WhitePointY": {
+     "name": "whitePointY"
+    }
+   }
+  },
+  "Metadata": {
+   "members": {
+    "ETag": {
+     "name": "eTag"
+    },
+    "FileSize": {
+     "name": "fileSize"
+    },
+    "LastModified": {
+     "name": "lastModified"
+    },
+    "MimeType": {
+     "name": "mimeType"
+    }
+   }
+  },
+  "MinBottomRenditionSize": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "MinTopRenditionSize": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "MotionImageInserter": {
+   "members": {
+    "Framerate": {
+     "name": "framerate",
+     "shape": "MotionImageInsertionFramerate"
+    },
+    "Input": {
+     "name": "input"
+    },
+    "InsertionMode": {
+     "name": "insertionMode"
+    },
+    "Offset": {
+     "name": "offset",
+     "shape": "MotionImageInsertionOffset"
+    },
+    "Playback": {
+     "name": "playback"
+    },
+    "StartTime": {
+     "name": "startTime"
+    }
+   }
+  },
+  "MotionImageInsertionFramerate": {
+   "members": {
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    }
+   }
+  },
+  "MotionImageInsertionOffset": {
+   "members": {
+    "ImageX": {
+     "name": "imageX"
+    },
+    "ImageY": {
+     "name": "imageY"
+    }
+   }
+  },
+  "MovSettings": {
+   "members": {
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "ClapAtom": {
+     "name": "clapAtom"
+    },
+    "CslgAtom": {
+     "name": "cslgAtom"
+    },
+    "Mpeg2FourCCControl": {
+     "name": "mpeg2FourCCControl"
+    },
+    "PaddingControl": {
+     "name": "paddingControl"
+    },
+    "Reference": {
+     "name": "reference"
+    }
+   }
+  },
+  "Mp2Settings": {
+   "members": {
+    "AudioDescriptionMix": {
+     "name": "audioDescriptionMix"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "Mp3Settings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "VbrQuality": {
+     "name": "vbrQuality"
+    }
+   }
+  },
+  "Mp4Settings": {
+   "members": {
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "C2paManifest": {
+     "name": "c2paManifest"
+    },
+    "CertificateSecret": {
+     "name": "certificateSecret"
+    },
+    "CslgAtom": {
+     "name": "cslgAtom"
+    },
+    "CttsVersion": {
+     "name": "cttsVersion"
+    },
+    "FreeSpaceBox": {
+     "name": "freeSpaceBox"
+    },
+    "MoovPlacement": {
+     "name": "moovPlacement"
+    },
+    "Mp4MajorBrand": {
+     "name": "mp4MajorBrand"
+    },
+    "SigningKmsKey": {
+     "name": "signingKmsKey"
+    }
+   }
+  },
+  "MpdSettings": {
+   "members": {
+    "AccessibilityCaptionHints": {
+     "name": "accessibilityCaptionHints"
+    },
+    "AudioDuration": {
+     "name": "audioDuration"
+    },
+    "C2paManifest": {
+     "name": "c2paManifest"
+    },
+    "CaptionContainerType": {
+     "name": "captionContainerType"
+    },
+    "CertificateSecret": {
+     "name": "certificateSecret"
+    },
+    "KlvMetadata": {
+     "name": "klvMetadata"
+    },
+    "ManifestMetadataSignaling": {
+     "name": "manifestMetadataSignaling"
+    },
+    "Scte35Esam": {
+     "name": "scte35Esam"
+    },
+    "Scte35Source": {
+     "name": "scte35Source"
+    },
+    "SigningKmsKey": {
+     "name": "signingKmsKey"
+    },
+    "TimedMetadata": {
+     "name": "timedMetadata"
+    },
+    "TimedMetadataBoxVersion": {
+     "name": "timedMetadataBoxVersion"
+    },
+    "TimedMetadataSchemeIdUri": {
+     "name": "timedMetadataSchemeIdUri"
+    },
+    "TimedMetadataValue": {
+     "name": "timedMetadataValue"
+    }
+   }
+  },
+  "Mpeg2Settings": {
+   "members": {
+    "AdaptiveQuantization": {
+     "name": "adaptiveQuantization"
+    },
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "CodecLevel": {
+     "name": "codecLevel"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "DynamicSubGop": {
+     "name": "dynamicSubGop"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopClosedCadence": {
+     "name": "gopClosedCadence"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "GopSizeUnits": {
+     "name": "gopSizeUnits"
+    },
+    "HrdBufferFinalFillPercentage": {
+     "name": "hrdBufferFinalFillPercentage"
+    },
+    "HrdBufferInitialFillPercentage": {
+     "name": "hrdBufferInitialFillPercentage"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "IntraDcPrecision": {
+     "name": "intraDcPrecision"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MinIInterval": {
+     "name": "minIInterval"
+    },
+    "NumberBFramesBetweenReferenceFrames": {
+     "name": "numberBFramesBetweenReferenceFrames"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SceneChangeDetect": {
+     "name": "sceneChangeDetect"
+    },
+    "SlidingWindowMs": {
+     "name": "slidingWindowMs"
+    },
+    "SlidingWindowPeakBitrate": {
+     "name": "slidingWindowPeakBitrate"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Softness": {
+     "name": "softness"
+    },
+    "SpatialAdaptiveQuantization": {
+     "name": "spatialAdaptiveQuantization"
+    },
+    "Syntax": {
+     "name": "syntax"
+    },
+    "Telecine": {
+     "name": "telecine"
+    },
+    "TemporalAdaptiveQuantization": {
+     "name": "temporalAdaptiveQuantization"
+    }
+   }
+  },
+  "MsSmoothAdditionalManifest": {
+   "members": {
+    "ManifestNameModifier": {
+     "name": "manifestNameModifier"
+    },
+    "SelectedOutputs": {
+     "name": "selectedOutputs",
+     "shape": "__listOf__stringMin1"
+    }
+   }
+  },
+  "MsSmoothEncryptionSettings": {
+   "members": {
+    "SpekeKeyProvider": {
+     "name": "spekeKeyProvider",
+     "shape": "SpekeKeyProvider"
+    }
+   }
+  },
+  "MsSmoothGroupSettings": {
+   "members": {
+    "AdditionalManifests": {
+     "name": "additionalManifests",
+     "shape": "__listOfMsSmoothAdditionalManifest"
+    },
+    "AudioDeduplication": {
+     "name": "audioDeduplication"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "DestinationSettings": {
+     "name": "destinationSettings",
+     "shape": "DestinationSettings"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "MsSmoothEncryptionSettings"
+    },
+    "FragmentLength": {
+     "name": "fragmentLength"
+    },
+    "FragmentLengthControl": {
+     "name": "fragmentLengthControl"
+    },
+    "ManifestEncoding": {
+     "name": "manifestEncoding"
+    }
+   }
+  },
+  "MultiViewInput": {
+   "members": {
+    "FileInput": {
+     "name": "fileInput"
+    }
+   }
+  },
+  "MultiViewSettings": {
+   "members": {
+    "Input": {
+     "name": "input",
+     "shape": "MultiViewInput"
+    }
+   }
+  },
+  "MxfSettings": {
+   "members": {
+    "AfdSignaling": {
+     "name": "afdSignaling"
+    },
+    "Profile": {
+     "name": "profile"
+    },
+    "UncompressedAudioWrapping": {
+     "name": "uncompressedAudioWrapping"
+    },
+    "XavcProfileSettings": {
+     "name": "xavcProfileSettings",
+     "shape": "MxfXavcProfileSettings"
+    }
+   }
+  },
+  "MxfXavcProfileSettings": {
+   "members": {
+    "DurationMode": {
+     "name": "durationMode"
+    },
+    "MaxAncDataSize": {
+     "name": "maxAncDataSize"
+    }
+   }
+  },
+  "NexGuardFileMarkerSettings": {
+   "members": {
+    "License": {
+     "name": "license"
+    },
+    "Payload": {
+     "name": "payload"
+    },
+    "Preset": {
+     "name": "preset"
+    },
+    "Strength": {
+     "name": "strength"
+    }
+   }
+  },
+  "NielsenConfiguration": {
+   "members": {
+    "BreakoutCode": {
+     "name": "breakoutCode"
+    },
+    "DistributorId": {
+     "name": "distributorId"
+    }
+   }
+  },
+  "NielsenNonLinearWatermarkSettings": {
+   "members": {
+    "ActiveWatermarkProcess": {
+     "name": "activeWatermarkProcess"
+    },
+    "AdiFilename": {
+     "name": "adiFilename"
+    },
+    "AssetId": {
+     "name": "assetId"
+    },
+    "AssetName": {
+     "name": "assetName"
+    },
+    "CbetSourceId": {
+     "name": "cbetSourceId"
+    },
+    "EpisodeId": {
+     "name": "episodeId"
+    },
+    "MetadataDestination": {
+     "name": "metadataDestination"
+    },
+    "SourceId": {
+     "name": "sourceId"
+    },
+    "SourceWatermarkStatus": {
+     "name": "sourceWatermarkStatus"
+    },
+    "TicServerUrl": {
+     "name": "ticServerUrl"
+    },
+    "UniqueTicPerAudioTrack": {
+     "name": "uniqueTicPerAudioTrack"
+    }
+   }
+  },
+  "NoiseReducer": {
+   "members": {
+    "Filter": {
+     "name": "filter"
+    },
+    "FilterSettings": {
+     "name": "filterSettings",
+     "shape": "NoiseReducerFilterSettings"
+    },
+    "SpatialFilterSettings": {
+     "name": "spatialFilterSettings",
+     "shape": "NoiseReducerSpatialFilterSettings"
+    },
+    "TemporalFilterSettings": {
+     "name": "temporalFilterSettings",
+     "shape": "NoiseReducerTemporalFilterSettings"
+    }
+   }
+  },
+  "NoiseReducerFilterSettings": {
+   "members": {
+    "Strength": {
+     "name": "strength"
+    }
+   }
+  },
+  "NoiseReducerSpatialFilterSettings": {
+   "members": {
+    "PostFilterSharpenStrength": {
+     "name": "postFilterSharpenStrength"
+    },
+    "Speed": {
+     "name": "speed"
+    },
+    "Strength": {
+     "name": "strength"
+    }
+   }
+  },
+  "NoiseReducerTemporalFilterSettings": {
+   "members": {
+    "AggressiveMode": {
+     "name": "aggressiveMode"
+    },
+    "PostTemporalSharpening": {
+     "name": "postTemporalSharpening"
+    },
+    "PostTemporalSharpeningStrength": {
+     "name": "postTemporalSharpeningStrength"
+    },
+    "Speed": {
+     "name": "speed"
+    },
+    "Strength": {
+     "name": "strength"
+    }
+   }
+  },
+  "NotFoundException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "OpusSettings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "Output": {
+   "members": {
+    "AudioDescriptions": {
+     "name": "audioDescriptions",
+     "shape": "__listOfAudioDescription"
+    },
+    "CaptionDescriptions": {
+     "name": "captionDescriptions",
+     "shape": "__listOfCaptionDescription"
+    },
+    "ContainerSettings": {
+     "name": "containerSettings",
+     "shape": "ContainerSettings"
+    },
+    "Extension": {
+     "name": "extension"
+    },
+    "NameModifier": {
+     "name": "nameModifier"
+    },
+    "OutputSettings": {
+     "name": "outputSettings",
+     "shape": "OutputSettings"
+    },
+    "Preset": {
+     "name": "preset"
+    },
+    "VideoDescription": {
+     "name": "videoDescription",
+     "shape": "VideoDescription"
+    }
+   }
+  },
+  "OutputChannelMapping": {
+   "members": {
+    "InputChannels": {
+     "name": "inputChannels",
+     "shape": "__listOf__integerMinNegative60Max6"
+    },
+    "InputChannelsFineTune": {
+     "name": "inputChannelsFineTune",
+     "shape": "__listOf__doubleMinNegative60Max6"
+    }
+   }
+  },
+  "OutputDetail": {
+   "members": {
+    "DurationInMs": {
+     "name": "durationInMs"
+    },
+    "VideoDetails": {
+     "name": "videoDetails",
+     "shape": "VideoDetail"
+    }
+   }
+  },
+  "OutputGroup": {
+   "members": {
+    "AutomatedEncodingSettings": {
+     "name": "automatedEncodingSettings",
+     "shape": "AutomatedEncodingSettings"
+    },
+    "CustomName": {
+     "name": "customName"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "OutputGroupSettings": {
+     "name": "outputGroupSettings",
+     "shape": "OutputGroupSettings"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfOutput"
+    }
+   }
+  },
+  "OutputGroupDetail": {
+   "members": {
+    "OutputDetails": {
+     "name": "outputDetails",
+     "shape": "__listOfOutputDetail"
+    }
+   }
+  },
+  "OutputGroupSettings": {
+   "members": {
+    "CmafGroupSettings": {
+     "name": "cmafGroupSettings",
+     "shape": "CmafGroupSettings"
+    },
+    "DashIsoGroupSettings": {
+     "name": "dashIsoGroupSettings",
+     "shape": "DashIsoGroupSettings"
+    },
+    "FileGroupSettings": {
+     "name": "fileGroupSettings",
+     "shape": "FileGroupSettings"
+    },
+    "HlsGroupSettings": {
+     "name": "hlsGroupSettings",
+     "shape": "HlsGroupSettings"
+    },
+    "MsSmoothGroupSettings": {
+     "name": "msSmoothGroupSettings",
+     "shape": "MsSmoothGroupSettings"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "OutputSettings": {
+   "members": {
+    "HlsSettings": {
+     "name": "hlsSettings",
+     "shape": "HlsSettings"
+    }
+   }
+  },
+  "PartnerWatermarking": {
+   "members": {
+    "NexguardFileMarkerSettings": {
+     "name": "nexguardFileMarkerSettings",
+     "shape": "NexGuardFileMarkerSettings"
+    }
+   }
+  },
+  "PassthroughSettings": {
+   "members": {
+    "FrameControl": {
+     "name": "frameControl"
+    },
+    "GopsPerSegment": {
+     "name": "gopsPerSegment"
+    },
+    "SegmentationMode": {
+     "name": "segmentationMode"
+    },
+    "VideoSelectorMode": {
+     "name": "videoSelectorMode"
+    }
+   }
+  },
+  "Policy": {
+   "members": {
+    "HttpInputs": {
+     "name": "httpInputs"
+    },
+    "HttpsInputs": {
+     "name": "httpsInputs"
+    },
+    "S3Inputs": {
+     "name": "s3Inputs"
+    }
+   }
+  },
+  "Preset": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Category": {
+     "name": "category"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "LastUpdated": {
+     "name": "lastUpdated"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "PresetSettings"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "PresetSettings": {
+   "members": {
+    "AudioDescriptions": {
+     "name": "audioDescriptions",
+     "shape": "__listOfAudioDescription"
+    },
+    "CaptionDescriptions": {
+     "name": "captionDescriptions",
+     "shape": "__listOfCaptionDescriptionPreset"
+    },
+    "ContainerSettings": {
+     "name": "containerSettings",
+     "shape": "ContainerSettings"
+    },
+    "VideoDescription": {
+     "name": "videoDescription",
+     "shape": "VideoDescription"
+    }
+   }
+  },
+  "ProbeInputFile": {
+   "members": {
+    "FileUrl": {
+     "name": "fileUrl"
+    }
+   }
+  },
+  "ProbeRequest": {
+   "members": {
+    "InputFiles": {
+     "name": "inputFiles",
+     "shape": "__listOfProbeInputFile"
+    }
+   }
+  },
+  "ProbeResponse": {
+   "members": {
+    "ProbeResults": {
+     "name": "probeResults",
+     "shape": "__listOfProbeResult"
+    }
+   }
+  },
+  "ProbeResult": {
+   "members": {
+    "Container": {
+     "name": "container",
+     "shape": "Container"
+    },
+    "Metadata": {
+     "name": "metadata",
+     "shape": "Metadata"
+    },
+    "TrackMappings": {
+     "name": "trackMappings",
+     "shape": "__listOfTrackMapping"
+    }
+   }
+  },
+  "ProresSettings": {
+   "members": {
+    "ChromaSampling": {
+     "name": "chromaSampling"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Telecine": {
+     "name": "telecine"
+    }
+   }
+  },
+  "PutPolicyRequest": {
+   "members": {
+    "Policy": {
+     "name": "policy",
+     "shape": "Policy"
+    }
+   }
+  },
+  "PutPolicyResponse": {
+   "members": {
+    "Policy": {
+     "name": "policy",
+     "shape": "Policy"
+    }
+   }
+  },
+  "Queue": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "ConcurrentJobs": {
+     "name": "concurrentJobs"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "LastUpdated": {
+     "name": "lastUpdated"
+    },
+    "MaximumConcurrentFeeds": {
+     "name": "maximumConcurrentFeeds"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "PricingPlan": {
+     "name": "pricingPlan"
+    },
+    "ProgressingJobsCount": {
+     "name": "progressingJobsCount"
+    },
+    "ReservationPlan": {
+     "name": "reservationPlan",
+     "shape": "ReservationPlan"
+    },
+    "ServiceOverrides": {
+     "name": "serviceOverrides",
+     "shape": "__listOfServiceOverride"
+    },
+    "Status": {
+     "name": "status"
+    },
+    "SubmittedJobsCount": {
+     "name": "submittedJobsCount"
+    },
+    "Type": {
+     "name": "type"
+    }
+   }
+  },
+  "QueueTransition": {
+   "members": {
+    "DestinationQueue": {
+     "name": "destinationQueue"
+    },
+    "SourceQueue": {
+     "name": "sourceQueue"
+    },
+    "Timestamp": {
+     "name": "timestamp"
+    }
+   }
+  },
+  "Rectangle": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Width": {
+     "name": "width"
+    },
+    "X": {
+     "name": "x"
+    },
+    "Y": {
+     "name": "y"
+    }
+   }
+  },
+  "RemixSettings": {
+   "members": {
+    "AudioDescriptionAudioChannel": {
+     "name": "audioDescriptionAudioChannel"
+    },
+    "AudioDescriptionDataChannel": {
+     "name": "audioDescriptionDataChannel"
+    },
+    "ChannelMapping": {
+     "name": "channelMapping",
+     "shape": "ChannelMapping"
+    },
+    "ChannelsIn": {
+     "name": "channelsIn"
+    },
+    "ChannelsOut": {
+     "name": "channelsOut"
+    }
+   }
+  },
+  "ReservationPlan": {
+   "members": {
+    "Commitment": {
+     "name": "commitment"
+    },
+    "ExpiresAt": {
+     "name": "expiresAt"
+    },
+    "PurchasedAt": {
+     "name": "purchasedAt"
+    },
+    "RenewalType": {
+     "name": "renewalType"
+    },
+    "ReservedSlots": {
+     "name": "reservedSlots"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "ReservationPlanSettings": {
+   "members": {
+    "Commitment": {
+     "name": "commitment"
+    },
+    "RenewalType": {
+     "name": "renewalType"
+    },
+    "ReservedSlots": {
+     "name": "reservedSlots"
+    }
+   }
+  },
+  "ResourceTags": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "S3DestinationAccessControl": {
+   "members": {
+    "CannedAcl": {
+     "name": "cannedAcl"
+    }
+   }
+  },
+  "S3DestinationSettings": {
+   "members": {
+    "AccessControl": {
+     "name": "accessControl",
+     "shape": "S3DestinationAccessControl"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "S3EncryptionSettings"
+    },
+    "StorageClass": {
+     "name": "storageClass"
+    }
+   }
+  },
+  "S3EncryptionSettings": {
+   "members": {
+    "EncryptionType": {
+     "name": "encryptionType"
+    },
+    "KmsEncryptionContext": {
+     "name": "kmsEncryptionContext"
+    },
+    "KmsKeyArn": {
+     "name": "kmsKeyArn"
+    }
+   }
+  },
+  "SccDestinationSettings": {
+   "members": {
+    "Framerate": {
+     "name": "framerate"
+    }
+   }
+  },
+  "SearchJobsRequest": {
+   "members": {}
+  },
+  "SearchJobsResponse": {
+   "members": {
+    "Jobs": {
+     "name": "jobs",
+     "shape": "__listOfJob"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ServiceOverride": {
+   "members": {
+    "Message": {
+     "name": "message"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "OverrideValue": {
+     "name": "overrideValue"
+    },
+    "Value": {
+     "name": "value"
+    }
+   }
+  },
+  "ServiceQuotaExceededException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "SpekeKeyProvider": {
+   "members": {
+    "CertificateArn": {
+     "name": "certificateArn"
+    },
+    "EncryptionContractConfiguration": {
+     "name": "encryptionContractConfiguration",
+     "shape": "EncryptionContractConfiguration"
+    },
+    "ResourceId": {
+     "name": "resourceId"
+    },
+    "SystemIds": {
+     "name": "systemIds",
+     "shape": "__listOf__stringPattern09aFAF809aFAF409aFAF409aFAF409aFAF12"
+    },
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "SpekeKeyProviderCmaf": {
+   "members": {
+    "CertificateArn": {
+     "name": "certificateArn"
+    },
+    "DashSignaledSystemIds": {
+     "name": "dashSignaledSystemIds",
+     "shape": "__listOf__stringMin36Max36Pattern09aFAF809aFAF409aFAF409aFAF409aFAF12"
+    },
+    "EncryptionContractConfiguration": {
+     "name": "encryptionContractConfiguration",
+     "shape": "EncryptionContractConfiguration"
+    },
+    "HlsSignaledSystemIds": {
+     "name": "hlsSignaledSystemIds",
+     "shape": "__listOf__stringMin36Max36Pattern09aFAF809aFAF409aFAF409aFAF409aFAF12"
+    },
+    "ResourceId": {
+     "name": "resourceId"
+    },
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "SrtDestinationSettings": {
+   "members": {
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    }
+   }
+  },
+  "StartJobsQueryRequest": {
+   "members": {
+    "FilterList": {
+     "name": "filterList",
+     "shape": "__listOfJobsQueryFilter"
+    },
+    "MaxResults": {
+     "name": "maxResults"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Order": {
+     "name": "order"
+    }
+   }
+  },
+  "StartJobsQueryResponse": {
+   "members": {
+    "Id": {
+     "name": "id"
+    }
+   }
+  },
+  "StaticKeyProvider": {
+   "members": {
+    "KeyFormat": {
+     "name": "keyFormat"
+    },
+    "KeyFormatVersions": {
+     "name": "keyFormatVersions"
+    },
+    "StaticKeyValue": {
+     "name": "staticKeyValue"
+    },
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "TagResourceRequest": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "TagResourceResponse": {
+   "members": {}
+  },
+  "TeletextDestinationSettings": {
+   "members": {
+    "PageNumber": {
+     "name": "pageNumber"
+    },
+    "PageTypes": {
+     "name": "pageTypes",
+     "shape": "__listOfTeletextPageType"
+    }
+   }
+  },
+  "TeletextSourceSettings": {
+   "members": {
+    "PageNumber": {
+     "name": "pageNumber"
+    }
+   }
+  },
+  "TimecodeBurnin": {
+   "members": {
+    "FontSize": {
+     "name": "fontSize"
+    },
+    "Position": {
+     "name": "position"
+    },
+    "Prefix": {
+     "name": "prefix"
+    }
+   }
+  },
+  "TimecodeConfig": {
+   "members": {
+    "Anchor": {
+     "name": "anchor"
+    },
+    "Source": {
+     "name": "source"
+    },
+    "Start": {
+     "name": "start"
+    },
+    "TimestampOffset": {
+     "name": "timestampOffset"
+    }
+   }
+  },
+  "TimedMetadataInsertion": {
+   "members": {
+    "Id3Insertions": {
+     "name": "id3Insertions",
+     "shape": "__listOfId3Insertion"
+    }
+   }
+  },
+  "Timing": {
+   "members": {
+    "FinishTime": {
+     "name": "finishTime"
+    },
+    "StartTime": {
+     "name": "startTime"
+    },
+    "SubmitTime": {
+     "name": "submitTime"
+    }
+   }
+  },
+  "TooManyRequestsException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "Track": {
+   "members": {
+    "AudioProperties": {
+     "name": "audioProperties",
+     "shape": "AudioProperties"
+    },
+    "Codec": {
+     "name": "codec"
+    },
+    "DataProperties": {
+     "name": "dataProperties",
+     "shape": "DataProperties"
+    },
+    "Duration": {
+     "name": "duration"
+    },
+    "Index": {
+     "name": "index"
+    },
+    "TrackType": {
+     "name": "trackType"
+    },
+    "VideoProperties": {
+     "name": "videoProperties",
+     "shape": "VideoProperties"
+    }
+   }
+  },
+  "TrackMapping": {
+   "members": {
+    "AudioTrackIndexes": {
+     "name": "audioTrackIndexes",
+     "shape": "__listOf__integer"
+    },
+    "DataTrackIndexes": {
+     "name": "dataTrackIndexes",
+     "shape": "__listOf__integer"
+    },
+    "VideoTrackIndexes": {
+     "name": "videoTrackIndexes",
+     "shape": "__listOf__integer"
+    }
+   }
+  },
+  "TrackSourceSettings": {
+   "members": {
+    "StreamNumber": {
+     "name": "streamNumber"
+    },
+    "TrackNumber": {
+     "name": "trackNumber"
+    }
+   }
+  },
+  "TtmlDestinationSettings": {
+   "members": {
+    "BackgroundColor": {
+     "name": "backgroundColor"
+    },
+    "BackgroundOpacity": {
+     "name": "backgroundOpacity"
+    },
+    "FontColor": {
+     "name": "fontColor"
+    },
+    "FontOpacity": {
+     "name": "fontOpacity"
+    },
+    "FontSize": {
+     "name": "fontSize"
+    },
+    "FontStyle": {
+     "name": "fontStyle"
+    },
+    "FontWeight": {
+     "name": "fontWeight"
+    },
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    },
+    "TextDecoration": {
+     "name": "textDecoration"
+    }
+   }
+  },
+  "UncompressedSettings": {
+   "members": {
+    "Fourcc": {
+     "name": "fourcc"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Telecine": {
+     "name": "telecine"
+    }
+   }
+  },
+  "UnprocessableEntityException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "UntagResourceRequest": {
+   "members": {
+    "TagKeys": {
+     "name": "tagKeys",
+     "shape": "__listOf__string"
+    }
+   }
+  },
+  "UntagResourceResponse": {
+   "members": {}
+  },
+  "UpdateJobTemplateRequest": {
+   "members": {
+    "AccelerationSettings": {
+     "name": "accelerationSettings",
+     "shape": "AccelerationSettings"
+    },
+    "Category": {
+     "name": "category"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "HopDestinations": {
+     "name": "hopDestinations",
+     "shape": "__listOfHopDestination"
+    },
+    "Priority": {
+     "name": "priority"
+    },
+    "Queue": {
+     "name": "queue"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "JobTemplateSettings"
+    },
+    "StatusUpdateInterval": {
+     "name": "statusUpdateInterval"
+    }
+   }
+  },
+  "UpdateJobTemplateResponse": {
+   "members": {
+    "JobTemplate": {
+     "name": "jobTemplate",
+     "shape": "JobTemplate"
+    }
+   }
+  },
+  "UpdatePresetRequest": {
+   "members": {
+    "Category": {
+     "name": "category"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Settings": {
+     "name": "settings",
+     "shape": "PresetSettings"
+    }
+   }
+  },
+  "UpdatePresetResponse": {
+   "members": {
+    "Preset": {
+     "name": "preset",
+     "shape": "Preset"
+    }
+   }
+  },
+  "UpdateQueueRequest": {
+   "members": {
+    "ConcurrentJobs": {
+     "name": "concurrentJobs"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "MaximumConcurrentFeeds": {
+     "name": "maximumConcurrentFeeds"
+    },
+    "ReservationPlanSettings": {
+     "name": "reservationPlanSettings",
+     "shape": "ReservationPlanSettings"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "UpdateQueueResponse": {
+   "members": {
+    "Queue": {
+     "name": "queue",
+     "shape": "Queue"
+    }
+   }
+  },
+  "Vc3Settings": {
+   "members": {
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "ScanTypeConversionMode": {
+     "name": "scanTypeConversionMode"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Telecine": {
+     "name": "telecine"
+    },
+    "Vc3Class": {
+     "name": "vc3Class"
+    }
+   }
+  },
+  "VideoCodecSettings": {
+   "members": {
+    "Av1Settings": {
+     "name": "av1Settings",
+     "shape": "Av1Settings"
+    },
+    "AvcIntraSettings": {
+     "name": "avcIntraSettings",
+     "shape": "AvcIntraSettings"
+    },
+    "Codec": {
+     "name": "codec"
+    },
+    "FrameCaptureSettings": {
+     "name": "frameCaptureSettings",
+     "shape": "FrameCaptureSettings"
+    },
+    "GifSettings": {
+     "name": "gifSettings",
+     "shape": "GifSettings"
+    },
+    "H264Settings": {
+     "name": "h264Settings",
+     "shape": "H264Settings"
+    },
+    "H265Settings": {
+     "name": "h265Settings",
+     "shape": "H265Settings"
+    },
+    "Mpeg2Settings": {
+     "name": "mpeg2Settings",
+     "shape": "Mpeg2Settings"
+    },
+    "PassthroughSettings": {
+     "name": "passthroughSettings",
+     "shape": "PassthroughSettings"
+    },
+    "ProresSettings": {
+     "name": "proresSettings",
+     "shape": "ProresSettings"
+    },
+    "UncompressedSettings": {
+     "name": "uncompressedSettings",
+     "shape": "UncompressedSettings"
+    },
+    "Vc3Settings": {
+     "name": "vc3Settings",
+     "shape": "Vc3Settings"
+    },
+    "Vp8Settings": {
+     "name": "vp8Settings",
+     "shape": "Vp8Settings"
+    },
+    "Vp9Settings": {
+     "name": "vp9Settings",
+     "shape": "Vp9Settings"
+    },
+    "XavcSettings": {
+     "name": "xavcSettings",
+     "shape": "XavcSettings"
+    }
+   }
+  },
+  "VideoDescription": {
+   "members": {
+    "AfdSignaling": {
+     "name": "afdSignaling"
+    },
+    "AntiAlias": {
+     "name": "antiAlias"
+    },
+    "ChromaPositionMode": {
+     "name": "chromaPositionMode"
+    },
+    "CodecSettings": {
+     "name": "codecSettings",
+     "shape": "VideoCodecSettings"
+    },
+    "ColorMetadata": {
+     "name": "colorMetadata"
+    },
+    "Crop": {
+     "name": "crop",
+     "shape": "Rectangle"
+    },
+    "DropFrameTimecode": {
+     "name": "dropFrameTimecode"
+    },
+    "FixedAfd": {
+     "name": "fixedAfd"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "Position": {
+     "name": "position",
+     "shape": "Rectangle"
+    },
+    "RespondToAfd": {
+     "name": "respondToAfd"
+    },
+    "ScalingBehavior": {
+     "name": "scalingBehavior"
+    },
+    "Sharpness": {
+     "name": "sharpness"
+    },
+    "TimecodeInsertion": {
+     "name": "timecodeInsertion"
+    },
+    "TimecodeTrack": {
+     "name": "timecodeTrack"
+    },
+    "VideoPreprocessors": {
+     "name": "videoPreprocessors",
+     "shape": "VideoPreprocessor"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "VideoDetail": {
+   "members": {
+    "HeightInPx": {
+     "name": "heightInPx"
+    },
+    "WidthInPx": {
+     "name": "widthInPx"
+    }
+   }
+  },
+  "VideoOverlay": {
+   "members": {
+    "Crop": {
+     "name": "crop",
+     "shape": "VideoOverlayCrop"
+    },
+    "EndTimecode": {
+     "name": "endTimecode"
+    },
+    "InitialPosition": {
+     "name": "initialPosition",
+     "shape": "VideoOverlayPosition"
+    },
+    "Input": {
+     "name": "input",
+     "shape": "VideoOverlayInput"
+    },
+    "Playback": {
+     "name": "playback"
+    },
+    "StartTimecode": {
+     "name": "startTimecode"
+    },
+    "Transitions": {
+     "name": "transitions",
+     "shape": "__listOfVideoOverlayTransition"
+    }
+   }
+  },
+  "VideoOverlayCrop": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Unit": {
+     "name": "unit"
+    },
+    "Width": {
+     "name": "width"
+    },
+    "X": {
+     "name": "x"
+    },
+    "Y": {
+     "name": "y"
+    }
+   }
+  },
+  "VideoOverlayInput": {
+   "members": {
+    "AudioSelectors": {
+     "name": "audioSelectors",
+     "shape": "__mapOfAudioSelector"
+    },
+    "FileInput": {
+     "name": "fileInput"
+    },
+    "InputClippings": {
+     "name": "inputClippings",
+     "shape": "__listOfVideoOverlayInputClipping"
+    },
+    "TimecodeSource": {
+     "name": "timecodeSource"
+    },
+    "TimecodeStart": {
+     "name": "timecodeStart"
+    }
+   }
+  },
+  "VideoOverlayInputClipping": {
+   "members": {
+    "EndTimecode": {
+     "name": "endTimecode"
+    },
+    "StartTimecode": {
+     "name": "startTimecode"
+    }
+   }
+  },
+  "VideoOverlayPosition": {
+   "members": {
+    "Height": {
+     "name": "height"
+    },
+    "Opacity": {
+     "name": "opacity"
+    },
+    "Unit": {
+     "name": "unit"
+    },
+    "Width": {
+     "name": "width"
+    },
+    "XPosition": {
+     "name": "xPosition"
+    },
+    "YPosition": {
+     "name": "yPosition"
+    }
+   }
+  },
+  "VideoOverlayTransition": {
+   "members": {
+    "EndPosition": {
+     "name": "endPosition",
+     "shape": "VideoOverlayPosition"
+    },
+    "EndTimecode": {
+     "name": "endTimecode"
+    },
+    "StartTimecode": {
+     "name": "startTimecode"
+    }
+   }
+  },
+  "VideoPreprocessor": {
+   "members": {
+    "ColorCorrector": {
+     "name": "colorCorrector",
+     "shape": "ColorCorrector"
+    },
+    "Deinterlacer": {
+     "name": "deinterlacer",
+     "shape": "Deinterlacer"
+    },
+    "DolbyVision": {
+     "name": "dolbyVision",
+     "shape": "DolbyVision"
+    },
+    "DurationControl": {
+     "name": "durationControl",
+     "shape": "DurationControl"
+    },
+    "Hdr10Plus": {
+     "name": "hdr10Plus",
+     "shape": "Hdr10Plus"
+    },
+    "ImageInserter": {
+     "name": "imageInserter",
+     "shape": "ImageInserter"
+    },
+    "NoiseReducer": {
+     "name": "noiseReducer",
+     "shape": "NoiseReducer"
+    },
+    "PartnerWatermarking": {
+     "name": "partnerWatermarking",
+     "shape": "PartnerWatermarking"
+    },
+    "TimecodeBurnin": {
+     "name": "timecodeBurnin",
+     "shape": "TimecodeBurnin"
+    }
+   }
+  },
+  "VideoProperties": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "BitRate": {
+     "name": "bitRate"
+    },
+    "CodecMetadata": {
+     "name": "codecMetadata",
+     "shape": "CodecMetadata"
+    },
+    "ColorPrimaries": {
+     "name": "colorPrimaries"
+    },
+    "DisplayAspectRatio": {
+     "name": "displayAspectRatio",
+     "shape": "AspectRatio"
+    },
+    "FrameRate": {
+     "name": "frameRate",
+     "shape": "FrameRate"
+    },
+    "HdrMetadata": {
+     "name": "hdrMetadata",
+     "shape": "HdrMetadata"
+    },
+    "Height": {
+     "name": "height"
+    },
+    "MatrixCoefficients": {
+     "name": "matrixCoefficients"
+    },
+    "Rotation": {
+     "name": "rotation"
+    },
+    "SampleAspectRatio": {
+     "name": "sampleAspectRatio",
+     "shape": "AspectRatio"
+    },
+    "TransferCharacteristics": {
+     "name": "transferCharacteristics"
+    },
+    "Width": {
+     "name": "width"
+    }
+   }
+  },
+  "VideoSelector": {
+   "members": {
+    "AlphaBehavior": {
+     "name": "alphaBehavior"
+    },
+    "ColorSpace": {
+     "name": "colorSpace"
+    },
+    "ColorSpaceUsage": {
+     "name": "colorSpaceUsage"
+    },
+    "EmbeddedTimecodeOverride": {
+     "name": "embeddedTimecodeOverride"
+    },
+    "Hdr10Metadata": {
+     "name": "hdr10Metadata",
+     "shape": "Hdr10Metadata"
+    },
+    "MaxLuminance": {
+     "name": "maxLuminance"
+    },
+    "PadVideo": {
+     "name": "padVideo"
+    },
+    "Pid": {
+     "name": "pid"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "Rotate": {
+     "name": "rotate"
+    },
+    "SampleRange": {
+     "name": "sampleRange"
+    },
+    "SelectorType": {
+     "name": "selectorType"
+    },
+    "Streams": {
+     "name": "streams",
+     "shape": "__listOf__integerMin1Max2147483647"
+    }
+   }
+  },
+  "VorbisSettings": {
+   "members": {
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "VbrQuality": {
+     "name": "vbrQuality"
+    }
+   }
+  },
+  "Vp8Settings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    }
+   }
+  },
+  "Vp9Settings": {
+   "members": {
+    "Bitrate": {
+     "name": "bitrate"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "GopSize": {
+     "name": "gopSize"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "ParControl": {
+     "name": "parControl"
+    },
+    "ParDenominator": {
+     "name": "parDenominator"
+    },
+    "ParNumerator": {
+     "name": "parNumerator"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "RateControlMode": {
+     "name": "rateControlMode"
+    }
+   }
+  },
+  "WarningGroup": {
+   "members": {
+    "Code": {
+     "name": "code"
+    },
+    "Count": {
+     "name": "count"
+    }
+   }
+  },
+  "WavSettings": {
+   "members": {
+    "BitDepth": {
+     "name": "bitDepth"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "Format": {
+     "name": "format"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "WebvttDestinationSettings": {
+   "members": {
+    "Accessibility": {
+     "name": "accessibility"
+    },
+    "StylePassthrough": {
+     "name": "stylePassthrough"
+    }
+   }
+  },
+  "WebvttHlsSourceSettings": {
+   "members": {
+    "RenditionGroupId": {
+     "name": "renditionGroupId"
+    },
+    "RenditionLanguageCode": {
+     "name": "renditionLanguageCode"
+    },
+    "RenditionName": {
+     "name": "renditionName"
+    }
+   }
+  },
+  "Xavc4kIntraCbgProfileSettings": {
+   "members": {
+    "XavcClass": {
+     "name": "xavcClass"
+    }
+   }
+  },
+  "Xavc4kIntraVbrProfileSettings": {
+   "members": {
+    "XavcClass": {
+     "name": "xavcClass"
+    }
+   }
+  },
+  "Xavc4kProfileSettings": {
+   "members": {
+    "BitrateClass": {
+     "name": "bitrateClass"
+    },
+    "CodecProfile": {
+     "name": "codecProfile"
+    },
+    "FlickerAdaptiveQuantization": {
+     "name": "flickerAdaptiveQuantization"
+    },
+    "GopBReference": {
+     "name": "gopBReference"
+    },
+    "GopClosedCadence": {
+     "name": "gopClosedCadence"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "Slices": {
+     "name": "slices"
+    }
+   }
+  },
+  "XavcHdIntraCbgProfileSettings": {
+   "members": {
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "XavcClass": {
+     "name": "xavcClass"
+    }
+   }
+  },
+  "XavcHdProfileSettings": {
+   "members": {
+    "BitrateClass": {
+     "name": "bitrateClass"
+    },
+    "FlickerAdaptiveQuantization": {
+     "name": "flickerAdaptiveQuantization"
+    },
+    "GopBReference": {
+     "name": "gopBReference"
+    },
+    "GopClosedCadence": {
+     "name": "gopClosedCadence"
+    },
+    "HrdBufferSize": {
+     "name": "hrdBufferSize"
+    },
+    "InterlaceMode": {
+     "name": "interlaceMode"
+    },
+    "QualityTuningLevel": {
+     "name": "qualityTuningLevel"
+    },
+    "Slices": {
+     "name": "slices"
+    },
+    "Telecine": {
+     "name": "telecine"
+    }
+   }
+  },
+  "XavcSettings": {
+   "members": {
+    "AdaptiveQuantization": {
+     "name": "adaptiveQuantization"
+    },
+    "EntropyEncoding": {
+     "name": "entropyEncoding"
+    },
+    "FramerateControl": {
+     "name": "framerateControl"
+    },
+    "FramerateConversionAlgorithm": {
+     "name": "framerateConversionAlgorithm"
+    },
+    "FramerateDenominator": {
+     "name": "framerateDenominator"
+    },
+    "FramerateNumerator": {
+     "name": "framerateNumerator"
+    },
+    "PerFrameMetrics": {
+     "name": "perFrameMetrics",
+     "shape": "__listOfFrameMetricType"
+    },
+    "Profile": {
+     "name": "profile"
+    },
+    "SlowPal": {
+     "name": "slowPal"
+    },
+    "Softness": {
+     "name": "softness"
+    },
+    "SpatialAdaptiveQuantization": {
+     "name": "spatialAdaptiveQuantization"
+    },
+    "TemporalAdaptiveQuantization": {
+     "name": "temporalAdaptiveQuantization"
+    },
+    "Xavc4kIntraCbgProfileSettings": {
+     "name": "xavc4kIntraCbgProfileSettings",
+     "shape": "Xavc4kIntraCbgProfileSettings"
+    },
+    "Xavc4kIntraVbrProfileSettings": {
+     "name": "xavc4kIntraVbrProfileSettings",
+     "shape": "Xavc4kIntraVbrProfileSettings"
+    },
+    "Xavc4kProfileSettings": {
+     "name": "xavc4kProfileSettings",
+     "shape": "Xavc4kProfileSettings"
+    },
+    "XavcHdIntraCbgProfileSettings": {
+     "name": "xavcHdIntraCbgProfileSettings",
+     "shape": "XavcHdIntraCbgProfileSettings"
+    },
+    "XavcHdProfileSettings": {
+     "name": "xavcHdProfileSettings",
+     "shape": "XavcHdProfileSettings"
+    }
+   }
+  },
+  "__listOfAllowedRenditionSize": {
+   "list": "AllowedRenditionSize"
+  },
+  "__listOfAudioChannelTag": {
+   "list": "AudioChannelTag"
+  },
+  "__listOfAudioDescription": {
+   "list": "AudioDescription"
+  },
+  "__listOfAutomatedAbrRule": {
+   "list": "AutomatedAbrRule"
+  },
+  "__listOfCaptionDescription": {
+   "list": "CaptionDescription"
+  },
+  "__listOfCaptionDescriptionPreset": {
+   "list": "CaptionDescriptionPreset"
+  },
+  "__listOfCmafAdditionalManifest": {
+   "list": "CmafAdditionalManifest"
+  },
+  "__listOfCmafImageBasedTrickPlayVariant": {
+   "list": "CmafImageBasedTrickPlayVariant"
+  },
+  "__listOfColorConversion3DLUTSetting": {
+   "list": "ColorConversion3DLUTSetting"
+  },
+  "__listOfDashAdaptationSetGrouping": {
+   "list": "DashAdaptationSetGrouping"
+  },
+  "__listOfDashAdditionalManifest": {
+   "list": "DashAdditionalManifest"
+  },
+  "__listOfDashIsoImageBasedTrickPlayVariant": {
+   "list": "DashIsoImageBasedTrickPlayVariant"
+  },
+  "__listOfElementalInferenceFeature": {
+   "list": "ElementalInferenceFeature"
+  },
+  "__listOfElementalInferenceFeed": {
+   "list": "ElementalInferenceFeed"
+  },
+  "__listOfEndpoint": {
+   "list": "Endpoint"
+  },
+  "__listOfForceIncludeRenditionSize": {
+   "list": "ForceIncludeRenditionSize"
+  },
+  "__listOfFrameMetricType": {
+   "list": "FrameMetricType"
+  },
+  "__listOfHlsAdMarkers": {
+   "list": "HlsAdMarkers"
+  },
+  "__listOfHlsAdditionalManifest": {
+   "list": "HlsAdditionalManifest"
+  },
+  "__listOfHlsCaptionLanguageMapping": {
+   "list": "HlsCaptionLanguageMapping"
+  },
+  "__listOfHlsImageBasedTrickPlayVariant": {
+   "list": "HlsImageBasedTrickPlayVariant"
+  },
+  "__listOfHopDestination": {
+   "list": "HopDestination"
+  },
+  "__listOfId3Insertion": {
+   "list": "Id3Insertion"
+  },
+  "__listOfInput": {
+   "list": "Input"
+  },
+  "__listOfInputClipping": {
+   "list": "InputClipping"
+  },
+  "__listOfInputTemplate": {
+   "list": "InputTemplate"
+  },
+  "__listOfInsertableImage": {
+   "list": "InsertableImage"
+  },
+  "__listOfJob": {
+   "list": "Job"
+  },
+  "__listOfJobEngineVersion": {
+   "list": "JobEngineVersion"
+  },
+  "__listOfJobTemplate": {
+   "list": "JobTemplate"
+  },
+  "__listOfJobsQueryFilter": {
+   "list": "JobsQueryFilter"
+  },
+  "__listOfMotionImageInserter": {
+   "list": "MotionImageInserter"
+  },
+  "__listOfMsSmoothAdditionalManifest": {
+   "list": "MsSmoothAdditionalManifest"
+  },
+  "__listOfMultiViewSettings": {
+   "list": "MultiViewSettings"
+  },
+  "__listOfOutput": {
+   "list": "Output"
+  },
+  "__listOfOutputChannelMapping": {
+   "list": "OutputChannelMapping"
+  },
+  "__listOfOutputDetail": {
+   "list": "OutputDetail"
+  },
+  "__listOfOutputGroup": {
+   "list": "OutputGroup"
+  },
+  "__listOfOutputGroupDetail": {
+   "list": "OutputGroupDetail"
+  },
+  "__listOfPreset": {
+   "list": "Preset"
+  },
+  "__listOfProbeInputFile": {
+   "list": "ProbeInputFile"
+  },
+  "__listOfProbeResult": {
+   "list": "ProbeResult"
+  },
+  "__listOfQueue": {
+   "list": "Queue"
+  },
+  "__listOfQueueTransition": {
+   "list": "QueueTransition"
+  },
+  "__listOfServiceOverride": {
+   "list": "ServiceOverride"
+  },
+  "__listOfTeletextPageType": {
+   "list": "TeletextPageType"
+  },
+  "__listOfTrack": {
+   "list": "Track"
+  },
+  "__listOfTrackMapping": {
+   "list": "TrackMapping"
+  },
+  "__listOfVideoOverlay": {
+   "list": "VideoOverlay"
+  },
+  "__listOfVideoOverlayInputClipping": {
+   "list": "VideoOverlayInputClipping"
+  },
+  "__listOfVideoOverlayTransition": {
+   "list": "VideoOverlayTransition"
+  },
+  "__listOfWarningGroup": {
+   "list": "WarningGroup"
+  },
+  "__listOf__doubleMinNegative60Max6": {
+   "list": "__doubleMinNegative60Max6"
+  },
+  "__listOf__integer": {
+   "list": "__integer"
+  },
+  "__listOf__integerMin1Max2147483647": {
+   "list": "__integerMin1Max2147483647"
+  },
+  "__listOf__integerMin32Max8182": {
+   "list": "__integerMin32Max8182"
+  },
+  "__listOf__integerMinNegative60Max6": {
+   "list": "__integerMinNegative60Max6"
+  },
+  "__listOf__string": {
+   "list": "__string"
+  },
+  "__listOf__stringMax100": {
+   "list": "__stringMax100"
+  },
+  "__listOf__stringMin1": {
+   "list": "__stringMin1"
+  },
+  "__listOf__stringMin36Max36Pattern09aFAF809aFAF409aFAF409aFAF409aFAF12": {
+   "list": "__stringMin36Max36Pattern09aFAF809aFAF409aFAF409aFAF409aFAF12"
+  },
+  "__listOf__stringPattern09aFAF809aFAF409aFAF409aFAF409aFAF12": {
+   "list": "__stringPattern09aFAF809aFAF409aFAF409aFAF409aFAF12"
+  },
+  "__listOf__stringPatternS3ASSETMAPXml": {
+   "list": "__stringPatternS3ASSETMAPXml"
+  },
+  "__mapOfAudioSelector": {
+   "map": "AudioSelector"
+  },
+  "__mapOfAudioSelectorGroup": {
+   "map": "AudioSelectorGroup"
+  },
+  "__mapOfCaptionSelector": {
+   "map": "CaptionSelector"
+  },
+  "__mapOfDynamicAudioSelector": {
+   "map": "DynamicAudioSelector"
+  },
+  "__mapOf__string": {
+   "map": "__string"
+  }
+ }
+}

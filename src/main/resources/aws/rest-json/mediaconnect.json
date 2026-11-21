@@ -1,0 +1,6798 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "mediaconnect",
+ "apiVersion": "2018-11-14",
+ "operations": {
+  "AddBridgeOutputs": {
+   "method": "POST",
+   "requestUri": "/v1/bridges/{BridgeArn}/outputs",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "AddBridgeOutputsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddBridgeOutputsResponse"
+   }
+  },
+  "AddBridgeSources": {
+   "method": "POST",
+   "requestUri": "/v1/bridges/{BridgeArn}/sources",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "AddBridgeSourcesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddBridgeSourcesResponse"
+   }
+  },
+  "AddFlowMediaStreams": {
+   "method": "POST",
+   "requestUri": "/v1/flows/{FlowArn}/mediaStreams",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "AddFlowMediaStreamsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddFlowMediaStreamsResponse"
+   }
+  },
+  "AddFlowOutputs": {
+   "method": "POST",
+   "requestUri": "/v1/flows/{FlowArn}/outputs",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "AddFlowOutputsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddFlowOutputsResponse"
+   }
+  },
+  "AddFlowSources": {
+   "method": "POST",
+   "requestUri": "/v1/flows/{FlowArn}/source",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "AddFlowSourcesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddFlowSourcesResponse"
+   }
+  },
+  "AddFlowVpcInterfaces": {
+   "method": "POST",
+   "requestUri": "/v1/flows/{FlowArn}/vpcInterfaces",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "AddFlowVpcInterfacesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "AddFlowVpcInterfacesResponse"
+   }
+  },
+  "BatchGetRouterInput": {
+   "method": "GET",
+   "requestUri": "/v1/routerInputs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arns": {
+      "location": "querystring",
+      "name": "arns",
+      "type": "list"
+     }
+    },
+    "shape": "BatchGetRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterInputs[].CreatedAt",
+     "RouterInputs[].UpdatedAt",
+     "RouterInputs[].MaintenanceSchedule.Window.Start",
+     "RouterInputs[].MaintenanceSchedule.Window.End",
+     "RouterInputs[].MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "BatchGetRouterInputResponse"
+   }
+  },
+  "BatchGetRouterNetworkInterface": {
+   "method": "GET",
+   "requestUri": "/v1/routerNetworkInterfaces",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arns": {
+      "location": "querystring",
+      "name": "arns",
+      "type": "list"
+     }
+    },
+    "shape": "BatchGetRouterNetworkInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterNetworkInterfaces[].CreatedAt",
+     "RouterNetworkInterfaces[].UpdatedAt"
+    ],
+    "shape": "BatchGetRouterNetworkInterfaceResponse"
+   }
+  },
+  "BatchGetRouterOutput": {
+   "method": "GET",
+   "requestUri": "/v1/routerOutputs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arns": {
+      "location": "querystring",
+      "name": "arns",
+      "type": "list"
+     }
+    },
+    "shape": "BatchGetRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterOutputs[].CreatedAt",
+     "RouterOutputs[].UpdatedAt",
+     "RouterOutputs[].MaintenanceSchedule.Window.Start",
+     "RouterOutputs[].MaintenanceSchedule.Window.End",
+     "RouterOutputs[].MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "BatchGetRouterOutputResponse"
+   }
+  },
+  "CreateBridge": {
+   "method": "POST",
+   "requestUri": "/v1/bridges",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateBridgeRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateBridgeResponse"
+   }
+  },
+  "CreateFlow": {
+   "method": "POST",
+   "requestUri": "/v1/flows",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateFlowResponse"
+   }
+  },
+  "CreateGateway": {
+   "method": "POST",
+   "requestUri": "/v1/gateways",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateGatewayRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateGatewayResponse"
+   }
+  },
+  "CreateRouterInput": {
+   "method": "POST",
+   "requestUri": "/v1/routerInput",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "body",
+      "name": "clientToken",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterInput.CreatedAt",
+     "RouterInput.UpdatedAt",
+     "RouterInput.MaintenanceSchedule.Window.Start",
+     "RouterInput.MaintenanceSchedule.Window.End",
+     "RouterInput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "CreateRouterInputResponse"
+   }
+  },
+  "CreateRouterNetworkInterface": {
+   "method": "POST",
+   "requestUri": "/v1/routerNetworkInterface",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "body",
+      "name": "clientToken",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateRouterNetworkInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterNetworkInterface.CreatedAt",
+     "RouterNetworkInterface.UpdatedAt"
+    ],
+    "shape": "CreateRouterNetworkInterfaceResponse"
+   }
+  },
+  "CreateRouterOutput": {
+   "method": "POST",
+   "requestUri": "/v1/routerOutput",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "body",
+      "name": "clientToken",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterOutput.CreatedAt",
+     "RouterOutput.UpdatedAt",
+     "RouterOutput.MaintenanceSchedule.Window.Start",
+     "RouterOutput.MaintenanceSchedule.Window.End",
+     "RouterOutput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "CreateRouterOutputResponse"
+   }
+  },
+  "DeleteBridge": {
+   "method": "DELETE",
+   "requestUri": "/v1/bridges/{BridgeArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "DeleteBridgeRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteBridgeResponse"
+   }
+  },
+  "DeleteFlow": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "DeleteFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteFlowResponse"
+   }
+  },
+  "DeleteGateway": {
+   "method": "DELETE",
+   "requestUri": "/v1/gateways/{GatewayArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GatewayArn": {
+      "location": "uri",
+      "name": "GatewayArn"
+     }
+    },
+    "shape": "DeleteGatewayRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteGatewayResponse"
+   }
+  },
+  "DeleteRouterInput": {
+   "method": "DELETE",
+   "requestUri": "/v1/routerInput/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "DeleteRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteRouterInputResponse"
+   }
+  },
+  "DeleteRouterNetworkInterface": {
+   "method": "DELETE",
+   "requestUri": "/v1/routerNetworkInterface/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "DeleteRouterNetworkInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteRouterNetworkInterfaceResponse"
+   }
+  },
+  "DeleteRouterOutput": {
+   "method": "DELETE",
+   "requestUri": "/v1/routerOutput/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "DeleteRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteRouterOutputResponse"
+   }
+  },
+  "DeregisterGatewayInstance": {
+   "method": "DELETE",
+   "requestUri": "/v1/gateway-instances/{GatewayInstanceArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     },
+     "GatewayInstanceArn": {
+      "location": "uri",
+      "name": "GatewayInstanceArn"
+     }
+    },
+    "shape": "DeregisterGatewayInstanceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeregisterGatewayInstanceResponse"
+   }
+  },
+  "DescribeBridge": {
+   "method": "GET",
+   "requestUri": "/v1/bridges/{BridgeArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "DescribeBridgeRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeBridgeResponse"
+   }
+  },
+  "DescribeFlow": {
+   "method": "GET",
+   "requestUri": "/v1/flows/{FlowArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "DescribeFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeFlowResponse"
+   }
+  },
+  "DescribeFlowSourceMetadata": {
+   "method": "GET",
+   "requestUri": "/v1/flows/{FlowArn}/source-metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "DescribeFlowSourceMetadataRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "Timestamp"
+    ],
+    "shape": "DescribeFlowSourceMetadataResponse"
+   }
+  },
+  "DescribeFlowSourceThumbnail": {
+   "method": "GET",
+   "requestUri": "/v1/flows/{FlowArn}/source-thumbnail",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "DescribeFlowSourceThumbnailRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "ThumbnailDetails.Timestamp"
+    ],
+    "shape": "DescribeFlowSourceThumbnailResponse"
+   }
+  },
+  "DescribeGateway": {
+   "method": "GET",
+   "requestUri": "/v1/gateways/{GatewayArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GatewayArn": {
+      "location": "uri",
+      "name": "GatewayArn"
+     }
+    },
+    "shape": "DescribeGatewayRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeGatewayResponse"
+   }
+  },
+  "DescribeGatewayInstance": {
+   "method": "GET",
+   "requestUri": "/v1/gateway-instances/{GatewayInstanceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GatewayInstanceArn": {
+      "location": "uri",
+      "name": "GatewayInstanceArn"
+     }
+    },
+    "shape": "DescribeGatewayInstanceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeGatewayInstanceResponse"
+   }
+  },
+  "DescribeOffering": {
+   "method": "GET",
+   "requestUri": "/v1/offerings/{OfferingArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "OfferingArn": {
+      "location": "uri",
+      "name": "OfferingArn"
+     }
+    },
+    "shape": "DescribeOfferingRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeOfferingResponse"
+   }
+  },
+  "DescribeReservation": {
+   "method": "GET",
+   "requestUri": "/v1/reservations/{ReservationArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ReservationArn": {
+      "location": "uri",
+      "name": "ReservationArn"
+     }
+    },
+    "shape": "DescribeReservationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeReservationResponse"
+   }
+  },
+  "GetRouterInput": {
+   "method": "GET",
+   "requestUri": "/v1/routerInput/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "GetRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterInput.CreatedAt",
+     "RouterInput.UpdatedAt",
+     "RouterInput.MaintenanceSchedule.Window.Start",
+     "RouterInput.MaintenanceSchedule.Window.End",
+     "RouterInput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "GetRouterInputResponse"
+   }
+  },
+  "GetRouterInputSourceMetadata": {
+   "method": "GET",
+   "requestUri": "/v1/routerInput/{Arn}/source-metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "GetRouterInputSourceMetadataRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "SourceMetadataDetails.Timestamp"
+    ],
+    "shape": "GetRouterInputSourceMetadataResponse"
+   }
+  },
+  "GetRouterInputThumbnail": {
+   "method": "GET",
+   "requestUri": "/v1/routerInput/{Arn}/thumbnail",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "GetRouterInputThumbnailRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "ThumbnailDetails.Timestamp"
+    ],
+    "shape": "GetRouterInputThumbnailResponse"
+   }
+  },
+  "GetRouterNetworkInterface": {
+   "method": "GET",
+   "requestUri": "/v1/routerNetworkInterface/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "GetRouterNetworkInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterNetworkInterface.CreatedAt",
+     "RouterNetworkInterface.UpdatedAt"
+    ],
+    "shape": "GetRouterNetworkInterfaceResponse"
+   }
+  },
+  "GetRouterOutput": {
+   "method": "GET",
+   "requestUri": "/v1/routerOutput/{Arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "GetRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterOutput.CreatedAt",
+     "RouterOutput.UpdatedAt",
+     "RouterOutput.MaintenanceSchedule.Window.Start",
+     "RouterOutput.MaintenanceSchedule.Window.End",
+     "RouterOutput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "GetRouterOutputResponse"
+   }
+  },
+  "GrantFlowEntitlements": {
+   "method": "POST",
+   "requestUri": "/v1/flows/{FlowArn}/entitlements",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "GrantFlowEntitlementsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GrantFlowEntitlementsResponse"
+   }
+  },
+  "ListBridges": {
+   "method": "GET",
+   "requestUri": "/v1/bridges",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FilterArn": {
+      "location": "querystring",
+      "name": "filterArn"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListBridgesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListBridgesResponse"
+   }
+  },
+  "ListEntitlements": {
+   "method": "GET",
+   "requestUri": "/v1/entitlements",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListEntitlementsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListEntitlementsResponse"
+   }
+  },
+  "ListFlows": {
+   "method": "GET",
+   "requestUri": "/v1/flows",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListFlowsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListFlowsResponse"
+   }
+  },
+  "ListGatewayInstances": {
+   "method": "GET",
+   "requestUri": "/v1/gateway-instances",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FilterArn": {
+      "location": "querystring",
+      "name": "filterArn"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListGatewayInstancesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListGatewayInstancesResponse"
+   }
+  },
+  "ListGateways": {
+   "method": "GET",
+   "requestUri": "/v1/gateways",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListGatewaysRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListGatewaysResponse"
+   }
+  },
+  "ListOfferings": {
+   "method": "GET",
+   "requestUri": "/v1/offerings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListOfferingsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListOfferingsResponse"
+   }
+  },
+  "ListReservations": {
+   "method": "GET",
+   "requestUri": "/v1/reservations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListReservationsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListReservationsResponse"
+   }
+  },
+  "ListRouterInputs": {
+   "method": "POST",
+   "requestUri": "/v1/routerInputs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListRouterInputsRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterInputs[].CreatedAt",
+     "RouterInputs[].UpdatedAt",
+     "RouterInputs[].MaintenanceSchedule.Window.Start",
+     "RouterInputs[].MaintenanceSchedule.Window.End",
+     "RouterInputs[].MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "ListRouterInputsResponse"
+   }
+  },
+  "ListRouterNetworkInterfaces": {
+   "method": "POST",
+   "requestUri": "/v1/routerNetworkInterfaces",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListRouterNetworkInterfacesRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterNetworkInterfaces[].CreatedAt",
+     "RouterNetworkInterfaces[].UpdatedAt"
+    ],
+    "shape": "ListRouterNetworkInterfacesResponse"
+   }
+  },
+  "ListRouterOutputs": {
+   "method": "POST",
+   "requestUri": "/v1/routerOutputs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListRouterOutputsRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterOutputs[].CreatedAt",
+     "RouterOutputs[].UpdatedAt",
+     "RouterOutputs[].MaintenanceSchedule.Window.Start",
+     "RouterOutputs[].MaintenanceSchedule.Window.End",
+     "RouterOutputs[].MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "ListRouterOutputsResponse"
+   }
+  },
+  "ListTagsForGlobalResource": {
+   "method": "GET",
+   "requestUri": "/tags/global/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "ListTagsForGlobalResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForGlobalResourceResponse"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "ListTagsForResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceResponse"
+   }
+  },
+  "PurchaseOffering": {
+   "method": "POST",
+   "requestUri": "/v1/offerings/{OfferingArn}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "OfferingArn": {
+      "location": "uri",
+      "name": "OfferingArn"
+     }
+    },
+    "shape": "PurchaseOfferingRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PurchaseOfferingResponse"
+   }
+  },
+  "RemoveBridgeOutput": {
+   "method": "DELETE",
+   "requestUri": "/v1/bridges/{BridgeArn}/outputs/{OutputName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     },
+     "OutputName": {
+      "location": "uri",
+      "name": "OutputName"
+     }
+    },
+    "shape": "RemoveBridgeOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveBridgeOutputResponse"
+   }
+  },
+  "RemoveBridgeSource": {
+   "method": "DELETE",
+   "requestUri": "/v1/bridges/{BridgeArn}/sources/{SourceName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     },
+     "SourceName": {
+      "location": "uri",
+      "name": "SourceName"
+     }
+    },
+    "shape": "RemoveBridgeSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveBridgeSourceResponse"
+   }
+  },
+  "RemoveFlowMediaStream": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}/mediaStreams/{MediaStreamName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "MediaStreamName": {
+      "location": "uri",
+      "name": "MediaStreamName"
+     }
+    },
+    "shape": "RemoveFlowMediaStreamRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveFlowMediaStreamResponse"
+   }
+  },
+  "RemoveFlowOutput": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}/outputs/{OutputArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "OutputArn": {
+      "location": "uri",
+      "name": "OutputArn"
+     }
+    },
+    "shape": "RemoveFlowOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveFlowOutputResponse"
+   }
+  },
+  "RemoveFlowSource": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}/source/{SourceArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "SourceArn": {
+      "location": "uri",
+      "name": "SourceArn"
+     }
+    },
+    "shape": "RemoveFlowSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveFlowSourceResponse"
+   }
+  },
+  "RemoveFlowVpcInterface": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}/vpcInterfaces/{VpcInterfaceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "VpcInterfaceName": {
+      "location": "uri",
+      "name": "VpcInterfaceName"
+     }
+    },
+    "shape": "RemoveFlowVpcInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RemoveFlowVpcInterfaceResponse"
+   }
+  },
+  "RestartRouterInput": {
+   "method": "POST",
+   "requestUri": "/v1/routerInput/restart/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "RestartRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RestartRouterInputResponse"
+   }
+  },
+  "RestartRouterOutput": {
+   "method": "POST",
+   "requestUri": "/v1/routerOutput/restart/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "RestartRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RestartRouterOutputResponse"
+   }
+  },
+  "RevokeFlowEntitlement": {
+   "method": "DELETE",
+   "requestUri": "/v1/flows/{FlowArn}/entitlements/{EntitlementArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "EntitlementArn": {
+      "location": "uri",
+      "name": "EntitlementArn"
+     },
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "RevokeFlowEntitlementRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "RevokeFlowEntitlementResponse"
+   }
+  },
+  "StartFlow": {
+   "method": "POST",
+   "requestUri": "/v1/flows/start/{FlowArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "StartFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartFlowResponse"
+   }
+  },
+  "StartRouterInput": {
+   "method": "POST",
+   "requestUri": "/v1/routerInput/start/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "StartRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "MaintenanceSchedule.Window.Start",
+     "MaintenanceSchedule.Window.End",
+     "MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "StartRouterInputResponse"
+   }
+  },
+  "StartRouterOutput": {
+   "method": "POST",
+   "requestUri": "/v1/routerOutput/start/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "StartRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "MaintenanceSchedule.Window.Start",
+     "MaintenanceSchedule.Window.End",
+     "MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "StartRouterOutputResponse"
+   }
+  },
+  "StopFlow": {
+   "method": "POST",
+   "requestUri": "/v1/flows/stop/{FlowArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "StopFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopFlowResponse"
+   }
+  },
+  "StopRouterInput": {
+   "method": "POST",
+   "requestUri": "/v1/routerInput/stop/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "StopRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopRouterInputResponse"
+   }
+  },
+  "StopRouterOutput": {
+   "method": "POST",
+   "requestUri": "/v1/routerOutput/stop/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "StopRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopRouterOutputResponse"
+   }
+  },
+  "TagGlobalResource": {
+   "method": "POST",
+   "requestUri": "/tags/global/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "TagGlobalResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "TagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TakeRouterInput": {
+   "method": "PUT",
+   "requestUri": "/v1/routerOutput/takeRouterInput/{RouterOutputArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "RouterOutputArn": {
+      "location": "uri",
+      "name": "RouterOutputArn"
+     }
+    },
+    "shape": "TakeRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "TakeRouterInputResponse"
+   }
+  },
+  "UntagGlobalResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/global/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagGlobalResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateBridge": {
+   "method": "PUT",
+   "requestUri": "/v1/bridges/{BridgeArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "UpdateBridgeRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateBridgeResponse"
+   }
+  },
+  "UpdateBridgeOutput": {
+   "method": "PUT",
+   "requestUri": "/v1/bridges/{BridgeArn}/outputs/{OutputName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     },
+     "OutputName": {
+      "location": "uri",
+      "name": "OutputName"
+     }
+    },
+    "shape": "UpdateBridgeOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateBridgeOutputResponse"
+   }
+  },
+  "UpdateBridgeSource": {
+   "method": "PUT",
+   "requestUri": "/v1/bridges/{BridgeArn}/sources/{SourceName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     },
+     "SourceName": {
+      "location": "uri",
+      "name": "SourceName"
+     }
+    },
+    "shape": "UpdateBridgeSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateBridgeSourceResponse"
+   }
+  },
+  "UpdateBridgeState": {
+   "method": "PUT",
+   "requestUri": "/v1/bridges/{BridgeArn}/state",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "BridgeArn": {
+      "location": "uri",
+      "name": "BridgeArn"
+     }
+    },
+    "shape": "UpdateBridgeStateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateBridgeStateResponse"
+   }
+  },
+  "UpdateFlow": {
+   "method": "PUT",
+   "requestUri": "/v1/flows/{FlowArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "UpdateFlowRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateFlowResponse"
+   }
+  },
+  "UpdateFlowEntitlement": {
+   "method": "PUT",
+   "requestUri": "/v1/flows/{FlowArn}/entitlements/{EntitlementArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "EntitlementArn": {
+      "location": "uri",
+      "name": "EntitlementArn"
+     },
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     }
+    },
+    "shape": "UpdateFlowEntitlementRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateFlowEntitlementResponse"
+   }
+  },
+  "UpdateFlowMediaStream": {
+   "method": "PUT",
+   "requestUri": "/v1/flows/{FlowArn}/mediaStreams/{MediaStreamName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "MediaStreamName": {
+      "location": "uri",
+      "name": "MediaStreamName"
+     }
+    },
+    "shape": "UpdateFlowMediaStreamRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateFlowMediaStreamResponse"
+   }
+  },
+  "UpdateFlowOutput": {
+   "method": "PUT",
+   "requestUri": "/v1/flows/{FlowArn}/outputs/{OutputArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "OutputArn": {
+      "location": "uri",
+      "name": "OutputArn"
+     }
+    },
+    "shape": "UpdateFlowOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateFlowOutputResponse"
+   }
+  },
+  "UpdateFlowSource": {
+   "method": "PUT",
+   "requestUri": "/v1/flows/{FlowArn}/source/{SourceArn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "FlowArn": {
+      "location": "uri",
+      "name": "FlowArn"
+     },
+     "SourceArn": {
+      "location": "uri",
+      "name": "SourceArn"
+     }
+    },
+    "shape": "UpdateFlowSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateFlowSourceResponse"
+   }
+  },
+  "UpdateGatewayInstance": {
+   "method": "PUT",
+   "requestUri": "/v1/gateway-instances/{GatewayInstanceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GatewayInstanceArn": {
+      "location": "uri",
+      "name": "GatewayInstanceArn"
+     }
+    },
+    "shape": "UpdateGatewayInstanceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateGatewayInstanceResponse"
+   }
+  },
+  "UpdateRouterInput": {
+   "method": "PUT",
+   "requestUri": "/v1/routerInput/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "UpdateRouterInputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterInput.CreatedAt",
+     "RouterInput.UpdatedAt",
+     "RouterInput.MaintenanceSchedule.Window.Start",
+     "RouterInput.MaintenanceSchedule.Window.End",
+     "RouterInput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "UpdateRouterInputResponse"
+   }
+  },
+  "UpdateRouterNetworkInterface": {
+   "method": "PUT",
+   "requestUri": "/v1/routerNetworkInterface/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "UpdateRouterNetworkInterfaceRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterNetworkInterface.CreatedAt",
+     "RouterNetworkInterface.UpdatedAt"
+    ],
+    "shape": "UpdateRouterNetworkInterfaceResponse"
+   }
+  },
+  "UpdateRouterOutput": {
+   "method": "PUT",
+   "requestUri": "/v1/routerOutput/{Arn}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "uri",
+      "name": "Arn"
+     }
+    },
+    "shape": "UpdateRouterOutputRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "RouterOutput.CreatedAt",
+     "RouterOutput.UpdatedAt",
+     "RouterOutput.MaintenanceSchedule.Window.Start",
+     "RouterOutput.MaintenanceSchedule.Window.End",
+     "RouterOutput.MaintenanceSchedule.Window.ScheduledTime"
+    ],
+    "shape": "UpdateRouterOutputResponse"
+   }
+  }
+ },
+ "shapes": {
+  "AddBridgeFlowSourceRequest": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowVpcInterfaceAttachment": {
+     "name": "flowVpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    },
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "AddBridgeNetworkOutputRequest": {
+   "members": {
+    "IpAddress": {
+     "name": "ipAddress"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "Ttl": {
+     "name": "ttl"
+    }
+   }
+  },
+  "AddBridgeNetworkSourceRequest": {
+   "members": {
+    "MulticastIp": {
+     "name": "multicastIp"
+    },
+    "MulticastSourceSettings": {
+     "name": "multicastSourceSettings",
+     "shape": "MulticastSourceSettings"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    }
+   }
+  },
+  "AddBridgeOutputRequest": {
+   "members": {
+    "NetworkOutput": {
+     "name": "networkOutput",
+     "shape": "AddBridgeNetworkOutputRequest"
+    }
+   }
+  },
+  "AddBridgeOutputsRequest": {
+   "members": {
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfAddBridgeOutputRequest"
+    }
+   }
+  },
+  "AddBridgeOutputsResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfBridgeOutput"
+    }
+   }
+  },
+  "AddBridgeSourceRequest": {
+   "members": {
+    "FlowSource": {
+     "name": "flowSource",
+     "shape": "AddBridgeFlowSourceRequest"
+    },
+    "NetworkSource": {
+     "name": "networkSource",
+     "shape": "AddBridgeNetworkSourceRequest"
+    }
+   }
+  },
+  "AddBridgeSourcesRequest": {
+   "members": {
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfAddBridgeSourceRequest"
+    }
+   }
+  },
+  "AddBridgeSourcesResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfBridgeSource"
+    }
+   }
+  },
+  "AddEgressGatewayBridgeRequest": {
+   "members": {
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    }
+   }
+  },
+  "AddFlowMediaStreamsRequest": {
+   "members": {
+    "MediaStreams": {
+     "name": "mediaStreams",
+     "shape": "__listOfAddMediaStreamRequest"
+    }
+   }
+  },
+  "AddFlowMediaStreamsResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "MediaStreams": {
+     "name": "mediaStreams",
+     "shape": "__listOfMediaStream"
+    }
+   }
+  },
+  "AddFlowOutputs420Exception": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "AddFlowOutputsRequest": {
+   "members": {
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfAddOutputRequest"
+    }
+   }
+  },
+  "AddFlowOutputsResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfOutput"
+    }
+   }
+  },
+  "AddFlowSourcesRequest": {
+   "members": {
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfSetSourceRequest"
+    }
+   }
+  },
+  "AddFlowSourcesResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfSource"
+    }
+   }
+  },
+  "AddFlowVpcInterfacesRequest": {
+   "members": {
+    "VpcInterfaces": {
+     "name": "vpcInterfaces",
+     "shape": "__listOfVpcInterfaceRequest"
+    }
+   }
+  },
+  "AddFlowVpcInterfacesResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "VpcInterfaces": {
+     "name": "vpcInterfaces",
+     "shape": "__listOfVpcInterface"
+    }
+   }
+  },
+  "AddIngressGatewayBridgeRequest": {
+   "members": {
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxOutputs": {
+     "name": "maxOutputs"
+    }
+   }
+  },
+  "AddMaintenance": {
+   "members": {
+    "MaintenanceDay": {
+     "name": "maintenanceDay"
+    },
+    "MaintenanceStartHour": {
+     "name": "maintenanceStartHour"
+    }
+   }
+  },
+  "AddMediaStreamRequest": {
+   "members": {
+    "Attributes": {
+     "name": "attributes",
+     "shape": "MediaStreamAttributesRequest"
+    },
+    "ClockRate": {
+     "name": "clockRate"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "MediaStreamId": {
+     "name": "mediaStreamId"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    },
+    "MediaStreamType": {
+     "name": "mediaStreamType"
+    },
+    "VideoFormat": {
+     "name": "videoFormat"
+    },
+    "MediaStreamTags": {
+     "name": "mediaStreamTags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "AddOutputRequest": {
+   "members": {
+    "CidrAllowList": {
+     "name": "cidrAllowList",
+     "shape": "__listOfString"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "Encryption"
+    },
+    "MaxLatency": {
+     "name": "maxLatency"
+    },
+    "MediaStreamOutputConfigurations": {
+     "name": "mediaStreamOutputConfigurations",
+     "shape": "__listOfMediaStreamOutputConfigurationRequest"
+    },
+    "MinLatency": {
+     "name": "minLatency"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "RemoteId": {
+     "name": "remoteId"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SmoothingLatency": {
+     "name": "smoothingLatency"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    },
+    "OutputStatus": {
+     "name": "outputStatus"
+    },
+    "NdiSpeedHqQuality": {
+     "name": "ndiSpeedHqQuality"
+    },
+    "NdiProgramName": {
+     "name": "ndiProgramName"
+    },
+    "OutputTags": {
+     "name": "outputTags",
+     "shape": "__mapOfString"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitEncryption": {
+     "name": "routerIntegrationTransitEncryption",
+     "shape": "FlowTransitEncryption"
+    },
+    "NdiOutputTimecodeSource": {
+     "name": "ndiOutputTimecodeSource"
+    },
+    "NdiAudioReferenceLevel": {
+     "name": "ndiAudioReferenceLevel"
+    }
+   }
+  },
+  "AudioMonitoringSetting": {
+   "members": {
+    "SilentAudio": {
+     "name": "silentAudio",
+     "shape": "SilentAudio"
+    }
+   }
+  },
+  "AutomaticEncryptionKeyConfiguration": {
+   "members": {}
+  },
+  "BadRequestException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "BatchGetRouterInputError": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "BatchGetRouterInputErrorList": {
+   "list": "BatchGetRouterInputError"
+  },
+  "BatchGetRouterInputRequest": {
+   "members": {}
+  },
+  "BatchGetRouterInputRequestArnsList": {
+   "list": "RouterInputArn"
+  },
+  "BatchGetRouterInputResponse": {
+   "members": {
+    "RouterInputs": {
+     "name": "routerInputs",
+     "shape": "RouterInputList"
+    },
+    "Errors": {
+     "name": "errors",
+     "shape": "BatchGetRouterInputErrorList"
+    }
+   }
+  },
+  "BatchGetRouterNetworkInterfaceError": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "BatchGetRouterNetworkInterfaceErrorList": {
+   "list": "BatchGetRouterNetworkInterfaceError"
+  },
+  "BatchGetRouterNetworkInterfaceRequest": {
+   "members": {}
+  },
+  "BatchGetRouterNetworkInterfaceRequestArnsList": {
+   "list": "RouterNetworkInterfaceArn"
+  },
+  "BatchGetRouterNetworkInterfaceResponse": {
+   "members": {
+    "RouterNetworkInterfaces": {
+     "name": "routerNetworkInterfaces",
+     "shape": "RouterNetworkInterfaceList"
+    },
+    "Errors": {
+     "name": "errors",
+     "shape": "BatchGetRouterNetworkInterfaceErrorList"
+    }
+   }
+  },
+  "BatchGetRouterOutputError": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "BatchGetRouterOutputErrorList": {
+   "list": "BatchGetRouterOutputError"
+  },
+  "BatchGetRouterOutputRequest": {
+   "members": {}
+  },
+  "BatchGetRouterOutputRequestArnsList": {
+   "list": "RouterOutputArn"
+  },
+  "BatchGetRouterOutputResponse": {
+   "members": {
+    "RouterOutputs": {
+     "name": "routerOutputs",
+     "shape": "RouterOutputList"
+    },
+    "Errors": {
+     "name": "errors",
+     "shape": "BatchGetRouterOutputErrorList"
+    }
+   }
+  },
+  "BlackFrames": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "BlackFramesConfiguration": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "Bridge": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "BridgeMessages": {
+     "name": "bridgeMessages",
+     "shape": "__listOfMessageDetail"
+    },
+    "BridgeState": {
+     "name": "bridgeState"
+    },
+    "EgressGatewayBridge": {
+     "name": "egressGatewayBridge",
+     "shape": "EgressGatewayBridge"
+    },
+    "IngressGatewayBridge": {
+     "name": "ingressGatewayBridge",
+     "shape": "IngressGatewayBridge"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfBridgeOutput"
+    },
+    "PlacementArn": {
+     "name": "placementArn"
+    },
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "FailoverConfig"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfBridgeSource"
+    }
+   }
+  },
+  "BridgeFlowOutput": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowSourceArn": {
+     "name": "flowSourceArn"
+    },
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "BridgeFlowSource": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowVpcInterfaceAttachment": {
+     "name": "flowVpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "OutputArn": {
+     "name": "outputArn"
+    }
+   }
+  },
+  "BridgeNetworkOutput": {
+   "members": {
+    "IpAddress": {
+     "name": "ipAddress"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "Ttl": {
+     "name": "ttl"
+    }
+   }
+  },
+  "BridgeNetworkSource": {
+   "members": {
+    "MulticastIp": {
+     "name": "multicastIp"
+    },
+    "MulticastSourceSettings": {
+     "name": "multicastSourceSettings",
+     "shape": "MulticastSourceSettings"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    }
+   }
+  },
+  "BridgeOutput": {
+   "members": {
+    "FlowOutput": {
+     "name": "flowOutput",
+     "shape": "BridgeFlowOutput"
+    },
+    "NetworkOutput": {
+     "name": "networkOutput",
+     "shape": "BridgeNetworkOutput"
+    }
+   }
+  },
+  "BridgeSource": {
+   "members": {
+    "FlowSource": {
+     "name": "flowSource",
+     "shape": "BridgeFlowSource"
+    },
+    "NetworkSource": {
+     "name": "networkSource",
+     "shape": "BridgeNetworkSource"
+    }
+   }
+  },
+  "ColorInformation": {
+   "members": {
+    "Colorimetry": {
+     "name": "colorimetry"
+    },
+    "TransferCharacteristics": {
+     "name": "transferCharacteristics"
+    },
+    "MatrixCoefficients": {
+     "name": "matrixCoefficients"
+    }
+   }
+  },
+  "ConflictException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "ContentQualityAnalysisFeatureConfiguration": {
+   "members": {
+    "BlackFrames": {
+     "name": "blackFrames",
+     "shape": "BlackFramesConfiguration"
+    },
+    "FrozenFrames": {
+     "name": "frozenFrames",
+     "shape": "FrozenFramesConfiguration"
+    },
+    "SilentAudio": {
+     "name": "silentAudio",
+     "shape": "SilentAudioConfiguration"
+    }
+   }
+  },
+  "CreateBridge420Exception": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "CreateBridgeRequest": {
+   "members": {
+    "EgressGatewayBridge": {
+     "name": "egressGatewayBridge",
+     "shape": "AddEgressGatewayBridgeRequest"
+    },
+    "IngressGatewayBridge": {
+     "name": "ingressGatewayBridge",
+     "shape": "AddIngressGatewayBridgeRequest"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfAddBridgeOutputRequest"
+    },
+    "PlacementArn": {
+     "name": "placementArn"
+    },
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "FailoverConfig"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfAddBridgeSourceRequest"
+    }
+   }
+  },
+  "CreateBridgeResponse": {
+   "members": {
+    "Bridge": {
+     "name": "bridge",
+     "shape": "Bridge"
+    }
+   }
+  },
+  "CreateFlow420Exception": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "CreateFlowRequest": {
+   "members": {
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "Entitlements": {
+     "name": "entitlements",
+     "shape": "__listOfGrantEntitlementRequest"
+    },
+    "MediaStreams": {
+     "name": "mediaStreams",
+     "shape": "__listOfAddMediaStreamRequest"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfAddOutputRequest"
+    },
+    "Source": {
+     "name": "source",
+     "shape": "SetSourceRequest"
+    },
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "FailoverConfig"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfSetSourceRequest"
+    },
+    "VpcInterfaces": {
+     "name": "vpcInterfaces",
+     "shape": "__listOfVpcInterfaceRequest"
+    },
+    "Maintenance": {
+     "name": "maintenance",
+     "shape": "AddMaintenance"
+    },
+    "SourceMonitoringConfig": {
+     "name": "sourceMonitoringConfig",
+     "shape": "MonitoringConfig"
+    },
+    "FlowSize": {
+     "name": "flowSize"
+    },
+    "NdiConfig": {
+     "name": "ndiConfig",
+     "shape": "NdiConfig"
+    },
+    "EncodingConfig": {
+     "name": "encodingConfig",
+     "shape": "EncodingConfig"
+    },
+    "FlowTags": {
+     "name": "flowTags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "CreateFlowResponse": {
+   "members": {
+    "Flow": {
+     "name": "flow",
+     "shape": "Flow"
+    }
+   }
+  },
+  "CreateGateway420Exception": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "CreateGatewayRequest": {
+   "members": {
+    "EgressCidrBlocks": {
+     "name": "egressCidrBlocks",
+     "shape": "__listOfString"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Networks": {
+     "name": "networks",
+     "shape": "__listOfGatewayNetwork"
+    }
+   }
+  },
+  "CreateGatewayResponse": {
+   "members": {
+    "Gateway": {
+     "name": "gateway",
+     "shape": "Gateway"
+    }
+   }
+  },
+  "CreateRouterInputRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterInputConfiguration"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "TransitEncryption": {
+     "name": "transitEncryption",
+     "shape": "RouterInputTransitEncryption"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    },
+    "ClientToken": {
+     "name": "clientToken"
+    },
+    "ContentQualityAnalysisConfiguration": {
+     "name": "contentQualityAnalysisConfiguration",
+     "shape": "RouterContentQualityAnalysisConfiguration"
+    }
+   }
+  },
+  "CreateRouterInputResponse": {
+   "members": {
+    "RouterInput": {
+     "name": "routerInput",
+     "shape": "RouterInput"
+    }
+   }
+  },
+  "CreateRouterNetworkInterfaceRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterNetworkInterfaceConfiguration"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    },
+    "ClientToken": {
+     "name": "clientToken"
+    }
+   }
+  },
+  "CreateRouterNetworkInterfaceResponse": {
+   "members": {
+    "RouterNetworkInterface": {
+     "name": "routerNetworkInterface",
+     "shape": "RouterNetworkInterface"
+    }
+   }
+  },
+  "CreateRouterOutputRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterOutputConfiguration"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    },
+    "FabricConfiguration": {
+     "name": "fabricConfiguration",
+     "shape": "FabricConfiguration"
+    },
+    "ClientToken": {
+     "name": "clientToken"
+    }
+   }
+  },
+  "CreateRouterOutputResponse": {
+   "members": {
+    "RouterOutput": {
+     "name": "routerOutput",
+     "shape": "RouterOutput"
+    }
+   }
+  },
+  "DefaultMaintenanceConfiguration": {
+   "members": {}
+  },
+  "DeleteBridgeRequest": {
+   "members": {}
+  },
+  "DeleteBridgeResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    }
+   }
+  },
+  "DeleteFlowRequest": {
+   "members": {}
+  },
+  "DeleteFlowResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "DeleteGatewayRequest": {
+   "members": {}
+  },
+  "DeleteGatewayResponse": {
+   "members": {
+    "GatewayArn": {
+     "name": "gatewayArn"
+    }
+   }
+  },
+  "DeleteRouterInputRequest": {
+   "members": {}
+  },
+  "DeleteRouterInputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "DeleteRouterNetworkInterfaceRequest": {
+   "members": {}
+  },
+  "DeleteRouterNetworkInterfaceResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "DeleteRouterOutputRequest": {
+   "members": {}
+  },
+  "DeleteRouterOutputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "DeregisterGatewayInstanceRequest": {
+   "members": {}
+  },
+  "DeregisterGatewayInstanceResponse": {
+   "members": {
+    "GatewayInstanceArn": {
+     "name": "gatewayInstanceArn"
+    },
+    "InstanceState": {
+     "name": "instanceState"
+    }
+   }
+  },
+  "DescribeBridgeRequest": {
+   "members": {}
+  },
+  "DescribeBridgeResponse": {
+   "members": {
+    "Bridge": {
+     "name": "bridge",
+     "shape": "Bridge"
+    }
+   }
+  },
+  "DescribeFlowRequest": {
+   "members": {}
+  },
+  "DescribeFlowResponse": {
+   "members": {
+    "Flow": {
+     "name": "flow",
+     "shape": "Flow"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "Messages"
+    }
+   }
+  },
+  "DescribeFlowSourceMetadataRequest": {
+   "members": {}
+  },
+  "DescribeFlowSourceMetadataResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "__listOfMessageDetail"
+    },
+    "Timestamp": {
+     "name": "timestamp"
+    },
+    "TransportMediaInfo": {
+     "name": "transportMediaInfo",
+     "shape": "TransportMediaInfo"
+    },
+    "NdiInfo": {
+     "name": "ndiInfo",
+     "shape": "NdiSourceMetadataInfo"
+    }
+   }
+  },
+  "DescribeFlowSourceThumbnailRequest": {
+   "members": {}
+  },
+  "DescribeFlowSourceThumbnailResponse": {
+   "members": {
+    "ThumbnailDetails": {
+     "name": "thumbnailDetails",
+     "shape": "ThumbnailDetails"
+    }
+   }
+  },
+  "DescribeGatewayInstanceRequest": {
+   "members": {}
+  },
+  "DescribeGatewayInstanceResponse": {
+   "members": {
+    "GatewayInstance": {
+     "name": "gatewayInstance",
+     "shape": "GatewayInstance"
+    }
+   }
+  },
+  "DescribeGatewayRequest": {
+   "members": {}
+  },
+  "DescribeGatewayResponse": {
+   "members": {
+    "Gateway": {
+     "name": "gateway",
+     "shape": "Gateway"
+    }
+   }
+  },
+  "DescribeOfferingRequest": {
+   "members": {}
+  },
+  "DescribeOfferingResponse": {
+   "members": {
+    "Offering": {
+     "name": "offering",
+     "shape": "Offering"
+    }
+   }
+  },
+  "DescribeReservationRequest": {
+   "members": {}
+  },
+  "DescribeReservationResponse": {
+   "members": {
+    "Reservation": {
+     "name": "reservation",
+     "shape": "Reservation"
+    }
+   }
+  },
+  "DestinationConfiguration": {
+   "members": {
+    "DestinationIp": {
+     "name": "destinationIp"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    },
+    "Interface": {
+     "name": "interface",
+     "shape": "Interface"
+    },
+    "OutboundIp": {
+     "name": "outboundIp"
+    }
+   }
+  },
+  "DestinationConfigurationRequest": {
+   "members": {
+    "DestinationIp": {
+     "name": "destinationIp"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    },
+    "Interface": {
+     "name": "interface",
+     "shape": "InterfaceRequest"
+    }
+   }
+  },
+  "EgressGatewayBridge": {
+   "members": {
+    "InstanceId": {
+     "name": "instanceId"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    }
+   }
+  },
+  "EncodingConfig": {
+   "members": {
+    "EncodingProfile": {
+     "name": "encodingProfile"
+    },
+    "VideoMaxBitrate": {
+     "name": "videoMaxBitrate"
+    }
+   }
+  },
+  "EncodingParameters": {
+   "members": {
+    "CompressionFactor": {
+     "name": "compressionFactor"
+    },
+    "EncoderProfile": {
+     "name": "encoderProfile"
+    }
+   }
+  },
+  "EncodingParametersRequest": {
+   "members": {
+    "CompressionFactor": {
+     "name": "compressionFactor"
+    },
+    "EncoderProfile": {
+     "name": "encoderProfile"
+    }
+   }
+  },
+  "Encryption": {
+   "members": {
+    "Algorithm": {
+     "name": "algorithm"
+    },
+    "ConstantInitializationVector": {
+     "name": "constantInitializationVector"
+    },
+    "DeviceId": {
+     "name": "deviceId"
+    },
+    "KeyType": {
+     "name": "keyType"
+    },
+    "Region": {
+     "name": "region"
+    },
+    "ResourceId": {
+     "name": "resourceId"
+    },
+    "RoleArn": {
+     "name": "roleArn"
+    },
+    "SecretArn": {
+     "name": "secretArn"
+    },
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "Entitlement": {
+   "members": {
+    "DataTransferSubscriberFeePercent": {
+     "name": "dataTransferSubscriberFeePercent"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "Encryption"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "EntitlementStatus": {
+     "name": "entitlementStatus"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Subscribers": {
+     "name": "subscribers",
+     "shape": "__listOfString"
+    }
+   }
+  },
+  "FabricConfiguration": {
+   "members": {
+    "RecoveryLatencyMode": {
+     "name": "recoveryLatencyMode"
+    }
+   }
+  },
+  "FailoverConfig": {
+   "members": {
+    "FailoverMode": {
+     "name": "failoverMode"
+    },
+    "RecoveryWindow": {
+     "name": "recoveryWindow"
+    },
+    "SourcePriority": {
+     "name": "sourcePriority",
+     "shape": "SourcePriority"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "FailoverRouterInputConfiguration": {
+   "members": {
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "ProtocolConfigurations": {
+     "name": "protocolConfigurations",
+     "shape": "FailoverRouterInputProtocolConfigurationList"
+    },
+    "SourcePriorityMode": {
+     "name": "sourcePriorityMode"
+    },
+    "PrimarySourceIndex": {
+     "name": "primarySourceIndex"
+    }
+   }
+  },
+  "FailoverRouterInputIndexedStreamDetails": {
+   "members": {
+    "SourceIndex": {
+     "name": "sourceIndex"
+    },
+    "SourceIpAddress": {
+     "name": "sourceIpAddress"
+    }
+   }
+  },
+  "FailoverRouterInputProtocolConfiguration": {
+   "members": {
+    "Rist": {
+     "name": "rist",
+     "shape": "RistRouterInputConfiguration"
+    },
+    "SrtListener": {
+     "name": "srtListener",
+     "shape": "SrtListenerRouterInputConfiguration"
+    },
+    "SrtCaller": {
+     "name": "srtCaller",
+     "shape": "SrtCallerRouterInputConfiguration"
+    },
+    "Rtp": {
+     "name": "rtp",
+     "shape": "RtpRouterInputConfiguration"
+    }
+   }
+  },
+  "FailoverRouterInputProtocolConfigurationList": {
+   "list": "FailoverRouterInputProtocolConfiguration"
+  },
+  "FailoverRouterInputStreamDetails": {
+   "members": {
+    "SourceIndexZeroStreamDetails": {
+     "name": "sourceIndexZeroStreamDetails",
+     "shape": "FailoverRouterInputIndexedStreamDetails"
+    },
+    "SourceIndexOneStreamDetails": {
+     "name": "sourceIndexOneStreamDetails",
+     "shape": "FailoverRouterInputIndexedStreamDetails"
+    }
+   }
+  },
+  "Flow": {
+   "members": {
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "EgressIp": {
+     "name": "egressIp"
+    },
+    "Entitlements": {
+     "name": "entitlements",
+     "shape": "__listOfEntitlement"
+    },
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "MediaStreams": {
+     "name": "mediaStreams",
+     "shape": "__listOfMediaStream"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Outputs": {
+     "name": "outputs",
+     "shape": "__listOfOutput"
+    },
+    "Source": {
+     "name": "source",
+     "shape": "Source"
+    },
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "FailoverConfig"
+    },
+    "Sources": {
+     "name": "sources",
+     "shape": "__listOfSource"
+    },
+    "Status": {
+     "name": "status"
+    },
+    "VpcInterfaces": {
+     "name": "vpcInterfaces",
+     "shape": "__listOfVpcInterface"
+    },
+    "Maintenance": {
+     "name": "maintenance",
+     "shape": "Maintenance"
+    },
+    "SourceMonitoringConfig": {
+     "name": "sourceMonitoringConfig",
+     "shape": "MonitoringConfig"
+    },
+    "FlowSize": {
+     "name": "flowSize"
+    },
+    "NdiConfig": {
+     "name": "ndiConfig",
+     "shape": "NdiConfig"
+    },
+    "EncodingConfig": {
+     "name": "encodingConfig",
+     "shape": "EncodingConfig"
+    }
+   }
+  },
+  "FlowTransitEncryption": {
+   "members": {
+    "EncryptionKeyType": {
+     "name": "encryptionKeyType"
+    },
+    "EncryptionKeyConfiguration": {
+     "name": "encryptionKeyConfiguration",
+     "shape": "FlowTransitEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "FlowTransitEncryptionKeyConfiguration": {
+   "members": {
+    "SecretsManager": {
+     "name": "secretsManager",
+     "shape": "SecretsManagerEncryptionKeyConfiguration"
+    },
+    "Automatic": {
+     "name": "automatic",
+     "shape": "AutomaticEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "Fmtp": {
+   "members": {
+    "ChannelOrder": {
+     "name": "channelOrder"
+    },
+    "Colorimetry": {
+     "name": "colorimetry"
+    },
+    "ExactFramerate": {
+     "name": "exactFramerate"
+    },
+    "Par": {
+     "name": "par"
+    },
+    "Range": {
+     "name": "range"
+    },
+    "ScanMode": {
+     "name": "scanMode"
+    },
+    "Tcs": {
+     "name": "tcs"
+    }
+   }
+  },
+  "FmtpRequest": {
+   "members": {
+    "ChannelOrder": {
+     "name": "channelOrder"
+    },
+    "Colorimetry": {
+     "name": "colorimetry"
+    },
+    "ExactFramerate": {
+     "name": "exactFramerate"
+    },
+    "Par": {
+     "name": "par"
+    },
+    "Range": {
+     "name": "range"
+    },
+    "ScanMode": {
+     "name": "scanMode"
+    },
+    "Tcs": {
+     "name": "tcs"
+    }
+   }
+  },
+  "ForbiddenException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "FrameResolution": {
+   "members": {
+    "FrameHeight": {
+     "name": "frameHeight"
+    },
+    "FrameWidth": {
+     "name": "frameWidth"
+    }
+   }
+  },
+  "FrozenFrames": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "FrozenFramesConfiguration": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "Gateway": {
+   "members": {
+    "EgressCidrBlocks": {
+     "name": "egressCidrBlocks",
+     "shape": "__listOfString"
+    },
+    "GatewayArn": {
+     "name": "gatewayArn"
+    },
+    "GatewayMessages": {
+     "name": "gatewayMessages",
+     "shape": "__listOfMessageDetail"
+    },
+    "GatewayState": {
+     "name": "gatewayState"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Networks": {
+     "name": "networks",
+     "shape": "__listOfGatewayNetwork"
+    }
+   }
+  },
+  "GatewayBridgeSource": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    }
+   }
+  },
+  "GatewayInstance": {
+   "members": {
+    "BridgePlacement": {
+     "name": "bridgePlacement"
+    },
+    "ConnectionStatus": {
+     "name": "connectionStatus"
+    },
+    "GatewayArn": {
+     "name": "gatewayArn"
+    },
+    "GatewayInstanceArn": {
+     "name": "gatewayInstanceArn"
+    },
+    "InstanceId": {
+     "name": "instanceId"
+    },
+    "InstanceMessages": {
+     "name": "instanceMessages",
+     "shape": "__listOfMessageDetail"
+    },
+    "InstanceState": {
+     "name": "instanceState"
+    },
+    "RunningBridgeCount": {
+     "name": "runningBridgeCount"
+    }
+   }
+  },
+  "GatewayNetwork": {
+   "members": {
+    "CidrBlock": {
+     "name": "cidrBlock"
+    },
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "GetRouterInputRequest": {
+   "members": {}
+  },
+  "GetRouterInputResponse": {
+   "members": {
+    "RouterInput": {
+     "name": "routerInput",
+     "shape": "RouterInput"
+    }
+   }
+  },
+  "GetRouterInputSourceMetadataRequest": {
+   "members": {}
+  },
+  "GetRouterInputSourceMetadataResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "SourceMetadataDetails": {
+     "name": "sourceMetadataDetails",
+     "shape": "RouterInputSourceMetadataDetails"
+    }
+   }
+  },
+  "GetRouterInputThumbnailRequest": {
+   "members": {}
+  },
+  "GetRouterInputThumbnailResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "ThumbnailDetails": {
+     "name": "thumbnailDetails",
+     "shape": "RouterInputThumbnailDetails"
+    }
+   }
+  },
+  "GetRouterNetworkInterfaceRequest": {
+   "members": {}
+  },
+  "GetRouterNetworkInterfaceResponse": {
+   "members": {
+    "RouterNetworkInterface": {
+     "name": "routerNetworkInterface",
+     "shape": "RouterNetworkInterface"
+    }
+   }
+  },
+  "GetRouterOutputRequest": {
+   "members": {}
+  },
+  "GetRouterOutputResponse": {
+   "members": {
+    "RouterOutput": {
+     "name": "routerOutput",
+     "shape": "RouterOutput"
+    }
+   }
+  },
+  "GrantEntitlementRequest": {
+   "members": {
+    "DataTransferSubscriberFeePercent": {
+     "name": "dataTransferSubscriberFeePercent"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "Encryption"
+    },
+    "EntitlementStatus": {
+     "name": "entitlementStatus"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Subscribers": {
+     "name": "subscribers",
+     "shape": "__listOfString"
+    },
+    "EntitlementTags": {
+     "name": "entitlementTags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "GrantFlowEntitlements420Exception": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "GrantFlowEntitlementsRequest": {
+   "members": {
+    "Entitlements": {
+     "name": "entitlements",
+     "shape": "__listOfGrantEntitlementRequest"
+    }
+   }
+  },
+  "GrantFlowEntitlementsResponse": {
+   "members": {
+    "Entitlements": {
+     "name": "entitlements",
+     "shape": "__listOfEntitlement"
+    },
+    "FlowArn": {
+     "name": "flowArn"
+    }
+   }
+  },
+  "IngressGatewayBridge": {
+   "members": {
+    "InstanceId": {
+     "name": "instanceId"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxOutputs": {
+     "name": "maxOutputs"
+    }
+   }
+  },
+  "InputConfiguration": {
+   "members": {
+    "InputIp": {
+     "name": "inputIp"
+    },
+    "InputPort": {
+     "name": "inputPort"
+    },
+    "Interface": {
+     "name": "interface",
+     "shape": "Interface"
+    }
+   }
+  },
+  "InputConfigurationRequest": {
+   "members": {
+    "InputPort": {
+     "name": "inputPort"
+    },
+    "Interface": {
+     "name": "interface",
+     "shape": "InterfaceRequest"
+    }
+   }
+  },
+  "Interface": {
+   "members": {
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "InterfaceRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "InternalServerErrorException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "ListBridgesRequest": {
+   "members": {}
+  },
+  "ListBridgesResponse": {
+   "members": {
+    "Bridges": {
+     "name": "bridges",
+     "shape": "__listOfListedBridge"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListEntitlementsRequest": {
+   "members": {}
+  },
+  "ListEntitlementsResponse": {
+   "members": {
+    "Entitlements": {
+     "name": "entitlements",
+     "shape": "__listOfListedEntitlement"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListFlowsRequest": {
+   "members": {}
+  },
+  "ListFlowsResponse": {
+   "members": {
+    "Flows": {
+     "name": "flows",
+     "shape": "__listOfListedFlow"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListGatewayInstancesRequest": {
+   "members": {}
+  },
+  "ListGatewayInstancesResponse": {
+   "members": {
+    "Instances": {
+     "name": "instances",
+     "shape": "__listOfListedGatewayInstance"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListGatewaysRequest": {
+   "members": {}
+  },
+  "ListGatewaysResponse": {
+   "members": {
+    "Gateways": {
+     "name": "gateways",
+     "shape": "__listOfListedGateway"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListOfferingsRequest": {
+   "members": {}
+  },
+  "ListOfferingsResponse": {
+   "members": {
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Offerings": {
+     "name": "offerings",
+     "shape": "__listOfOffering"
+    }
+   }
+  },
+  "ListReservationsRequest": {
+   "members": {}
+  },
+  "ListReservationsResponse": {
+   "members": {
+    "NextToken": {
+     "name": "nextToken"
+    },
+    "Reservations": {
+     "name": "reservations",
+     "shape": "__listOfReservation"
+    }
+   }
+  },
+  "ListRouterInputsRequest": {
+   "members": {
+    "Filters": {
+     "name": "filters",
+     "shape": "RouterInputFilterList"
+    }
+   }
+  },
+  "ListRouterInputsResponse": {
+   "members": {
+    "RouterInputs": {
+     "name": "routerInputs",
+     "shape": "ListedRouterInputList"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListRouterNetworkInterfacesRequest": {
+   "members": {
+    "Filters": {
+     "name": "filters",
+     "shape": "RouterNetworkInterfaceFilterList"
+    }
+   }
+  },
+  "ListRouterNetworkInterfacesResponse": {
+   "members": {
+    "RouterNetworkInterfaces": {
+     "name": "routerNetworkInterfaces",
+     "shape": "ListedRouterNetworkInterfaceList"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListRouterOutputsRequest": {
+   "members": {
+    "Filters": {
+     "name": "filters",
+     "shape": "RouterOutputFilterList"
+    }
+   }
+  },
+  "ListRouterOutputsResponse": {
+   "members": {
+    "RouterOutputs": {
+     "name": "routerOutputs",
+     "shape": "ListedRouterOutputList"
+    },
+    "NextToken": {
+     "name": "nextToken"
+    }
+   }
+  },
+  "ListTagsForGlobalResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForGlobalResourceResponse": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "ListTagsForResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForResourceResponse": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "ListedBridge": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "BridgeState": {
+     "name": "bridgeState"
+    },
+    "BridgeType": {
+     "name": "bridgeType"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "PlacementArn": {
+     "name": "placementArn"
+    }
+   }
+  },
+  "ListedEntitlement": {
+   "members": {
+    "DataTransferSubscriberFeePercent": {
+     "name": "dataTransferSubscriberFeePercent"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "EntitlementName": {
+     "name": "entitlementName"
+    }
+   }
+  },
+  "ListedFlow": {
+   "members": {
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "SourceType": {
+     "name": "sourceType"
+    },
+    "Status": {
+     "name": "status"
+    },
+    "Maintenance": {
+     "name": "maintenance",
+     "shape": "Maintenance"
+    }
+   }
+  },
+  "ListedGateway": {
+   "members": {
+    "GatewayArn": {
+     "name": "gatewayArn"
+    },
+    "GatewayState": {
+     "name": "gatewayState"
+    },
+    "Name": {
+     "name": "name"
+    }
+   }
+  },
+  "ListedGatewayInstance": {
+   "members": {
+    "GatewayArn": {
+     "name": "gatewayArn"
+    },
+    "GatewayInstanceArn": {
+     "name": "gatewayInstanceArn"
+    },
+    "InstanceId": {
+     "name": "instanceId"
+    },
+    "InstanceState": {
+     "name": "instanceState"
+    }
+   }
+  },
+  "ListedRouterInput": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "InputType": {
+     "name": "inputType"
+    },
+    "State": {
+     "name": "state"
+    },
+    "RoutedOutputs": {
+     "name": "routedOutputs"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    },
+    "MessageCount": {
+     "name": "messageCount"
+    },
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    }
+   }
+  },
+  "ListedRouterInputList": {
+   "list": "ListedRouterInput"
+  },
+  "ListedRouterNetworkInterface": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "NetworkInterfaceType": {
+     "name": "networkInterfaceType"
+    },
+    "AssociatedOutputCount": {
+     "name": "associatedOutputCount"
+    },
+    "AssociatedInputCount": {
+     "name": "associatedInputCount"
+    },
+    "State": {
+     "name": "state"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    }
+   }
+  },
+  "ListedRouterNetworkInterfaceList": {
+   "list": "ListedRouterNetworkInterface"
+  },
+  "ListedRouterOutput": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "OutputType": {
+     "name": "outputType"
+    },
+    "State": {
+     "name": "state"
+    },
+    "RoutedState": {
+     "name": "routedState"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    },
+    "MessageCount": {
+     "name": "messageCount"
+    },
+    "RoutedInputArn": {
+     "name": "routedInputArn"
+    },
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    }
+   }
+  },
+  "ListedRouterOutputList": {
+   "list": "ListedRouterOutput"
+  },
+  "Maintenance": {
+   "members": {
+    "MaintenanceDay": {
+     "name": "maintenanceDay"
+    },
+    "MaintenanceDeadline": {
+     "name": "maintenanceDeadline"
+    },
+    "MaintenanceScheduledDate": {
+     "name": "maintenanceScheduledDate"
+    },
+    "MaintenanceStartHour": {
+     "name": "maintenanceStartHour"
+    }
+   }
+  },
+  "MaintenanceConfiguration": {
+   "members": {
+    "PreferredDayTime": {
+     "name": "preferredDayTime",
+     "shape": "PreferredDayTimeMaintenanceConfiguration"
+    },
+    "Default": {
+     "name": "default",
+     "shape": "DefaultMaintenanceConfiguration"
+    }
+   }
+  },
+  "MaintenanceSchedule": {
+   "members": {
+    "Window": {
+     "name": "window",
+     "shape": "WindowMaintenanceSchedule"
+    }
+   }
+  },
+  "MediaConnectFlowRouterInputConfiguration": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowOutputArn": {
+     "name": "flowOutputArn"
+    },
+    "SourceTransitDecryption": {
+     "name": "sourceTransitDecryption",
+     "shape": "FlowTransitEncryption"
+    }
+   }
+  },
+  "MediaConnectFlowRouterInputStreamDetails": {
+   "members": {}
+  },
+  "MediaConnectFlowRouterOutputConfiguration": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowSourceArn": {
+     "name": "flowSourceArn"
+    },
+    "DestinationTransitEncryption": {
+     "name": "destinationTransitEncryption",
+     "shape": "FlowTransitEncryption"
+    }
+   }
+  },
+  "MediaConnectFlowRouterOutputStreamDetails": {
+   "members": {}
+  },
+  "MediaLiveChannelRouterInputConfiguration": {
+   "members": {
+    "MediaLiveChannelArn": {
+     "name": "mediaLiveChannelArn"
+    },
+    "MediaLivePipelineId": {
+     "name": "mediaLivePipelineId"
+    },
+    "MediaLiveChannelOutputName": {
+     "name": "mediaLiveChannelOutputName"
+    },
+    "SourceTransitDecryption": {
+     "name": "sourceTransitDecryption",
+     "shape": "MediaLiveTransitEncryption"
+    }
+   }
+  },
+  "MediaLiveChannelRouterInputStreamDetails": {
+   "members": {}
+  },
+  "MediaLiveInputRouterOutputConfiguration": {
+   "members": {
+    "MediaLiveInputArn": {
+     "name": "mediaLiveInputArn"
+    },
+    "MediaLivePipelineId": {
+     "name": "mediaLivePipelineId"
+    },
+    "DestinationTransitEncryption": {
+     "name": "destinationTransitEncryption",
+     "shape": "MediaLiveTransitEncryption"
+    }
+   }
+  },
+  "MediaLiveInputRouterOutputStreamDetails": {
+   "members": {}
+  },
+  "MediaLiveTransitEncryption": {
+   "members": {
+    "EncryptionKeyType": {
+     "name": "encryptionKeyType"
+    },
+    "EncryptionKeyConfiguration": {
+     "name": "encryptionKeyConfiguration",
+     "shape": "MediaLiveTransitEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "MediaLiveTransitEncryptionKeyConfiguration": {
+   "members": {
+    "SecretsManager": {
+     "name": "secretsManager",
+     "shape": "SecretsManagerEncryptionKeyConfiguration"
+    },
+    "Automatic": {
+     "name": "automatic",
+     "shape": "AutomaticEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "MediaStream": {
+   "members": {
+    "Attributes": {
+     "name": "attributes",
+     "shape": "MediaStreamAttributes"
+    },
+    "ClockRate": {
+     "name": "clockRate"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Fmt": {
+     "name": "fmt"
+    },
+    "MediaStreamId": {
+     "name": "mediaStreamId"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    },
+    "MediaStreamType": {
+     "name": "mediaStreamType"
+    },
+    "VideoFormat": {
+     "name": "videoFormat"
+    }
+   }
+  },
+  "MediaStreamAttributes": {
+   "members": {
+    "Fmtp": {
+     "name": "fmtp",
+     "shape": "Fmtp"
+    },
+    "Lang": {
+     "name": "lang"
+    }
+   }
+  },
+  "MediaStreamAttributesRequest": {
+   "members": {
+    "Fmtp": {
+     "name": "fmtp",
+     "shape": "FmtpRequest"
+    },
+    "Lang": {
+     "name": "lang"
+    }
+   }
+  },
+  "MediaStreamOutputConfiguration": {
+   "members": {
+    "DestinationConfigurations": {
+     "name": "destinationConfigurations",
+     "shape": "__listOfDestinationConfiguration"
+    },
+    "EncodingName": {
+     "name": "encodingName"
+    },
+    "EncodingParameters": {
+     "name": "encodingParameters",
+     "shape": "EncodingParameters"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    }
+   }
+  },
+  "MediaStreamOutputConfigurationRequest": {
+   "members": {
+    "DestinationConfigurations": {
+     "name": "destinationConfigurations",
+     "shape": "__listOfDestinationConfigurationRequest"
+    },
+    "EncodingName": {
+     "name": "encodingName"
+    },
+    "EncodingParameters": {
+     "name": "encodingParameters",
+     "shape": "EncodingParametersRequest"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    }
+   }
+  },
+  "MediaStreamSourceConfiguration": {
+   "members": {
+    "EncodingName": {
+     "name": "encodingName"
+    },
+    "InputConfigurations": {
+     "name": "inputConfigurations",
+     "shape": "__listOfInputConfiguration"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    }
+   }
+  },
+  "MediaStreamSourceConfigurationRequest": {
+   "members": {
+    "EncodingName": {
+     "name": "encodingName"
+    },
+    "InputConfigurations": {
+     "name": "inputConfigurations",
+     "shape": "__listOfInputConfigurationRequest"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    }
+   }
+  },
+  "MergeRouterInputConfiguration": {
+   "members": {
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "ProtocolConfigurations": {
+     "name": "protocolConfigurations",
+     "shape": "MergeRouterInputProtocolConfigurationList"
+    },
+    "MergeRecoveryWindowMilliseconds": {
+     "name": "mergeRecoveryWindowMilliseconds"
+    }
+   }
+  },
+  "MergeRouterInputIndexedStreamDetails": {
+   "members": {
+    "SourceIndex": {
+     "name": "sourceIndex"
+    },
+    "SourceIpAddress": {
+     "name": "sourceIpAddress"
+    }
+   }
+  },
+  "MergeRouterInputProtocolConfiguration": {
+   "members": {
+    "Rtp": {
+     "name": "rtp",
+     "shape": "RtpRouterInputConfiguration"
+    },
+    "Rist": {
+     "name": "rist",
+     "shape": "RistRouterInputConfiguration"
+    }
+   }
+  },
+  "MergeRouterInputProtocolConfigurationList": {
+   "list": "MergeRouterInputProtocolConfiguration"
+  },
+  "MergeRouterInputStreamDetails": {
+   "members": {
+    "SourceIndexZeroStreamDetails": {
+     "name": "sourceIndexZeroStreamDetails",
+     "shape": "MergeRouterInputIndexedStreamDetails"
+    },
+    "SourceIndexOneStreamDetails": {
+     "name": "sourceIndexOneStreamDetails",
+     "shape": "MergeRouterInputIndexedStreamDetails"
+    }
+   }
+  },
+  "MessageDetail": {
+   "members": {
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    },
+    "ResourceName": {
+     "name": "resourceName"
+    }
+   }
+  },
+  "Messages": {
+   "members": {
+    "Errors": {
+     "name": "errors",
+     "shape": "__listOfString"
+    }
+   }
+  },
+  "MonitoringConfig": {
+   "members": {
+    "ThumbnailState": {
+     "name": "thumbnailState"
+    },
+    "AudioMonitoringSettings": {
+     "name": "audioMonitoringSettings",
+     "shape": "__listOfAudioMonitoringSetting"
+    },
+    "ContentQualityAnalysisState": {
+     "name": "contentQualityAnalysisState"
+    },
+    "VideoMonitoringSettings": {
+     "name": "videoMonitoringSettings",
+     "shape": "__listOfVideoMonitoringSetting"
+    }
+   }
+  },
+  "MulticastSourceSettings": {
+   "members": {
+    "MulticastSourceIp": {
+     "name": "multicastSourceIp"
+    }
+   }
+  },
+  "NdiConfig": {
+   "members": {
+    "NdiState": {
+     "name": "ndiState"
+    },
+    "MachineName": {
+     "name": "machineName"
+    },
+    "NdiDiscoveryServers": {
+     "name": "ndiDiscoveryServers",
+     "shape": "__listOfNdiDiscoveryServerConfig"
+    }
+   }
+  },
+  "NdiDiscoveryServerConfig": {
+   "members": {
+    "DiscoveryServerAddress": {
+     "name": "discoveryServerAddress"
+    },
+    "DiscoveryServerPort": {
+     "name": "discoveryServerPort"
+    },
+    "VpcInterfaceAdapter": {
+     "name": "vpcInterfaceAdapter"
+    }
+   }
+  },
+  "NdiMediaInfo": {
+   "members": {
+    "Streams": {
+     "name": "streams",
+     "shape": "__listOfNdiMediaStreamInfo"
+    }
+   }
+  },
+  "NdiMediaStreamInfo": {
+   "members": {
+    "StreamType": {
+     "name": "streamType"
+    },
+    "Codec": {
+     "name": "codec"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "ScanMode": {
+     "name": "scanMode"
+    },
+    "Color": {
+     "name": "color",
+     "shape": "ColorInformation"
+    },
+    "FrameResolution": {
+     "name": "frameResolution",
+     "shape": "FrameResolution"
+    },
+    "FrameRate": {
+     "name": "frameRate"
+    },
+    "Channels": {
+     "name": "channels"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    }
+   }
+  },
+  "NdiSourceInfo": {
+   "members": {
+    "SourceName": {
+     "name": "sourceName"
+    }
+   }
+  },
+  "NdiSourceMetadataInfo": {
+   "members": {
+    "ActiveSource": {
+     "name": "activeSource",
+     "shape": "NdiSourceInfo"
+    },
+    "DiscoveredSources": {
+     "name": "discoveredSources",
+     "shape": "__listOfNdiSourceInfo"
+    },
+    "MediaInfo": {
+     "name": "mediaInfo",
+     "shape": "NdiMediaInfo"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "__listOfMessageDetail"
+    }
+   }
+  },
+  "NdiSourceSettings": {
+   "members": {
+    "SourceName": {
+     "name": "sourceName"
+    },
+    "AudioReferenceLevel": {
+     "name": "audioReferenceLevel"
+    }
+   }
+  },
+  "NotFoundException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "Offering": {
+   "members": {
+    "CurrencyCode": {
+     "name": "currencyCode"
+    },
+    "Duration": {
+     "name": "duration"
+    },
+    "DurationUnits": {
+     "name": "durationUnits"
+    },
+    "OfferingArn": {
+     "name": "offeringArn"
+    },
+    "OfferingDescription": {
+     "name": "offeringDescription"
+    },
+    "PricePerUnit": {
+     "name": "pricePerUnit"
+    },
+    "PriceUnits": {
+     "name": "priceUnits"
+    },
+    "ResourceSpecification": {
+     "name": "resourceSpecification",
+     "shape": "ResourceSpecification"
+    }
+   }
+  },
+  "Output": {
+   "members": {
+    "DataTransferSubscriberFeePercent": {
+     "name": "dataTransferSubscriberFeePercent"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "Encryption"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "ListenerAddress": {
+     "name": "listenerAddress"
+    },
+    "MediaLiveInputArn": {
+     "name": "mediaLiveInputArn"
+    },
+    "MediaStreamOutputConfigurations": {
+     "name": "mediaStreamOutputConfigurations",
+     "shape": "__listOfMediaStreamOutputConfiguration"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "OutputArn": {
+     "name": "outputArn"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Transport": {
+     "name": "transport",
+     "shape": "Transport"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    },
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "BridgePorts": {
+     "name": "bridgePorts",
+     "shape": "__listOfInteger"
+    },
+    "OutputStatus": {
+     "name": "outputStatus"
+    },
+    "PeerIpAddress": {
+     "name": "peerIpAddress"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitEncryption": {
+     "name": "routerIntegrationTransitEncryption",
+     "shape": "FlowTransitEncryption"
+    },
+    "ConnectedRouterInputArn": {
+     "name": "connectedRouterInputArn"
+    }
+   }
+  },
+  "PreferredDayTimeMaintenanceConfiguration": {
+   "members": {
+    "Day": {
+     "name": "day"
+    },
+    "Time": {
+     "name": "time"
+    }
+   }
+  },
+  "PublicRouterNetworkInterfaceConfiguration": {
+   "members": {
+    "AllowRules": {
+     "name": "allowRules",
+     "shape": "PublicRouterNetworkInterfaceConfigurationAllowRulesList"
+    }
+   }
+  },
+  "PublicRouterNetworkInterfaceConfigurationAllowRulesList": {
+   "list": "PublicRouterNetworkInterfaceRule"
+  },
+  "PublicRouterNetworkInterfaceRule": {
+   "members": {
+    "Cidr": {
+     "name": "cidr"
+    }
+   }
+  },
+  "PublicTlsEncryptionConfiguration": {
+   "members": {}
+  },
+  "PurchaseOfferingRequest": {
+   "members": {
+    "ReservationName": {
+     "name": "reservationName"
+    },
+    "Start": {
+     "name": "start"
+    }
+   }
+  },
+  "PurchaseOfferingResponse": {
+   "members": {
+    "Reservation": {
+     "name": "reservation",
+     "shape": "Reservation"
+    }
+   }
+  },
+  "RemoveBridgeOutputRequest": {
+   "members": {}
+  },
+  "RemoveBridgeOutputResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "OutputName": {
+     "name": "outputName"
+    }
+   }
+  },
+  "RemoveBridgeSourceRequest": {
+   "members": {}
+  },
+  "RemoveBridgeSourceResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "SourceName": {
+     "name": "sourceName"
+    }
+   }
+  },
+  "RemoveFlowMediaStreamRequest": {
+   "members": {}
+  },
+  "RemoveFlowMediaStreamResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "MediaStreamName": {
+     "name": "mediaStreamName"
+    }
+   }
+  },
+  "RemoveFlowOutputRequest": {
+   "members": {}
+  },
+  "RemoveFlowOutputResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "OutputArn": {
+     "name": "outputArn"
+    }
+   }
+  },
+  "RemoveFlowSourceRequest": {
+   "members": {}
+  },
+  "RemoveFlowSourceResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "SourceArn": {
+     "name": "sourceArn"
+    }
+   }
+  },
+  "RemoveFlowVpcInterfaceRequest": {
+   "members": {}
+  },
+  "RemoveFlowVpcInterfaceResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "NonDeletedNetworkInterfaceIds": {
+     "name": "nonDeletedNetworkInterfaceIds",
+     "shape": "__listOfString"
+    },
+    "VpcInterfaceName": {
+     "name": "vpcInterfaceName"
+    }
+   }
+  },
+  "Reservation": {
+   "members": {
+    "CurrencyCode": {
+     "name": "currencyCode"
+    },
+    "Duration": {
+     "name": "duration"
+    },
+    "DurationUnits": {
+     "name": "durationUnits"
+    },
+    "End": {
+     "name": "end"
+    },
+    "OfferingArn": {
+     "name": "offeringArn"
+    },
+    "OfferingDescription": {
+     "name": "offeringDescription"
+    },
+    "PricePerUnit": {
+     "name": "pricePerUnit"
+    },
+    "PriceUnits": {
+     "name": "priceUnits"
+    },
+    "ReservationArn": {
+     "name": "reservationArn"
+    },
+    "ReservationName": {
+     "name": "reservationName"
+    },
+    "ReservationState": {
+     "name": "reservationState"
+    },
+    "ResourceSpecification": {
+     "name": "resourceSpecification",
+     "shape": "ResourceSpecification"
+    },
+    "Start": {
+     "name": "start"
+    }
+   }
+  },
+  "ResourceSpecification": {
+   "members": {
+    "ReservedBitrate": {
+     "name": "reservedBitrate"
+    },
+    "ResourceType": {
+     "name": "resourceType"
+    }
+   }
+  },
+  "RestartRouterInputRequest": {
+   "members": {}
+  },
+  "RestartRouterInputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "RestartRouterOutputRequest": {
+   "members": {}
+  },
+  "RestartRouterOutputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "RevokeFlowEntitlementRequest": {
+   "members": {}
+  },
+  "RevokeFlowEntitlementResponse": {
+   "members": {
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "FlowArn": {
+     "name": "flowArn"
+    }
+   }
+  },
+  "RistRouterInputConfiguration": {
+   "members": {
+    "Port": {
+     "name": "port"
+    },
+    "RecoveryLatencyMilliseconds": {
+     "name": "recoveryLatencyMilliseconds"
+    }
+   }
+  },
+  "RistRouterOutputConfiguration": {
+   "members": {
+    "DestinationAddress": {
+     "name": "destinationAddress"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    }
+   }
+  },
+  "RouterContentQualityAnalysisConfiguration": {
+   "members": {
+    "ContentLevel": {
+     "name": "contentLevel",
+     "shape": "ContentQualityAnalysisFeatureConfiguration"
+    }
+   }
+  },
+  "RouterInput": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "State": {
+     "name": "state"
+    },
+    "InputType": {
+     "name": "inputType"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterInputConfiguration"
+    },
+    "RoutedOutputs": {
+     "name": "routedOutputs"
+    },
+    "MaximumRoutedOutputs": {
+     "name": "maximumRoutedOutputs"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "RouterInputMessages"
+    },
+    "TransitEncryption": {
+     "name": "transitEncryption",
+     "shape": "RouterInputTransitEncryption"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    },
+    "StreamDetails": {
+     "name": "streamDetails",
+     "shape": "RouterInputStreamDetails"
+    },
+    "IpAddress": {
+     "name": "ipAddress"
+    },
+    "MaintenanceType": {
+     "name": "maintenanceType"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    },
+    "ContentQualityAnalysisType": {
+     "name": "contentQualityAnalysisType"
+    },
+    "ContentQualityAnalysisConfiguration": {
+     "name": "contentQualityAnalysisConfiguration",
+     "shape": "RouterContentQualityAnalysisConfiguration"
+    }
+   }
+  },
+  "RouterInputArnList": {
+   "list": "RouterInputArn"
+  },
+  "RouterInputConfiguration": {
+   "members": {
+    "Standard": {
+     "name": "standard",
+     "shape": "StandardRouterInputConfiguration"
+    },
+    "MediaLiveChannel": {
+     "name": "mediaLiveChannel",
+     "shape": "MediaLiveChannelRouterInputConfiguration"
+    },
+    "Failover": {
+     "name": "failover",
+     "shape": "FailoverRouterInputConfiguration"
+    },
+    "MediaConnectFlow": {
+     "name": "mediaConnectFlow",
+     "shape": "MediaConnectFlowRouterInputConfiguration"
+    },
+    "Merge": {
+     "name": "merge",
+     "shape": "MergeRouterInputConfiguration"
+    }
+   }
+  },
+  "RouterInputFilter": {
+   "members": {
+    "NameContains": {
+     "name": "nameContains",
+     "shape": "StringList"
+    },
+    "RegionNames": {
+     "name": "regionNames",
+     "shape": "StringList"
+    },
+    "NetworkInterfaceArns": {
+     "name": "networkInterfaceArns",
+     "shape": "RouterNetworkInterfaceArnList"
+    },
+    "RoutingScopes": {
+     "name": "routingScopes",
+     "shape": "RoutingScopeList"
+    },
+    "InputTypes": {
+     "name": "inputTypes",
+     "shape": "RouterInputTypeList"
+    }
+   }
+  },
+  "RouterInputFilterList": {
+   "list": "RouterInputFilter"
+  },
+  "RouterInputList": {
+   "list": "RouterInput"
+  },
+  "RouterInputMessage": {
+   "members": {
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "RouterInputMessages": {
+   "list": "RouterInputMessage"
+  },
+  "RouterInputMetadata": {
+   "members": {
+    "TransportStreamMediaInfo": {
+     "name": "transportStreamMediaInfo",
+     "shape": "TransportMediaInfo"
+    }
+   }
+  },
+  "RouterInputProtocolConfiguration": {
+   "members": {
+    "Rist": {
+     "name": "rist",
+     "shape": "RistRouterInputConfiguration"
+    },
+    "SrtListener": {
+     "name": "srtListener",
+     "shape": "SrtListenerRouterInputConfiguration"
+    },
+    "SrtCaller": {
+     "name": "srtCaller",
+     "shape": "SrtCallerRouterInputConfiguration"
+    },
+    "Rtp": {
+     "name": "rtp",
+     "shape": "RtpRouterInputConfiguration"
+    }
+   }
+  },
+  "RouterInputServiceQuotaExceededException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "RouterInputSourceMetadataDetails": {
+   "members": {
+    "SourceMetadataMessages": {
+     "name": "sourceMetadataMessages",
+     "shape": "RouterInputMessages"
+    },
+    "Timestamp": {
+     "name": "timestamp"
+    },
+    "RouterInputMetadata": {
+     "name": "routerInputMetadata",
+     "shape": "RouterInputMetadata"
+    }
+   }
+  },
+  "RouterInputStreamDetails": {
+   "members": {
+    "Standard": {
+     "name": "standard",
+     "shape": "StandardRouterInputStreamDetails"
+    },
+    "MediaLiveChannel": {
+     "name": "mediaLiveChannel",
+     "shape": "MediaLiveChannelRouterInputStreamDetails"
+    },
+    "Failover": {
+     "name": "failover",
+     "shape": "FailoverRouterInputStreamDetails"
+    },
+    "MediaConnectFlow": {
+     "name": "mediaConnectFlow",
+     "shape": "MediaConnectFlowRouterInputStreamDetails"
+    },
+    "Merge": {
+     "name": "merge",
+     "shape": "MergeRouterInputStreamDetails"
+    }
+   }
+  },
+  "RouterInputThumbnailDetails": {
+   "members": {
+    "ThumbnailMessages": {
+     "name": "thumbnailMessages",
+     "shape": "RouterInputMessages"
+    },
+    "Thumbnail": {
+     "name": "thumbnail"
+    },
+    "Timecode": {
+     "name": "timecode"
+    },
+    "Timestamp": {
+     "name": "timestamp"
+    }
+   }
+  },
+  "RouterInputTransitEncryption": {
+   "members": {
+    "EncryptionKeyType": {
+     "name": "encryptionKeyType"
+    },
+    "EncryptionKeyConfiguration": {
+     "name": "encryptionKeyConfiguration",
+     "shape": "RouterInputTransitEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "RouterInputTransitEncryptionKeyConfiguration": {
+   "members": {
+    "SecretsManager": {
+     "name": "secretsManager",
+     "shape": "SecretsManagerEncryptionKeyConfiguration"
+    },
+    "Automatic": {
+     "name": "automatic",
+     "shape": "AutomaticEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "RouterInputTypeList": {
+   "list": "RouterInputType"
+  },
+  "RouterNetworkInterface": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "State": {
+     "name": "state"
+    },
+    "NetworkInterfaceType": {
+     "name": "networkInterfaceType"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterNetworkInterfaceConfiguration"
+    },
+    "AssociatedOutputCount": {
+     "name": "associatedOutputCount"
+    },
+    "AssociatedInputCount": {
+     "name": "associatedInputCount"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "RouterNetworkInterfaceArnList": {
+   "list": "RouterNetworkInterfaceArn"
+  },
+  "RouterNetworkInterfaceConfiguration": {
+   "members": {
+    "Public": {
+     "name": "public",
+     "shape": "PublicRouterNetworkInterfaceConfiguration"
+    },
+    "Vpc": {
+     "name": "vpc",
+     "shape": "VpcRouterNetworkInterfaceConfiguration"
+    }
+   }
+  },
+  "RouterNetworkInterfaceFilter": {
+   "members": {
+    "RegionNames": {
+     "name": "regionNames",
+     "shape": "StringList"
+    },
+    "NetworkInterfaceTypes": {
+     "name": "networkInterfaceTypes",
+     "shape": "RouterNetworkInterfaceTypeList"
+    },
+    "NameContains": {
+     "name": "nameContains",
+     "shape": "StringList"
+    }
+   }
+  },
+  "RouterNetworkInterfaceFilterList": {
+   "list": "RouterNetworkInterfaceFilter"
+  },
+  "RouterNetworkInterfaceList": {
+   "list": "RouterNetworkInterface"
+  },
+  "RouterNetworkInterfaceServiceQuotaExceededException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "RouterNetworkInterfaceTypeList": {
+   "list": "RouterNetworkInterfaceType"
+  },
+  "RouterOutput": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Arn": {
+     "name": "arn"
+    },
+    "Id": {
+     "name": "id"
+    },
+    "State": {
+     "name": "state"
+    },
+    "OutputType": {
+     "name": "outputType"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterOutputConfiguration"
+    },
+    "RoutedState": {
+     "name": "routedState"
+    },
+    "RegionName": {
+     "name": "regionName"
+    },
+    "AvailabilityZone": {
+     "name": "availabilityZone"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "CreatedAt": {
+     "name": "createdAt"
+    },
+    "UpdatedAt": {
+     "name": "updatedAt"
+    },
+    "Messages": {
+     "name": "messages",
+     "shape": "RouterOutputMessages"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    },
+    "StreamDetails": {
+     "name": "streamDetails",
+     "shape": "RouterOutputStreamDetails"
+    },
+    "IpAddress": {
+     "name": "ipAddress"
+    },
+    "RoutedInputArn": {
+     "name": "routedInputArn"
+    },
+    "MaintenanceType": {
+     "name": "maintenanceType"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    },
+    "FabricConfiguration": {
+     "name": "fabricConfiguration",
+     "shape": "FabricConfiguration"
+    }
+   }
+  },
+  "RouterOutputConfiguration": {
+   "members": {
+    "Standard": {
+     "name": "standard",
+     "shape": "StandardRouterOutputConfiguration"
+    },
+    "MediaConnectFlow": {
+     "name": "mediaConnectFlow",
+     "shape": "MediaConnectFlowRouterOutputConfiguration"
+    },
+    "MediaLiveInput": {
+     "name": "mediaLiveInput",
+     "shape": "MediaLiveInputRouterOutputConfiguration"
+    }
+   }
+  },
+  "RouterOutputFilter": {
+   "members": {
+    "RegionNames": {
+     "name": "regionNames",
+     "shape": "StringList"
+    },
+    "NetworkInterfaceArns": {
+     "name": "networkInterfaceArns",
+     "shape": "RouterNetworkInterfaceArnList"
+    },
+    "RoutingScopes": {
+     "name": "routingScopes",
+     "shape": "RoutingScopeList"
+    },
+    "OutputTypes": {
+     "name": "outputTypes",
+     "shape": "RouterOutputTypeList"
+    },
+    "RoutedInputArns": {
+     "name": "routedInputArns",
+     "shape": "RouterInputArnList"
+    },
+    "NameContains": {
+     "name": "nameContains",
+     "shape": "StringList"
+    }
+   }
+  },
+  "RouterOutputFilterList": {
+   "list": "RouterOutputFilter"
+  },
+  "RouterOutputList": {
+   "list": "RouterOutput"
+  },
+  "RouterOutputMessage": {
+   "members": {
+    "Code": {
+     "name": "code"
+    },
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "RouterOutputMessages": {
+   "list": "RouterOutputMessage"
+  },
+  "RouterOutputProtocolConfiguration": {
+   "members": {
+    "Rist": {
+     "name": "rist",
+     "shape": "RistRouterOutputConfiguration"
+    },
+    "SrtListener": {
+     "name": "srtListener",
+     "shape": "SrtListenerRouterOutputConfiguration"
+    },
+    "RtmpPush": {
+     "name": "rtmpPush",
+     "shape": "RtmpPushRouterOutputConfiguration"
+    },
+    "SrtCaller": {
+     "name": "srtCaller",
+     "shape": "SrtCallerRouterOutputConfiguration"
+    },
+    "Rtp": {
+     "name": "rtp",
+     "shape": "RtpRouterOutputConfiguration"
+    }
+   }
+  },
+  "RouterOutputServiceQuotaExceededException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "RouterOutputStreamDetails": {
+   "members": {
+    "Standard": {
+     "name": "standard",
+     "shape": "StandardRouterOutputStreamDetails"
+    },
+    "MediaConnectFlow": {
+     "name": "mediaConnectFlow",
+     "shape": "MediaConnectFlowRouterOutputStreamDetails"
+    },
+    "MediaLiveInput": {
+     "name": "mediaLiveInput",
+     "shape": "MediaLiveInputRouterOutputStreamDetails"
+    }
+   }
+  },
+  "RouterOutputTypeList": {
+   "list": "RouterOutputType"
+  },
+  "RoutingScopeList": {
+   "list": "RoutingScope"
+  },
+  "RtmpPushRouterOutputConfiguration": {
+   "members": {
+    "DestinationAddress": {
+     "name": "destinationAddress"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    },
+    "ApplicationName": {
+     "name": "applicationName"
+    },
+    "StreamName": {
+     "name": "streamName"
+    },
+    "TlsEncryption": {
+     "name": "tlsEncryption",
+     "shape": "TlsEncryption"
+    }
+   }
+  },
+  "RtpRouterInputConfiguration": {
+   "members": {
+    "Port": {
+     "name": "port"
+    },
+    "ForwardErrorCorrection": {
+     "name": "forwardErrorCorrection"
+    }
+   }
+  },
+  "RtpRouterOutputConfiguration": {
+   "members": {
+    "DestinationAddress": {
+     "name": "destinationAddress"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    },
+    "ForwardErrorCorrection": {
+     "name": "forwardErrorCorrection"
+    }
+   }
+  },
+  "SecretsManagerEncryptionKeyConfiguration": {
+   "members": {
+    "SecretArn": {
+     "name": "secretArn"
+    },
+    "RoleArn": {
+     "name": "roleArn"
+    }
+   }
+  },
+  "ServiceUnavailableException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "SetGatewayBridgeSourceRequest": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    }
+   }
+  },
+  "SetSourceRequest": {
+   "members": {
+    "Decryption": {
+     "name": "decryption",
+     "shape": "Encryption"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "IngestPort": {
+     "name": "ingestPort"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxLatency": {
+     "name": "maxLatency"
+    },
+    "MaxSyncBuffer": {
+     "name": "maxSyncBuffer"
+    },
+    "MediaStreamSourceConfigurations": {
+     "name": "mediaStreamSourceConfigurations",
+     "shape": "__listOfMediaStreamSourceConfigurationRequest"
+    },
+    "MinLatency": {
+     "name": "minLatency"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SenderIpAddress": {
+     "name": "senderIpAddress"
+    },
+    "SourceListenerAddress": {
+     "name": "sourceListenerAddress"
+    },
+    "SourceListenerPort": {
+     "name": "sourceListenerPort"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "VpcInterfaceName": {
+     "name": "vpcInterfaceName"
+    },
+    "WhitelistCidr": {
+     "name": "whitelistCidr"
+    },
+    "GatewayBridgeSource": {
+     "name": "gatewayBridgeSource",
+     "shape": "SetGatewayBridgeSourceRequest"
+    },
+    "NdiSourceSettings": {
+     "name": "ndiSourceSettings",
+     "shape": "NdiSourceSettings"
+    },
+    "SourceTags": {
+     "name": "sourceTags",
+     "shape": "__mapOfString"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitDecryption": {
+     "name": "routerIntegrationTransitDecryption",
+     "shape": "FlowTransitEncryption"
+    }
+   }
+  },
+  "SilentAudio": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "SilentAudioConfiguration": {
+   "members": {
+    "State": {
+     "name": "state"
+    },
+    "ThresholdSeconds": {
+     "name": "thresholdSeconds"
+    }
+   }
+  },
+  "Source": {
+   "members": {
+    "DataTransferSubscriberFeePercent": {
+     "name": "dataTransferSubscriberFeePercent"
+    },
+    "Decryption": {
+     "name": "decryption",
+     "shape": "Encryption"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "IngestIp": {
+     "name": "ingestIp"
+    },
+    "IngestPort": {
+     "name": "ingestPort"
+    },
+    "MediaStreamSourceConfigurations": {
+     "name": "mediaStreamSourceConfigurations",
+     "shape": "__listOfMediaStreamSourceConfiguration"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SenderIpAddress": {
+     "name": "senderIpAddress"
+    },
+    "SourceArn": {
+     "name": "sourceArn"
+    },
+    "Transport": {
+     "name": "transport",
+     "shape": "Transport"
+    },
+    "VpcInterfaceName": {
+     "name": "vpcInterfaceName"
+    },
+    "WhitelistCidr": {
+     "name": "whitelistCidr"
+    },
+    "GatewayBridgeSource": {
+     "name": "gatewayBridgeSource",
+     "shape": "GatewayBridgeSource"
+    },
+    "PeerIpAddress": {
+     "name": "peerIpAddress"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitDecryption": {
+     "name": "routerIntegrationTransitDecryption",
+     "shape": "FlowTransitEncryption"
+    },
+    "ConnectedRouterOutputArn": {
+     "name": "connectedRouterOutputArn"
+    }
+   }
+  },
+  "SourcePriority": {
+   "members": {
+    "PrimarySource": {
+     "name": "primarySource"
+    }
+   }
+  },
+  "SrtCallerRouterInputConfiguration": {
+   "members": {
+    "SourceAddress": {
+     "name": "sourceAddress"
+    },
+    "SourcePort": {
+     "name": "sourcePort"
+    },
+    "MinimumLatencyMilliseconds": {
+     "name": "minimumLatencyMilliseconds"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "DecryptionConfiguration": {
+     "name": "decryptionConfiguration",
+     "shape": "SrtDecryptionConfiguration"
+    }
+   }
+  },
+  "SrtCallerRouterOutputConfiguration": {
+   "members": {
+    "DestinationAddress": {
+     "name": "destinationAddress"
+    },
+    "DestinationPort": {
+     "name": "destinationPort"
+    },
+    "MinimumLatencyMilliseconds": {
+     "name": "minimumLatencyMilliseconds"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "EncryptionConfiguration": {
+     "name": "encryptionConfiguration",
+     "shape": "SrtEncryptionConfiguration"
+    }
+   }
+  },
+  "SrtDecryptionConfiguration": {
+   "members": {
+    "EncryptionKey": {
+     "name": "encryptionKey",
+     "shape": "SecretsManagerEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "SrtEncryptionConfiguration": {
+   "members": {
+    "EncryptionKey": {
+     "name": "encryptionKey",
+     "shape": "SecretsManagerEncryptionKeyConfiguration"
+    }
+   }
+  },
+  "SrtListenerRouterInputConfiguration": {
+   "members": {
+    "Port": {
+     "name": "port"
+    },
+    "MinimumLatencyMilliseconds": {
+     "name": "minimumLatencyMilliseconds"
+    },
+    "DecryptionConfiguration": {
+     "name": "decryptionConfiguration",
+     "shape": "SrtDecryptionConfiguration"
+    }
+   }
+  },
+  "SrtListenerRouterOutputConfiguration": {
+   "members": {
+    "Port": {
+     "name": "port"
+    },
+    "MinimumLatencyMilliseconds": {
+     "name": "minimumLatencyMilliseconds"
+    },
+    "EncryptionConfiguration": {
+     "name": "encryptionConfiguration",
+     "shape": "SrtEncryptionConfiguration"
+    }
+   }
+  },
+  "StandardRouterInputConfiguration": {
+   "members": {
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "ProtocolConfiguration": {
+     "name": "protocolConfiguration",
+     "shape": "RouterInputProtocolConfiguration"
+    },
+    "Protocol": {
+     "name": "protocol"
+    }
+   }
+  },
+  "StandardRouterInputStreamDetails": {
+   "members": {
+    "SourceIpAddress": {
+     "name": "sourceIpAddress"
+    }
+   }
+  },
+  "StandardRouterOutputConfiguration": {
+   "members": {
+    "NetworkInterfaceArn": {
+     "name": "networkInterfaceArn"
+    },
+    "ProtocolConfiguration": {
+     "name": "protocolConfiguration",
+     "shape": "RouterOutputProtocolConfiguration"
+    },
+    "Protocol": {
+     "name": "protocol"
+    }
+   }
+  },
+  "StandardRouterOutputStreamDetails": {
+   "members": {
+    "DestinationIpAddress": {
+     "name": "destinationIpAddress"
+    }
+   }
+  },
+  "StartFlowRequest": {
+   "members": {}
+  },
+  "StartFlowResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "StartRouterInputRequest": {
+   "members": {}
+  },
+  "StartRouterInputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    }
+   }
+  },
+  "StartRouterOutputRequest": {
+   "members": {}
+  },
+  "StartRouterOutputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    },
+    "MaintenanceScheduleType": {
+     "name": "maintenanceScheduleType"
+    },
+    "MaintenanceSchedule": {
+     "name": "maintenanceSchedule",
+     "shape": "MaintenanceSchedule"
+    }
+   }
+  },
+  "StopFlowRequest": {
+   "members": {}
+  },
+  "StopFlowResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Status": {
+     "name": "status"
+    }
+   }
+  },
+  "StopRouterInputRequest": {
+   "members": {}
+  },
+  "StopRouterInputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "StopRouterOutputRequest": {
+   "members": {}
+  },
+  "StopRouterOutputResponse": {
+   "members": {
+    "Arn": {
+     "name": "arn"
+    },
+    "Name": {
+     "name": "name"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "StringList": {
+   "list": "String"
+  },
+  "TagGlobalResourceRequest": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "TagResourceRequest": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "TakeRouterInputRequest": {
+   "members": {
+    "RouterInputArn": {
+     "name": "routerInputArn"
+    }
+   }
+  },
+  "TakeRouterInputResponse": {
+   "members": {
+    "RoutedState": {
+     "name": "routedState"
+    },
+    "RouterOutputArn": {
+     "name": "routerOutputArn"
+    },
+    "RouterOutputName": {
+     "name": "routerOutputName"
+    },
+    "RouterInputArn": {
+     "name": "routerInputArn"
+    },
+    "RouterInputName": {
+     "name": "routerInputName"
+    }
+   }
+  },
+  "ThumbnailDetails": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Thumbnail": {
+     "name": "thumbnail"
+    },
+    "ThumbnailMessages": {
+     "name": "thumbnailMessages",
+     "shape": "__listOfMessageDetail"
+    },
+    "Timecode": {
+     "name": "timecode"
+    },
+    "Timestamp": {
+     "name": "timestamp"
+    }
+   }
+  },
+  "TlsEncryption": {
+   "members": {
+    "EncryptionType": {
+     "name": "encryptionType"
+    },
+    "EncryptionConfiguration": {
+     "name": "encryptionConfiguration",
+     "shape": "TlsEncryptionConfiguration"
+    }
+   }
+  },
+  "TlsEncryptionConfiguration": {
+   "members": {
+    "Public": {
+     "name": "public",
+     "shape": "PublicTlsEncryptionConfiguration"
+    }
+   }
+  },
+  "TooManyRequestsException": {
+   "members": {
+    "Message": {
+     "name": "message"
+    }
+   }
+  },
+  "Transport": {
+   "members": {
+    "CidrAllowList": {
+     "name": "cidrAllowList",
+     "shape": "__listOfString"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxLatency": {
+     "name": "maxLatency"
+    },
+    "MaxSyncBuffer": {
+     "name": "maxSyncBuffer"
+    },
+    "MinLatency": {
+     "name": "minLatency"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "RemoteId": {
+     "name": "remoteId"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SenderIpAddress": {
+     "name": "senderIpAddress"
+    },
+    "SmoothingLatency": {
+     "name": "smoothingLatency"
+    },
+    "SourceListenerAddress": {
+     "name": "sourceListenerAddress"
+    },
+    "SourceListenerPort": {
+     "name": "sourceListenerPort"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "NdiSpeedHqQuality": {
+     "name": "ndiSpeedHqQuality"
+    },
+    "NdiProgramName": {
+     "name": "ndiProgramName"
+    },
+    "NdiSourceSettings": {
+     "name": "ndiSourceSettings",
+     "shape": "NdiSourceSettings"
+    },
+    "NdiOutputTimecodeSource": {
+     "name": "ndiOutputTimecodeSource"
+    },
+    "NdiAudioReferenceLevel": {
+     "name": "ndiAudioReferenceLevel"
+    }
+   }
+  },
+  "TransportMediaInfo": {
+   "members": {
+    "Programs": {
+     "name": "programs",
+     "shape": "__listOfTransportStreamProgram"
+    },
+    "TsId": {
+     "name": "tsId"
+    }
+   }
+  },
+  "TransportStream": {
+   "members": {
+    "Channels": {
+     "name": "channels"
+    },
+    "Codec": {
+     "name": "codec"
+    },
+    "Color": {
+     "name": "color",
+     "shape": "ColorInformation"
+    },
+    "FrameRate": {
+     "name": "frameRate"
+    },
+    "FrameResolution": {
+     "name": "frameResolution",
+     "shape": "FrameResolution"
+    },
+    "Pid": {
+     "name": "pid"
+    },
+    "SampleRate": {
+     "name": "sampleRate"
+    },
+    "SampleSize": {
+     "name": "sampleSize"
+    },
+    "StreamType": {
+     "name": "streamType"
+    }
+   }
+  },
+  "TransportStreamProgram": {
+   "members": {
+    "PcrPid": {
+     "name": "pcrPid"
+    },
+    "ProgramName": {
+     "name": "programName"
+    },
+    "ProgramNumber": {
+     "name": "programNumber"
+    },
+    "ProgramPid": {
+     "name": "programPid"
+    },
+    "Streams": {
+     "name": "streams",
+     "shape": "__listOfTransportStream"
+    }
+   }
+  },
+  "UntagGlobalResourceRequest": {
+   "members": {}
+  },
+  "UntagResourceRequest": {
+   "members": {}
+  },
+  "UpdateBridgeFlowSourceRequest": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "FlowVpcInterfaceAttachment": {
+     "name": "flowVpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    }
+   }
+  },
+  "UpdateBridgeNetworkOutputRequest": {
+   "members": {
+    "IpAddress": {
+     "name": "ipAddress"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "Ttl": {
+     "name": "ttl"
+    }
+   }
+  },
+  "UpdateBridgeNetworkSourceRequest": {
+   "members": {
+    "MulticastIp": {
+     "name": "multicastIp"
+    },
+    "MulticastSourceSettings": {
+     "name": "multicastSourceSettings",
+     "shape": "MulticastSourceSettings"
+    },
+    "NetworkName": {
+     "name": "networkName"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    }
+   }
+  },
+  "UpdateBridgeOutputRequest": {
+   "members": {
+    "NetworkOutput": {
+     "name": "networkOutput",
+     "shape": "UpdateBridgeNetworkOutputRequest"
+    }
+   }
+  },
+  "UpdateBridgeOutputResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "Output": {
+     "name": "output",
+     "shape": "BridgeOutput"
+    }
+   }
+  },
+  "UpdateBridgeRequest": {
+   "members": {
+    "EgressGatewayBridge": {
+     "name": "egressGatewayBridge",
+     "shape": "UpdateEgressGatewayBridgeRequest"
+    },
+    "IngressGatewayBridge": {
+     "name": "ingressGatewayBridge",
+     "shape": "UpdateIngressGatewayBridgeRequest"
+    },
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "UpdateFailoverConfig"
+    }
+   }
+  },
+  "UpdateBridgeResponse": {
+   "members": {
+    "Bridge": {
+     "name": "bridge",
+     "shape": "Bridge"
+    }
+   }
+  },
+  "UpdateBridgeSourceRequest": {
+   "members": {
+    "FlowSource": {
+     "name": "flowSource",
+     "shape": "UpdateBridgeFlowSourceRequest"
+    },
+    "NetworkSource": {
+     "name": "networkSource",
+     "shape": "UpdateBridgeNetworkSourceRequest"
+    }
+   }
+  },
+  "UpdateBridgeSourceResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "Source": {
+     "name": "source",
+     "shape": "BridgeSource"
+    }
+   }
+  },
+  "UpdateBridgeStateRequest": {
+   "members": {
+    "DesiredState": {
+     "name": "desiredState"
+    }
+   }
+  },
+  "UpdateBridgeStateResponse": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "DesiredState": {
+     "name": "desiredState"
+    }
+   }
+  },
+  "UpdateEgressGatewayBridgeRequest": {
+   "members": {
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    }
+   }
+  },
+  "UpdateEncryption": {
+   "members": {
+    "Algorithm": {
+     "name": "algorithm"
+    },
+    "ConstantInitializationVector": {
+     "name": "constantInitializationVector"
+    },
+    "DeviceId": {
+     "name": "deviceId"
+    },
+    "KeyType": {
+     "name": "keyType"
+    },
+    "Region": {
+     "name": "region"
+    },
+    "ResourceId": {
+     "name": "resourceId"
+    },
+    "RoleArn": {
+     "name": "roleArn"
+    },
+    "SecretArn": {
+     "name": "secretArn"
+    },
+    "Url": {
+     "name": "url"
+    }
+   }
+  },
+  "UpdateFailoverConfig": {
+   "members": {
+    "FailoverMode": {
+     "name": "failoverMode"
+    },
+    "RecoveryWindow": {
+     "name": "recoveryWindow"
+    },
+    "SourcePriority": {
+     "name": "sourcePriority",
+     "shape": "SourcePriority"
+    },
+    "State": {
+     "name": "state"
+    }
+   }
+  },
+  "UpdateFlowEntitlementRequest": {
+   "members": {
+    "Description": {
+     "name": "description"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "UpdateEncryption"
+    },
+    "EntitlementStatus": {
+     "name": "entitlementStatus"
+    },
+    "Subscribers": {
+     "name": "subscribers",
+     "shape": "__listOfString"
+    }
+   }
+  },
+  "UpdateFlowEntitlementResponse": {
+   "members": {
+    "Entitlement": {
+     "name": "entitlement",
+     "shape": "Entitlement"
+    },
+    "FlowArn": {
+     "name": "flowArn"
+    }
+   }
+  },
+  "UpdateFlowMediaStreamRequest": {
+   "members": {
+    "Attributes": {
+     "name": "attributes",
+     "shape": "MediaStreamAttributesRequest"
+    },
+    "ClockRate": {
+     "name": "clockRate"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "MediaStreamType": {
+     "name": "mediaStreamType"
+    },
+    "VideoFormat": {
+     "name": "videoFormat"
+    }
+   }
+  },
+  "UpdateFlowMediaStreamResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "MediaStream": {
+     "name": "mediaStream",
+     "shape": "MediaStream"
+    }
+   }
+  },
+  "UpdateFlowOutputRequest": {
+   "members": {
+    "CidrAllowList": {
+     "name": "cidrAllowList",
+     "shape": "__listOfString"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "Destination": {
+     "name": "destination"
+    },
+    "Encryption": {
+     "name": "encryption",
+     "shape": "UpdateEncryption"
+    },
+    "MaxLatency": {
+     "name": "maxLatency"
+    },
+    "MediaStreamOutputConfigurations": {
+     "name": "mediaStreamOutputConfigurations",
+     "shape": "__listOfMediaStreamOutputConfigurationRequest"
+    },
+    "MinLatency": {
+     "name": "minLatency"
+    },
+    "Port": {
+     "name": "port"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "RemoteId": {
+     "name": "remoteId"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SenderIpAddress": {
+     "name": "senderIpAddress"
+    },
+    "SmoothingLatency": {
+     "name": "smoothingLatency"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    },
+    "OutputStatus": {
+     "name": "outputStatus"
+    },
+    "NdiProgramName": {
+     "name": "ndiProgramName"
+    },
+    "NdiSpeedHqQuality": {
+     "name": "ndiSpeedHqQuality"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitEncryption": {
+     "name": "routerIntegrationTransitEncryption",
+     "shape": "FlowTransitEncryption"
+    },
+    "NdiOutputTimecodeSource": {
+     "name": "ndiOutputTimecodeSource"
+    },
+    "NdiAudioReferenceLevel": {
+     "name": "ndiAudioReferenceLevel"
+    }
+   }
+  },
+  "UpdateFlowOutputResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Output": {
+     "name": "output",
+     "shape": "Output"
+    }
+   }
+  },
+  "UpdateFlowRequest": {
+   "members": {
+    "SourceFailoverConfig": {
+     "name": "sourceFailoverConfig",
+     "shape": "UpdateFailoverConfig"
+    },
+    "Maintenance": {
+     "name": "maintenance",
+     "shape": "UpdateMaintenance"
+    },
+    "SourceMonitoringConfig": {
+     "name": "sourceMonitoringConfig",
+     "shape": "MonitoringConfig"
+    },
+    "NdiConfig": {
+     "name": "ndiConfig",
+     "shape": "NdiConfig"
+    },
+    "FlowSize": {
+     "name": "flowSize"
+    },
+    "EncodingConfig": {
+     "name": "encodingConfig",
+     "shape": "EncodingConfig"
+    }
+   }
+  },
+  "UpdateFlowResponse": {
+   "members": {
+    "Flow": {
+     "name": "flow",
+     "shape": "Flow"
+    }
+   }
+  },
+  "UpdateFlowSourceRequest": {
+   "members": {
+    "Decryption": {
+     "name": "decryption",
+     "shape": "UpdateEncryption"
+    },
+    "Description": {
+     "name": "description"
+    },
+    "EntitlementArn": {
+     "name": "entitlementArn"
+    },
+    "IngestPort": {
+     "name": "ingestPort"
+    },
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxLatency": {
+     "name": "maxLatency"
+    },
+    "MaxSyncBuffer": {
+     "name": "maxSyncBuffer"
+    },
+    "MediaStreamSourceConfigurations": {
+     "name": "mediaStreamSourceConfigurations",
+     "shape": "__listOfMediaStreamSourceConfigurationRequest"
+    },
+    "MinLatency": {
+     "name": "minLatency"
+    },
+    "Protocol": {
+     "name": "protocol"
+    },
+    "SenderControlPort": {
+     "name": "senderControlPort"
+    },
+    "SenderIpAddress": {
+     "name": "senderIpAddress"
+    },
+    "SourceListenerAddress": {
+     "name": "sourceListenerAddress"
+    },
+    "SourceListenerPort": {
+     "name": "sourceListenerPort"
+    },
+    "StreamId": {
+     "name": "streamId"
+    },
+    "VpcInterfaceName": {
+     "name": "vpcInterfaceName"
+    },
+    "WhitelistCidr": {
+     "name": "whitelistCidr"
+    },
+    "GatewayBridgeSource": {
+     "name": "gatewayBridgeSource",
+     "shape": "UpdateGatewayBridgeSourceRequest"
+    },
+    "NdiSourceSettings": {
+     "name": "ndiSourceSettings",
+     "shape": "NdiSourceSettings"
+    },
+    "RouterIntegrationState": {
+     "name": "routerIntegrationState"
+    },
+    "RouterIntegrationTransitDecryption": {
+     "name": "routerIntegrationTransitDecryption",
+     "shape": "FlowTransitEncryption"
+    }
+   }
+  },
+  "UpdateFlowSourceResponse": {
+   "members": {
+    "FlowArn": {
+     "name": "flowArn"
+    },
+    "Source": {
+     "name": "source",
+     "shape": "Source"
+    }
+   }
+  },
+  "UpdateGatewayBridgeSourceRequest": {
+   "members": {
+    "BridgeArn": {
+     "name": "bridgeArn"
+    },
+    "VpcInterfaceAttachment": {
+     "name": "vpcInterfaceAttachment",
+     "shape": "VpcInterfaceAttachment"
+    }
+   }
+  },
+  "UpdateGatewayInstanceRequest": {
+   "members": {
+    "BridgePlacement": {
+     "name": "bridgePlacement"
+    }
+   }
+  },
+  "UpdateGatewayInstanceResponse": {
+   "members": {
+    "BridgePlacement": {
+     "name": "bridgePlacement"
+    },
+    "GatewayInstanceArn": {
+     "name": "gatewayInstanceArn"
+    }
+   }
+  },
+  "UpdateIngressGatewayBridgeRequest": {
+   "members": {
+    "MaxBitrate": {
+     "name": "maxBitrate"
+    },
+    "MaxOutputs": {
+     "name": "maxOutputs"
+    }
+   }
+  },
+  "UpdateMaintenance": {
+   "members": {
+    "MaintenanceDay": {
+     "name": "maintenanceDay"
+    },
+    "MaintenanceScheduledDate": {
+     "name": "maintenanceScheduledDate"
+    },
+    "MaintenanceStartHour": {
+     "name": "maintenanceStartHour"
+    }
+   }
+  },
+  "UpdateRouterInputRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterInputConfiguration"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "TransitEncryption": {
+     "name": "transitEncryption",
+     "shape": "RouterInputTransitEncryption"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "ContentQualityAnalysisConfiguration": {
+     "name": "contentQualityAnalysisConfiguration",
+     "shape": "RouterContentQualityAnalysisConfiguration"
+    }
+   }
+  },
+  "UpdateRouterInputResponse": {
+   "members": {
+    "RouterInput": {
+     "name": "routerInput",
+     "shape": "RouterInput"
+    }
+   }
+  },
+  "UpdateRouterNetworkInterfaceRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterNetworkInterfaceConfiguration"
+    }
+   }
+  },
+  "UpdateRouterNetworkInterfaceResponse": {
+   "members": {
+    "RouterNetworkInterface": {
+     "name": "routerNetworkInterface",
+     "shape": "RouterNetworkInterface"
+    }
+   }
+  },
+  "UpdateRouterOutputRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "Configuration": {
+     "name": "configuration",
+     "shape": "RouterOutputConfiguration"
+    },
+    "MaximumBitrate": {
+     "name": "maximumBitrate"
+    },
+    "RoutingScope": {
+     "name": "routingScope"
+    },
+    "Tier": {
+     "name": "tier"
+    },
+    "MaintenanceConfiguration": {
+     "name": "maintenanceConfiguration",
+     "shape": "MaintenanceConfiguration"
+    },
+    "FabricConfiguration": {
+     "name": "fabricConfiguration",
+     "shape": "FabricConfiguration"
+    }
+   }
+  },
+  "UpdateRouterOutputResponse": {
+   "members": {
+    "RouterOutput": {
+     "name": "routerOutput",
+     "shape": "RouterOutput"
+    }
+   }
+  },
+  "VideoMonitoringSetting": {
+   "members": {
+    "BlackFrames": {
+     "name": "blackFrames",
+     "shape": "BlackFrames"
+    },
+    "FrozenFrames": {
+     "name": "frozenFrames",
+     "shape": "FrozenFrames"
+    }
+   }
+  },
+  "VpcInterface": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "NetworkInterfaceIds": {
+     "name": "networkInterfaceIds",
+     "shape": "__listOfString"
+    },
+    "NetworkInterfaceType": {
+     "name": "networkInterfaceType"
+    },
+    "RoleArn": {
+     "name": "roleArn"
+    },
+    "SecurityGroupIds": {
+     "name": "securityGroupIds",
+     "shape": "__listOfString"
+    },
+    "SubnetId": {
+     "name": "subnetId"
+    }
+   }
+  },
+  "VpcInterfaceAttachment": {
+   "members": {
+    "VpcInterfaceName": {
+     "name": "vpcInterfaceName"
+    }
+   }
+  },
+  "VpcInterfaceRequest": {
+   "members": {
+    "Name": {
+     "name": "name"
+    },
+    "NetworkInterfaceType": {
+     "name": "networkInterfaceType"
+    },
+    "RoleArn": {
+     "name": "roleArn"
+    },
+    "SecurityGroupIds": {
+     "name": "securityGroupIds",
+     "shape": "__listOfString"
+    },
+    "SubnetId": {
+     "name": "subnetId"
+    },
+    "VpcInterfaceTags": {
+     "name": "vpcInterfaceTags",
+     "shape": "__mapOfString"
+    }
+   }
+  },
+  "VpcRouterNetworkInterfaceConfiguration": {
+   "members": {
+    "SecurityGroupIds": {
+     "name": "securityGroupIds",
+     "shape": "VpcRouterNetworkInterfaceConfigurationSecurityGroupIdsList"
+    },
+    "SubnetId": {
+     "name": "subnetId"
+    }
+   }
+  },
+  "VpcRouterNetworkInterfaceConfigurationSecurityGroupIdsList": {
+   "list": "String"
+  },
+  "WindowMaintenanceSchedule": {
+   "members": {
+    "Start": {
+     "name": "start"
+    },
+    "End": {
+     "name": "end"
+    },
+    "ScheduledTime": {
+     "name": "scheduledTime"
+    }
+   }
+  },
+  "__listOfAddBridgeOutputRequest": {
+   "list": "AddBridgeOutputRequest"
+  },
+  "__listOfAddBridgeSourceRequest": {
+   "list": "AddBridgeSourceRequest"
+  },
+  "__listOfAddMediaStreamRequest": {
+   "list": "AddMediaStreamRequest"
+  },
+  "__listOfAddOutputRequest": {
+   "list": "AddOutputRequest"
+  },
+  "__listOfAudioMonitoringSetting": {
+   "list": "AudioMonitoringSetting"
+  },
+  "__listOfBridgeOutput": {
+   "list": "BridgeOutput"
+  },
+  "__listOfBridgeSource": {
+   "list": "BridgeSource"
+  },
+  "__listOfDestinationConfiguration": {
+   "list": "DestinationConfiguration"
+  },
+  "__listOfDestinationConfigurationRequest": {
+   "list": "DestinationConfigurationRequest"
+  },
+  "__listOfEntitlement": {
+   "list": "Entitlement"
+  },
+  "__listOfGatewayNetwork": {
+   "list": "GatewayNetwork"
+  },
+  "__listOfGrantEntitlementRequest": {
+   "list": "GrantEntitlementRequest"
+  },
+  "__listOfInputConfiguration": {
+   "list": "InputConfiguration"
+  },
+  "__listOfInputConfigurationRequest": {
+   "list": "InputConfigurationRequest"
+  },
+  "__listOfInteger": {
+   "list": "Integer"
+  },
+  "__listOfListedBridge": {
+   "list": "ListedBridge"
+  },
+  "__listOfListedEntitlement": {
+   "list": "ListedEntitlement"
+  },
+  "__listOfListedFlow": {
+   "list": "ListedFlow"
+  },
+  "__listOfListedGateway": {
+   "list": "ListedGateway"
+  },
+  "__listOfListedGatewayInstance": {
+   "list": "ListedGatewayInstance"
+  },
+  "__listOfMediaStream": {
+   "list": "MediaStream"
+  },
+  "__listOfMediaStreamOutputConfiguration": {
+   "list": "MediaStreamOutputConfiguration"
+  },
+  "__listOfMediaStreamOutputConfigurationRequest": {
+   "list": "MediaStreamOutputConfigurationRequest"
+  },
+  "__listOfMediaStreamSourceConfiguration": {
+   "list": "MediaStreamSourceConfiguration"
+  },
+  "__listOfMediaStreamSourceConfigurationRequest": {
+   "list": "MediaStreamSourceConfigurationRequest"
+  },
+  "__listOfMessageDetail": {
+   "list": "MessageDetail"
+  },
+  "__listOfNdiDiscoveryServerConfig": {
+   "list": "NdiDiscoveryServerConfig"
+  },
+  "__listOfNdiMediaStreamInfo": {
+   "list": "NdiMediaStreamInfo"
+  },
+  "__listOfNdiSourceInfo": {
+   "list": "NdiSourceInfo"
+  },
+  "__listOfOffering": {
+   "list": "Offering"
+  },
+  "__listOfOutput": {
+   "list": "Output"
+  },
+  "__listOfReservation": {
+   "list": "Reservation"
+  },
+  "__listOfSetSourceRequest": {
+   "list": "SetSourceRequest"
+  },
+  "__listOfSource": {
+   "list": "Source"
+  },
+  "__listOfString": {
+   "list": "String"
+  },
+  "__listOfTransportStream": {
+   "list": "TransportStream"
+  },
+  "__listOfTransportStreamProgram": {
+   "list": "TransportStreamProgram"
+  },
+  "__listOfVideoMonitoringSetting": {
+   "list": "VideoMonitoringSetting"
+  },
+  "__listOfVpcInterface": {
+   "list": "VpcInterface"
+  },
+  "__listOfVpcInterfaceRequest": {
+   "list": "VpcInterfaceRequest"
+  },
+  "__mapOfString": {
+   "map": "String"
+  }
+ }
+}

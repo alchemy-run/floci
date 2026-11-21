@@ -1,0 +1,736 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_neptunegraph_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CancelExportTask": "CancelExportTaskInput",
+    "CancelImportTask": "CancelImportTaskInput",
+    "CancelQuery": "CancelQueryInput",
+    "CreateGraph": "CreateGraphInput",
+    "CreateGraphSnapshot": "CreateGraphSnapshotInput",
+    "CreateGraphUsingImportTask": "CreateGraphUsingImportTaskInput",
+    "CreatePrivateGraphEndpoint": "CreatePrivateGraphEndpointInput",
+    "DeleteGraph": "DeleteGraphInput",
+    "DeleteGraphSnapshot": "DeleteGraphSnapshotInput",
+    "DeletePrivateGraphEndpoint": "DeletePrivateGraphEndpointInput",
+    "ExecuteQuery": "ExecuteQueryInput",
+    "GetExportTask": "GetExportTaskInput",
+    "GetGraph": "GetGraphInput",
+    "GetGraphSnapshot": "GetGraphSnapshotInput",
+    "GetGraphSummary": "GetGraphSummaryInput",
+    "GetImportTask": "GetImportTaskInput",
+    "GetPrivateGraphEndpoint": "GetPrivateGraphEndpointInput",
+    "GetQuery": "GetQueryInput",
+    "ListExportTasks": "ListExportTasksInput",
+    "ListGraphSnapshots": "ListGraphSnapshotsInput",
+    "ListGraphs": "ListGraphsInput",
+    "ListImportTasks": "ListImportTasksInput",
+    "ListPrivateGraphEndpoints": "ListPrivateGraphEndpointsInput",
+    "ListQueries": "ListQueriesInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "ResetGraph": "ResetGraphInput",
+    "RestoreGraphFromSnapshot": "RestoreGraphFromSnapshotInput",
+    "StartExportTask": "StartExportTaskInput",
+    "StartGraph": "StartGraphInput",
+    "StartImportTask": "StartImportTaskInput",
+    "StopGraph": "StopGraphInput",
+    "TagResource": "TagResourceInput",
+    "UntagResource": "UntagResourceInput",
+    "UpdateGraph": "UpdateGraphInput"
+  },
+  "shapes": {
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:.+"
+    },
+    "BlankNodeHandling": {
+      "type": "string",
+      "enum": [
+        "convertToIri"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CancelExportTaskInput": {
+      "type": "structure",
+      "required": [
+        "taskIdentifier"
+      ],
+      "members": {
+        "taskIdentifier": "ExportTaskId"
+      }
+    },
+    "CancelImportTaskInput": {
+      "type": "structure",
+      "required": [
+        "taskIdentifier"
+      ],
+      "members": {
+        "taskIdentifier": "TaskId"
+      }
+    },
+    "CancelQueryInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "queryId"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "queryId": "String"
+      }
+    },
+    "CreateGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphName",
+        "provisionedMemory"
+      ],
+      "members": {
+        "graphName": "GraphName",
+        "tags": "TagMap",
+        "publicConnectivity": "Boolean",
+        "kmsKeyIdentifier": "KmsKeyArn",
+        "vectorSearchConfiguration": "VectorSearchConfiguration",
+        "replicaCount": "ReplicaCount",
+        "deletionProtection": "Boolean",
+        "provisionedMemory": "ProvisionedMemory"
+      }
+    },
+    "CreateGraphSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "snapshotName"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "snapshotName": "SnapshotName",
+        "tags": "TagMap"
+      }
+    },
+    "CreateGraphUsingImportTaskInput": {
+      "type": "structure",
+      "required": [
+        "graphName",
+        "source",
+        "roleArn"
+      ],
+      "members": {
+        "graphName": "GraphName",
+        "tags": "TagMap",
+        "publicConnectivity": "Boolean",
+        "kmsKeyIdentifier": "KmsKeyArn",
+        "vectorSearchConfiguration": "VectorSearchConfiguration",
+        "replicaCount": "ReplicaCount",
+        "deletionProtection": "Boolean",
+        "importOptions": "ImportOptions",
+        "maxProvisionedMemory": "ProvisionedMemory",
+        "minProvisionedMemory": "ProvisionedMemory",
+        "failOnError": "Boolean",
+        "source": "String",
+        "format": "Format",
+        "parquetType": "ParquetType",
+        "blankNodeHandling": "BlankNodeHandling",
+        "roleArn": "RoleArn"
+      }
+    },
+    "CreatePrivateGraphEndpointInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "vpcId": "VpcId",
+        "subnetIds": "SubnetIds",
+        "vpcSecurityGroupIds": "SecurityGroupIds"
+      }
+    },
+    "DeleteGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "skipSnapshot"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "skipSnapshot": "Boolean"
+      }
+    },
+    "DeleteGraphSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotIdentifier"
+      ],
+      "members": {
+        "snapshotIdentifier": "SnapshotIdentifier"
+      }
+    },
+    "DeletePrivateGraphEndpointInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "vpcId"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "vpcId": "VpcId"
+      }
+    },
+    "Document": {
+      "type": "document"
+    },
+    "DocumentValuedMap": {
+      "type": "map",
+      "key": "String",
+      "value": "Document"
+    },
+    "ExecuteQueryInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "queryString",
+        "language"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "queryString": "String",
+        "language": "QueryLanguage",
+        "parameters": "DocumentValuedMap",
+        "planCache": "PlanCacheType",
+        "explainMode": "ExplainMode",
+        "queryTimeoutMilliseconds": "Integer"
+      }
+    },
+    "ExplainMode": {
+      "type": "string",
+      "enum": [
+        "STATIC",
+        "DETAILS"
+      ]
+    },
+    "ExportFilter": {
+      "type": "structure",
+      "members": {
+        "vertexFilter": "ExportFilterPerLabelMap",
+        "edgeFilter": "ExportFilterPerLabelMap"
+      }
+    },
+    "ExportFilterElement": {
+      "type": "structure",
+      "members": {
+        "properties": "ExportFilterPropertyMap"
+      }
+    },
+    "ExportFilterLabel": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "ExportFilterOutputDataType": {
+      "type": "string",
+      "pattern": "(Any|Byte|Short|Int|Long|Float|Double|String|Bool|Boolean|Float\\[\\]|Double\\[\\])"
+    },
+    "ExportFilterOutputPropertyName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9_]+"
+    },
+    "ExportFilterPerLabelMap": {
+      "type": "map",
+      "key": "ExportFilterLabel",
+      "value": "ExportFilterElement"
+    },
+    "ExportFilterPropertyAttributes": {
+      "type": "structure",
+      "members": {
+        "outputType": "ExportFilterOutputDataType",
+        "sourcePropertyName": "ExportFilterSourcePropertyName",
+        "multiValueHandling": "MultiValueHandlingType"
+      }
+    },
+    "ExportFilterPropertyMap": {
+      "type": "map",
+      "key": "ExportFilterOutputPropertyName",
+      "value": "ExportFilterPropertyAttributes"
+    },
+    "ExportFilterSourcePropertyName": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "ExportFormat": {
+      "type": "string",
+      "enum": [
+        "PARQUET",
+        "CSV"
+      ]
+    },
+    "ExportTaskId": {
+      "type": "string",
+      "pattern": "t-[a-z0-9]{10}"
+    },
+    "Format": {
+      "type": "string",
+      "enum": [
+        "CSV",
+        "OPEN_CYPHER",
+        "PARQUET",
+        "NTRIPLES"
+      ]
+    },
+    "GetExportTaskInput": {
+      "type": "structure",
+      "required": [
+        "taskIdentifier"
+      ],
+      "members": {
+        "taskIdentifier": "ExportTaskId"
+      }
+    },
+    "GetGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier"
+      }
+    },
+    "GetGraphSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotIdentifier"
+      ],
+      "members": {
+        "snapshotIdentifier": "SnapshotIdentifier"
+      }
+    },
+    "GetGraphSummaryInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "mode": "GraphSummaryMode"
+      }
+    },
+    "GetImportTaskInput": {
+      "type": "structure",
+      "required": [
+        "taskIdentifier"
+      ],
+      "members": {
+        "taskIdentifier": "TaskId"
+      }
+    },
+    "GetPrivateGraphEndpointInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "vpcId"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "vpcId": "VpcId"
+      }
+    },
+    "GetQueryInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "queryId"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "queryId": "String"
+      }
+    },
+    "GraphIdentifier": {
+      "type": "string",
+      "pattern": "g-[a-z0-9]{10}"
+    },
+    "GraphName": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "(?!g-)[a-z][a-z0-9]*(-[a-z0-9]+)*"
+    },
+    "GraphSummaryMode": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "DETAILED"
+      ]
+    },
+    "ImportOptions": {
+      "type": "structure",
+      "members": {
+        "neptune": "NeptuneImportOptions"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws[^:]*:kms:[a-zA-Z0-9-]*:[0-9]{12}:key/[a-zA-Z0-9-]{36}"
+    },
+    "ListExportTasksInput": {
+      "type": "structure",
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListGraphSnapshotsInput": {
+      "type": "structure",
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListGraphsInput": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListImportTasksInput": {
+      "type": "structure",
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListPrivateGraphEndpointsInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListQueriesInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "maxResults"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "maxResults": "Integer",
+        "state": "QueryStateInput"
+      }
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MultiValueHandlingType": {
+      "type": "string",
+      "enum": [
+        "TO_LIST",
+        "PICK_FIRST"
+      ]
+    },
+    "NeptuneImportOptions": {
+      "type": "structure",
+      "required": [
+        "s3ExportPath",
+        "s3ExportKmsKeyId"
+      ],
+      "members": {
+        "s3ExportPath": "NeptuneImportOptionsS3ExportPathString",
+        "s3ExportKmsKeyId": "NeptuneImportOptionsS3ExportKmsKeyIdString",
+        "preserveDefaultVertexLabels": "Boolean",
+        "preserveEdgeIds": "Boolean"
+      }
+    },
+    "NeptuneImportOptionsS3ExportKmsKeyIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "NeptuneImportOptionsS3ExportPathString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 8192
+    },
+    "ParquetType": {
+      "type": "string",
+      "enum": [
+        "COLUMNAR"
+      ]
+    },
+    "PlanCacheType": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED",
+        "AUTO"
+      ]
+    },
+    "ProvisionedMemory": {
+      "type": "integer",
+      "min": 16,
+      "max": 24576
+    },
+    "QueryLanguage": {
+      "type": "string",
+      "enum": [
+        "OPEN_CYPHER"
+      ]
+    },
+    "QueryStateInput": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "RUNNING",
+        "WAITING",
+        "CANCELLING"
+      ]
+    },
+    "ReplicaCount": {
+      "type": "integer",
+      "min": 0,
+      "max": 2
+    },
+    "ResetGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "skipSnapshot"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "skipSnapshot": "Boolean"
+      }
+    },
+    "RestoreGraphFromSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotIdentifier",
+        "graphName"
+      ],
+      "members": {
+        "snapshotIdentifier": "SnapshotIdentifier",
+        "graphName": "GraphName",
+        "provisionedMemory": "ProvisionedMemory",
+        "deletionProtection": "Boolean",
+        "tags": "TagMap",
+        "replicaCount": "ReplicaCount",
+        "publicConnectivity": "Boolean"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)(/[\\w+=,.@-]+)+"
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "pattern": "sg-[a-z0-9]+"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SecurityGroupId"
+    },
+    "SnapshotIdentifier": {
+      "type": "string",
+      "pattern": "gs-[a-z0-9]{10}"
+    },
+    "SnapshotName": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "(?!gs-)[a-z][a-z0-9]*(-[a-z0-9]+)*"
+    },
+    "StartExportTaskInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier",
+        "roleArn",
+        "format",
+        "destination",
+        "kmsKeyIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "roleArn": "RoleArn",
+        "format": "ExportFormat",
+        "destination": "StartExportTaskInputDestinationString",
+        "kmsKeyIdentifier": "KmsKeyArn",
+        "parquetType": "ParquetType",
+        "exportFilter": "ExportFilter",
+        "tags": "TagMap"
+      }
+    },
+    "StartExportTaskInputDestinationString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "StartGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier"
+      }
+    },
+    "StartImportTaskInput": {
+      "type": "structure",
+      "required": [
+        "source",
+        "graphIdentifier",
+        "roleArn"
+      ],
+      "members": {
+        "importOptions": "ImportOptions",
+        "failOnError": "Boolean",
+        "source": "String",
+        "format": "Format",
+        "parquetType": "ParquetType",
+        "blankNodeHandling": "BlankNodeHandling",
+        "graphIdentifier": "GraphIdentifier",
+        "roleArn": "RoleArn"
+      }
+    },
+    "StopGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubnetId": {
+      "type": "string",
+      "pattern": "subnet-[a-z0-9]+"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 1,
+      "max": 6,
+      "member": "SubnetId"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z+-=._:/]+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TaskId": {
+      "type": "string",
+      "pattern": "t-[a-z0-9]{10}"
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateGraphInput": {
+      "type": "structure",
+      "required": [
+        "graphIdentifier"
+      ],
+      "members": {
+        "graphIdentifier": "GraphIdentifier",
+        "publicConnectivity": "Boolean",
+        "provisionedMemory": "ProvisionedMemory",
+        "deletionProtection": "Boolean"
+      }
+    },
+    "VectorSearchConfiguration": {
+      "type": "structure",
+      "required": [
+        "dimension"
+      ],
+      "members": {
+        "dimension": "VectorSearchDimension"
+      }
+    },
+    "VectorSearchDimension": {
+      "type": "integer",
+      "min": 1,
+      "max": 65536
+    },
+    "VpcId": {
+      "type": "string",
+      "pattern": "vpc-[a-z0-9]+"
+    }
+  }
+}

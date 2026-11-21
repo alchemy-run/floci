@@ -153,6 +153,23 @@ public class RedshiftProxyManager {
         }
     }
 
+    /**
+     * Routes {@code host} on {@code port} to the proxy on {@code proxyPort} through the shared
+     * listeners, by TLS server name: how Redshift Serverless serves its workgroup endpoints. A
+     * route set again for the same proxy replaces the previous one.
+     */
+    public synchronized void routeEndpoint(String relayKey, String host, int port, int proxyPort) {
+        if (endpointRouter == null || host == null || port <= 0) {
+            return;
+        }
+        tlsCertificates.ensureHost(host);
+        endpointRouter.unroutePostgresEndpoint(routeKey(relayKey));
+        if (!endpointRouter.routePostgresEndpoint(routeKey(relayKey), List.of(host), port, proxyPort)) {
+            LOG.warnv("Endpoint {0} cannot listen on port {1}; it is reachable on proxy port {2} only",
+                    host, String.valueOf(port), String.valueOf(proxyPort));
+        }
+    }
+
     private static String routeKey(String relayKey) {
         return "redshift:" + relayKey;
     }

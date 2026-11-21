@@ -1,0 +1,368 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "repostspace",
+ "apiVersion": "2022-05-13",
+ "operations": {
+  "BatchAddChannelRoleToAccessors": {
+   "method": "POST",
+   "requestUri": "/spaces/{spaceId}/channels/{channelId}/roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "channelId": {
+      "location": "uri",
+      "name": "channelId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchAddRole": {
+   "method": "POST",
+   "requestUri": "/spaces/{spaceId}/roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchRemoveChannelRoleFromAccessors": {
+   "method": "PATCH",
+   "requestUri": "/spaces/{spaceId}/channels/{channelId}/roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "channelId": {
+      "location": "uri",
+      "name": "channelId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchRemoveRole": {
+   "method": "PATCH",
+   "requestUri": "/spaces/{spaceId}/roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateChannel": {
+   "method": "POST",
+   "requestUri": "/spaces/{spaceId}/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSpace": {
+   "method": "POST",
+   "requestUri": "/spaces",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSpace": {
+   "method": "DELETE",
+   "requestUri": "/spaces/{spaceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeregisterAdmin": {
+   "method": "DELETE",
+   "requestUri": "/spaces/{spaceId}/admins/{adminId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "adminId": {
+      "location": "uri",
+      "name": "adminId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetChannel": {
+   "method": "GET",
+   "requestUri": "/spaces/{spaceId}/channels/{channelId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "channelId": {
+      "location": "uri",
+      "name": "channelId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createDateTime",
+     "deleteDateTime"
+    ]
+   }
+  },
+  "GetSpace": {
+   "method": "GET",
+   "requestUri": "/spaces/{spaceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createDateTime",
+     "deleteDateTime"
+    ]
+   }
+  },
+  "ListChannels": {
+   "method": "GET",
+   "requestUri": "/spaces/{spaceId}/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "channels[].createDateTime",
+     "channels[].deleteDateTime"
+    ]
+   }
+  },
+  "ListSpaces": {
+   "method": "GET",
+   "requestUri": "/spaces",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "spaces[].createDateTime",
+     "spaces[].deleteDateTime"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RegisterAdmin": {
+   "method": "POST",
+   "requestUri": "/spaces/{spaceId}/admins/{adminId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "adminId": {
+      "location": "uri",
+      "name": "adminId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SendInvites": {
+   "method": "POST",
+   "requestUri": "/spaces/{spaceId}/invite",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateChannel": {
+   "method": "PUT",
+   "requestUri": "/spaces/{spaceId}/channels/{channelId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     },
+     "channelId": {
+      "location": "uri",
+      "name": "channelId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSpace": {
+   "method": "PUT",
+   "requestUri": "/spaces/{spaceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "spaceId": {
+      "location": "uri",
+      "name": "spaceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

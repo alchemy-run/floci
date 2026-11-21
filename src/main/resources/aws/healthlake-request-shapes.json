@@ -1,0 +1,966 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_healthlake_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateDataTransformationProfile": "CreateDataTransformationProfileRequest",
+    "CreateFHIRDatastore": "CreateFHIRDatastoreRequest",
+    "DeleteDataTransformationProfile": "DeleteDataTransformationProfileRequest",
+    "DeleteFHIRDatastore": "DeleteFHIRDatastoreRequest",
+    "DescribeDataTransformationJob": "DescribeDataTransformationJobRequest",
+    "DescribeFHIRDatastore": "DescribeFHIRDatastoreRequest",
+    "DescribeFHIRExportJob": "DescribeFHIRExportJobRequest",
+    "DescribeFHIRImportJob": "DescribeFHIRImportJobRequest",
+    "GetDataTransformationProfile": "GetDataTransformationProfileRequest",
+    "ListDataTransformationJobs": "ListDataTransformationJobsRequest",
+    "ListDataTransformationProfileVersions": "ListDataTransformationProfileVersionsRequest",
+    "ListDataTransformationProfiles": "ListDataTransformationProfilesRequest",
+    "ListFHIRDatastores": "ListFHIRDatastoresRequest",
+    "ListFHIRExportJobs": "ListFHIRExportJobsRequest",
+    "ListFHIRImportJobs": "ListFHIRImportJobsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PublishDataTransformationProfile": "PublishDataTransformationProfileRequest",
+    "RestoreFHIRDatastore": "RestoreFHIRDatastoreRequest",
+    "StartDataTransformationJob": "StartDataTransformationJobRequest",
+    "StartFHIRExportJob": "StartFHIRExportJobRequest",
+    "StartFHIRImportJob": "StartFHIRImportJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDataTransformationProfile": "UpdateDataTransformationProfileRequest",
+    "UpdateFHIRDatastore": "UpdateFHIRDatastoreRequest",
+    "UpdateProfileWithAgent": "UpdateProfileWithAgentRequest"
+  },
+  "shapes": {
+    "AgentInputMessage": {
+      "type": "structure",
+      "required": [
+        "Body",
+        "Type"
+      ],
+      "members": {
+        "Body": "AgentMessageString",
+        "Type": "AgentInputMessageType"
+      }
+    },
+    "AgentInputMessageType": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "confirmation_response"
+      ]
+    },
+    "AgentMessageString": {
+      "type": "string",
+      "min": 1,
+      "max": 40960
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws((-us-gov)|(-iso)|(-iso-b)|(-cn))?:healthlake:[a-z0-9-]+:\\d{12}:(datastore\\/fhir\\/.{32}|dataTransformationProfile\\/[a-f0-9]{32})"
+    },
+    "AnalyticsConfiguration": {
+      "type": "structure",
+      "members": {
+        "Status": "AnalyticsStatus"
+      }
+    },
+    "AnalyticsStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "ENABLING",
+        "DISABLED",
+        "DISABLING",
+        "PAUSING",
+        "PAUSED"
+      ]
+    },
+    "AuthorizationStrategy": {
+      "type": "string",
+      "enum": [
+        "SMART_ON_FHIR_V1",
+        "SMART_ON_FHIR",
+        "AWS_AUTH"
+      ]
+    },
+    "BackupConfiguration": {
+      "type": "structure",
+      "members": {
+        "Status": "BackupStatus",
+        "BackupType": "BackupType",
+        "RetentionPeriodInDays": "BackupRetentionPeriodInDays",
+        "BackupTagsEnabled": "HealthLakeBoolean"
+      }
+    },
+    "BackupRetentionPeriodInDays": {
+      "type": "integer",
+      "min": 1,
+      "max": 30
+    },
+    "BackupStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "BackupType": {
+      "type": "string",
+      "enum": [
+        "CONTINUOUS"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BoundedLengthString": {
+      "type": "string",
+      "min": 1,
+      "max": 5000,
+      "pattern": "[\\P{M}\\p{M}]{1,5000}"
+    },
+    "ChangeDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "ClientTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "CmkType": {
+      "type": "string",
+      "enum": [
+        "CUSTOMER_MANAGED_KMS_KEY",
+        "AWS_OWNED_KMS_KEY"
+      ]
+    },
+    "ConfigurationMetadata": {
+      "type": "string"
+    },
+    "ContinuousBackupRestoreConfiguration": {
+      "type": "structure",
+      "members": {
+        "RestorePointTime": "HealthLakeTimestamp"
+      }
+    },
+    "ConversationIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 36
+    },
+    "CreateDataTransformationProfileRequest": {
+      "type": "structure",
+      "required": [
+        "SourceFormat",
+        "Source",
+        "ProfileName"
+      ],
+      "members": {
+        "SourceFormat": "SourceFormat",
+        "Source": "CreateDataTransformationProfileSource",
+        "KmsKeyId": "KmsKeyId",
+        "ProfileDescription": "ProfileDescription",
+        "ProfileName": "ProfileNameString",
+        "Tags": "TagMap",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateDataTransformationProfileSource": {
+      "type": "structure",
+      "members": {
+        "StarterProfile": "StarterProfileSource",
+        "ExistingVersionedProfileId": "ExistingVersionedProfileSource",
+        "ProfileMapping": "ProfileMappingSource",
+        "SampleData": "SampleDataSource"
+      }
+    },
+    "CreateFHIRDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreTypeVersion"
+      ],
+      "members": {
+        "DatastoreName": "DatastoreName",
+        "DatastoreTypeVersion": "FHIRVersion",
+        "SseConfiguration": "SseConfiguration",
+        "PreloadDataConfig": "PreloadDataConfig",
+        "ClientToken": "ClientTokenString",
+        "Tags": "TagList",
+        "IdentityProviderConfiguration": "IdentityProviderConfiguration",
+        "AnalyticsConfiguration": "AnalyticsConfiguration",
+        "NlpConfiguration": "NlpConfiguration",
+        "ProfileConfiguration": "ProfileConfiguration",
+        "BackupConfiguration": "BackupConfiguration"
+      }
+    },
+    "DataTransformationIamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws(-[^:]+)?:iam::[0-9]{12}:role/.+"
+    },
+    "DataTransformationJobId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "DataTransformationJobName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\p{L}\\p{Z}\\p{N}_.:/=+\\-%@]*"
+    },
+    "DataTransformationNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DataTransformationS3Configuration": {
+      "type": "structure",
+      "required": [
+        "S3Uri",
+        "KmsKeyId"
+      ],
+      "members": {
+        "S3Uri": "DataTransformationS3Uri",
+        "KmsKeyId": "KmsKeyId"
+      }
+    },
+    "DataTransformationS3Uri": {
+      "type": "string",
+      "min": 8,
+      "max": 2048,
+      "pattern": "s3://[a-z0-9][a-z0-9.\\-]{1,61}[a-z0-9](/.+)?"
+    },
+    "DataTransformationTagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "DataTransformationTagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "DatastoreFilter": {
+      "type": "structure",
+      "members": {
+        "DatastoreName": "DatastoreName",
+        "DatastoreStatus": "DatastoreStatus",
+        "CreatedBefore": "HealthLakeTimestamp",
+        "CreatedAfter": "HealthLakeTimestamp"
+      }
+    },
+    "DatastoreId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-%@]*)"
+    },
+    "DatastoreName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-%@]*)"
+    },
+    "DatastoreStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "ACTIVE",
+        "DELETING",
+        "DELETED",
+        "CREATE_FAILED",
+        "UPDATING",
+        "UPDATE_FAILED"
+      ]
+    },
+    "DateTime": {
+      "type": "timestamp"
+    },
+    "DefaultEnabledBoolean": {
+      "type": "boolean"
+    },
+    "DefaultProfiles": {
+      "type": "list",
+      "member": "HealthLakeString"
+    },
+    "DeleteDataTransformationProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString"
+      }
+    },
+    "DeleteFHIRDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId"
+      }
+    },
+    "DescribeDataTransformationJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "DataTransformationJobId"
+      }
+    },
+    "DescribeFHIRDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId"
+      }
+    },
+    "DescribeFHIRExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId",
+        "JobId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId",
+        "JobId": "JobId"
+      }
+    },
+    "DescribeFHIRImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId",
+        "JobId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId",
+        "JobId": "JobId"
+      }
+    },
+    "EncryptionKeyID": {
+      "type": "string",
+      "min": 1,
+      "max": 400,
+      "pattern": "(arn:aws((-us-gov)|(-iso)|(-iso-b)|(-cn))?:kms:)?([a-z]{2}-[a-z]+(-[a-z]+)?-\\d:)?(\\d{12}:)?(((key/)?[a-zA-Z0-9-_]+)|(alias/[a-zA-Z0-9:/_-]+))"
+    },
+    "ExistingVersionedProfileSource": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "Version"
+      ],
+      "members": {
+        "ProfileId": "String",
+        "Version": "Integer"
+      }
+    },
+    "FHIRVersion": {
+      "type": "string",
+      "enum": [
+        "R4"
+      ]
+    },
+    "GetDataTransformationProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString",
+        "ProfileVersion": "ProfileVersion"
+      }
+    },
+    "HealthLakeBoolean": {
+      "type": "boolean"
+    },
+    "HealthLakeString": {
+      "type": "string",
+      "min": 0,
+      "max": 10000,
+      "pattern": "[\\P{M}\\p{M}]{0,10000}"
+    },
+    "HealthLakeTimestamp": {
+      "type": "timestamp"
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws(-[^:]+)?:iam::[0-9]{12}:role/.+"
+    },
+    "IdentityProviderConfiguration": {
+      "type": "structure",
+      "required": [
+        "AuthorizationStrategy"
+      ],
+      "members": {
+        "AuthorizationStrategy": "AuthorizationStrategy",
+        "FineGrainedAuthorizationEnabled": "HealthLakeBoolean",
+        "Metadata": "ConfigurationMetadata",
+        "IdpLambdaArn": "LambdaArn"
+      }
+    },
+    "InputDataConfig": {
+      "type": "structure",
+      "members": {
+        "S3Uri": "S3Uri"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "JobId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-%@]*)"
+    },
+    "JobName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-%@]*)"
+    },
+    "JobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "QUEUED",
+        "IN_PROGRESS",
+        "COMPLETED_WITH_ERRORS",
+        "COMPLETED",
+        "FAILED",
+        "CANCEL_SUBMITTED",
+        "CANCEL_IN_PROGRESS",
+        "CANCEL_COMPLETED",
+        "CANCEL_FAILED"
+      ]
+    },
+    "KmsEncryptionConfig": {
+      "type": "structure",
+      "required": [
+        "CmkType"
+      ],
+      "members": {
+        "CmkType": "CmkType",
+        "KmsKeyId": "EncryptionKeyID"
+      }
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "LambdaArn": {
+      "type": "string",
+      "min": 49,
+      "max": 256,
+      "pattern": "arn:aws[a-z0-9-]*:lambda:[a-z]{2,4}(-[a-z]{1,16})+-[0-9]+:\\d{12}:function:[a-zA-Z0-9\\-_\\.]+(:(\\$LATEST|[a-zA-Z0-9\\-_]+))?"
+    },
+    "ListDataTransformationJobsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "DataTransformationNextToken",
+        "JobStatus": "TransformationJobStatus",
+        "JobName": "DataTransformationJobName",
+        "SubmittedAfter": "DateTime",
+        "SubmittedBefore": "DateTime"
+      }
+    },
+    "ListDataTransformationProfileVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString",
+        "MaxResults": "MaxResults",
+        "NextToken": "DataTransformationNextToken"
+      }
+    },
+    "ListDataTransformationProfilesRequest": {
+      "type": "structure",
+      "required": [
+        "SourceFormat"
+      ],
+      "members": {
+        "SourceFormat": "SourceFormat",
+        "MaxResults": "MaxResults",
+        "NextToken": "DataTransformationNextToken"
+      }
+    },
+    "ListFHIRDatastoresRequest": {
+      "type": "structure",
+      "members": {
+        "Filter": "DatastoreFilter",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsInteger"
+      }
+    },
+    "ListFHIRExportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsInteger",
+        "JobName": "JobName",
+        "JobStatus": "JobStatus",
+        "SubmittedBefore": "HealthLakeTimestamp",
+        "SubmittedAfter": "HealthLakeTimestamp"
+      }
+    },
+    "ListFHIRImportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsInteger",
+        "JobName": "JobName",
+        "JobStatus": "JobStatus",
+        "SubmittedBefore": "HealthLakeTimestamp",
+        "SubmittedAfter": "HealthLakeTimestamp"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 500
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 8192,
+      "pattern": "\\p{ASCII}{0,8192}"
+    },
+    "NlpConfiguration": {
+      "type": "structure",
+      "members": {
+        "Status": "NlpStatus"
+      }
+    },
+    "NlpStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "ENABLING",
+        "DISABLED",
+        "DISABLING"
+      ]
+    },
+    "OutputDataConfig": {
+      "type": "structure",
+      "members": {
+        "S3Configuration": "S3Configuration"
+      }
+    },
+    "PreloadDataConfig": {
+      "type": "structure",
+      "required": [
+        "PreloadDataType"
+      ],
+      "members": {
+        "PreloadDataType": "PreloadDataType"
+      }
+    },
+    "PreloadDataType": {
+      "type": "string",
+      "enum": [
+        "SYNTHEA"
+      ]
+    },
+    "ProfileConfiguration": {
+      "type": "structure",
+      "members": {
+        "DefaultProfiles": "DefaultProfiles"
+      }
+    },
+    "ProfileDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "ProfileIdString": {
+      "type": "string",
+      "min": 32,
+      "max": 32,
+      "pattern": "[a-f0-9]{32}"
+    },
+    "ProfileMapping": {
+      "type": "map",
+      "min": 1,
+      "max": 500,
+      "key": "ProfileMappingKey",
+      "value": "ProfileMappingValue"
+    },
+    "ProfileMappingKey": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "ProfileMappingSource": {
+      "type": "structure",
+      "required": [
+        "ProfileMapping"
+      ],
+      "members": {
+        "ProfileMapping": "StringMap"
+      }
+    },
+    "ProfileMappingValue": {
+      "type": "string",
+      "min": 0,
+      "max": 102400
+    },
+    "ProfileNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ProfileVersion": {
+      "type": "integer",
+      "min": 0,
+      "max": 99
+    },
+    "PublishDataTransformationProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "SourceFormat"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString",
+        "SourceFormat": "SourceFormat",
+        "FromExistingVersion": "ProfileVersion",
+        "ChangeDescription": "ChangeDescription"
+      }
+    },
+    "RestoreConfiguration": {
+      "type": "structure",
+      "members": {
+        "ContinuousBackupRestoreConfiguration": "ContinuousBackupRestoreConfiguration"
+      }
+    },
+    "RestoreFHIRDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "SourceDatastoreId",
+        "RestoreConfiguration"
+      ],
+      "members": {
+        "SourceDatastoreId": "DatastoreId",
+        "RestoreConfiguration": "RestoreConfiguration",
+        "DatastoreName": "DatastoreName",
+        "SseConfiguration": "SseConfiguration",
+        "ClientToken": "ClientTokenString",
+        "Tags": "TagList",
+        "IdentityProviderConfiguration": "IdentityProviderConfiguration",
+        "AnalyticsConfiguration": "AnalyticsConfiguration",
+        "NlpConfiguration": "NlpConfiguration",
+        "ProfileConfiguration": "ProfileConfiguration"
+      }
+    },
+    "S3Configuration": {
+      "type": "structure",
+      "required": [
+        "S3Uri",
+        "KmsKeyId"
+      ],
+      "members": {
+        "S3Uri": "S3Uri",
+        "KmsKeyId": "EncryptionKeyID"
+      }
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9](/.*)?"
+    },
+    "SampleDataS3Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][a-z0-9.\\-]{1,61}[a-z0-9](/.*)?"
+    },
+    "SampleDataSource": {
+      "type": "structure",
+      "required": [
+        "S3Uri"
+      ],
+      "members": {
+        "S3Uri": "SampleDataS3Uri"
+      }
+    },
+    "SourceFormat": {
+      "type": "string",
+      "enum": [
+        "CCDA",
+        "CSV"
+      ]
+    },
+    "SseConfiguration": {
+      "type": "structure",
+      "required": [
+        "KmsEncryptionConfig"
+      ],
+      "members": {
+        "KmsEncryptionConfig": "KmsEncryptionConfig"
+      }
+    },
+    "StartDataTransformationJobRequest": {
+      "type": "structure",
+      "required": [
+        "InputDataConfig",
+        "OutputDataConfig",
+        "DataAccessRoleArn",
+        "ClientToken",
+        "ProfileId"
+      ],
+      "members": {
+        "InputDataConfig": "TransformationInputDataConfig",
+        "OutputDataConfig": "TransformationOutputDataConfig",
+        "DataAccessRoleArn": "DataTransformationIamRoleArn",
+        "ClientToken": "ClientToken",
+        "JobName": "DataTransformationJobName",
+        "ProfileId": "ProfileIdString",
+        "DriftDetectionEnabled": "Boolean",
+        "ProvenanceEnabled": "Boolean"
+      }
+    },
+    "StartFHIRExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "OutputDataConfig",
+        "DatastoreId",
+        "DataAccessRoleArn"
+      ],
+      "members": {
+        "JobName": "JobName",
+        "OutputDataConfig": "OutputDataConfig",
+        "DatastoreId": "DatastoreId",
+        "DataAccessRoleArn": "IamRoleArn",
+        "ClientToken": "ClientTokenString"
+      }
+    },
+    "StartFHIRImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "InputDataConfig",
+        "JobOutputDataConfig",
+        "DatastoreId",
+        "DataAccessRoleArn"
+      ],
+      "members": {
+        "JobName": "JobName",
+        "InputDataConfig": "InputDataConfig",
+        "JobOutputDataConfig": "OutputDataConfig",
+        "DatastoreId": "DatastoreId",
+        "DataAccessRoleArn": "IamRoleArn",
+        "ClientToken": "ClientTokenString",
+        "ValidationLevel": "ValidationLevel",
+        "ProfileId": "BoundedLengthString",
+        "InputFormat": "BoundedLengthString",
+        "DriftDetectionEnabled": "HealthLakeBoolean",
+        "ProvenanceEnabled": "DefaultEnabledBoolean"
+      }
+    },
+    "StarterProfileSource": {
+      "type": "structure",
+      "required": [
+        "StarterProfileName"
+      ],
+      "members": {
+        "StarterProfileName": "String"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringMap": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "DataTransformationTagKey",
+      "value": "DataTransformationTagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TransformationInputDataConfig": {
+      "type": "structure",
+      "required": [
+        "S3Uri"
+      ],
+      "members": {
+        "S3Uri": "DataTransformationS3Uri",
+        "SourceFormat": "SourceFormat"
+      }
+    },
+    "TransformationJobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "QUEUED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "COMPLETED_WITH_ERRORS",
+        "FAILED"
+      ]
+    },
+    "TransformationOutputDataConfig": {
+      "type": "structure",
+      "required": [
+        "S3Configuration"
+      ],
+      "members": {
+        "S3Configuration": "DataTransformationS3Configuration"
+      }
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDataTransformationProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "ProfileMapping"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString",
+        "ProfileMapping": "ProfileMapping",
+        "ChangeDescription": "ChangeDescription"
+      }
+    },
+    "UpdateFHIRDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "DatastoreId"
+      ],
+      "members": {
+        "DatastoreId": "DatastoreId",
+        "DatastoreName": "DatastoreName",
+        "AnalyticsConfiguration": "AnalyticsConfiguration",
+        "NlpConfiguration": "NlpConfiguration",
+        "ProfileConfiguration": "ProfileConfiguration",
+        "IdentityProviderConfiguration": "IdentityProviderConfiguration",
+        "BackupConfiguration": "BackupConfiguration"
+      }
+    },
+    "UpdateProfileWithAgentRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "InputMessage"
+      ],
+      "members": {
+        "ProfileId": "ProfileIdString",
+        "InputMessage": "AgentInputMessage",
+        "ConversationId": "ConversationIdString"
+      }
+    },
+    "ValidationLevel": {
+      "type": "string",
+      "enum": [
+        "strict",
+        "structure-only",
+        "minimal"
+      ]
+    }
+  }
+}

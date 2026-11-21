@@ -275,6 +275,14 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                 lambdaAccountId, cwLogGroup, cwLogStream, lambdaRegion, line));
 
         List<String> env = LambdaRuntimeEnv.of(fn, runtimeApiEndpoint, cwLogGroup, cwLogStream);
+        // The X-Ray daemon, as Lambda sets it for every function: SDKs send their segments to it over UDP.
+        if (config.services().xray().enabled() && config.services().xray().daemonPort() > 0) {
+            String daemon = hostAddress + ":" + config.services().xray().daemonPort();
+            env.add("AWS_XRAY_DAEMON_ADDRESS=" + daemon);
+            env.add("_AWS_XRAY_DAEMON_ADDRESS=" + hostAddress);
+            env.add("_AWS_XRAY_DAEMON_PORT=" + config.services().xray().daemonPort());
+            env.add("AWS_XRAY_CONTEXT_MISSING=LOG_ERROR");
+        }
         // Region, credentials and the Floci endpoint the SDK should target: the same baseline
         // Floci gives every launched container. When the host ~/.aws is mounted (awsConfigPath),
         // the SDK discovers credentials from /opt/aws-config instead of injected credentials.

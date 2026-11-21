@@ -6,6 +6,7 @@ import io.floci.aws.services.route53.Route53Service;
 import io.floci.aws.services.route53.model.ResourceRecord;
 import io.floci.aws.services.route53.model.ResourceRecordSet;
 import io.floci.aws.testing.AcmDnsRecordValidationProfile;
+import io.floci.aws.testing.PrivateCaFixture;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -41,6 +42,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmIntegrationTest {
+
+    private static String privateCa;
+
+    /** An ACTIVE AWS Private CA the class's private certificates are signed by. */
+    private static synchronized String privateCa() {
+        if (privateCa == null) {
+            privateCa = PrivateCaFixture.activeRoot("acm-tests.floci.test");
+        }
+        return privateCa;
+    }
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
     private static String createdCertificateArn;
@@ -355,9 +366,9 @@ class AcmIntegrationTest {
             .body("""
                 {
                     "DomainName": "internal.example.com",
-                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+                    "CertificateAuthorityArn": "PRIVATE_CA_ARN"
                 }
-                """)
+                """.replace("PRIVATE_CA_ARN", privateCa()))
         .when()
             .post("/")
         .then()
@@ -437,16 +448,16 @@ class AcmIntegrationTest {
 
     @Test
     @Order(16)
-    void privateCertificateChainsToTheSameCa() throws Exception {
+    void privateCertificateChainsToItsPrivateCa() throws Exception {
         String arn = given()
             .header("X-Amz-Target", "CertificateManager.RequestCertificate")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
                 {
                     "DomainName": "internal.example.com",
-                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/11111111-2222-3333-4444-555555555555"
+                    "CertificateAuthorityArn": "PRIVATE_CA_ARN"
                 }
-                """)
+                """.replace("PRIVATE_CA_ARN", privateCa()))
         .when()
             .post("/")
         .then()
@@ -455,7 +466,9 @@ class AcmIntegrationTest {
 
         JsonPath response = getCertificatePems(arn);
 
-        assertLeafChainsToLocalCa(response.getString("Certificate"), response.getString("CertificateChain"));
+        String caPem = PrivateCaFixture.call("GetCertificateAuthorityCertificate",
+                "{\"CertificateAuthorityArn\":\"" + privateCa() + "\"}").statusCode(200).extract().path("Certificate");
+        assertLeafChainsTo(response.getString("Certificate"), response.getString("CertificateChain"), caPem);
     }
 
     @Test
@@ -789,9 +802,9 @@ class AcmIntegrationTest {
             .body("""
                 {
                     "DomainName": "renewable-private.example.com",
-                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/test"
+                    "CertificateAuthorityArn": "PRIVATE_CA_ARN"
                 }
-                """)
+                """.replace("PRIVATE_CA_ARN", privateCa()))
         .when()
             .post("/")
         .then()
@@ -864,12 +877,16 @@ class AcmIntegrationTest {
      * client that pins Certificate plus CertificateChain does, so a signature check alone is not enough.
      */
     private static X509Certificate assertLeafChainsToLocalCa(String leafPem, String chainPem) throws Exception {
+        String servedCa = given().when().get("/_floci/ca.pem").then().statusCode(200).extract().asString();
+        return assertLeafChainsTo(leafPem, chainPem, servedCa);
+    }
+
+    private static X509Certificate assertLeafChainsTo(String leafPem, String chainPem, String caPem) throws Exception {
         CertificateFactory factory = CertificateFactory.getInstance("X.509");
         X509Certificate leaf = parse(factory, leafPem);
         X509Certificate chain = parse(factory, chainPem);
-        String servedCa = given().when().get("/_floci/ca.pem").then().statusCode(200).extract().asString();
 
-        assertEquals(servedCa.strip(), chainPem.strip(), "CertificateChain must be the local CA PEM");
+        assertEquals(caPem.strip(), chainPem.strip(), "CertificateChain must be the issuing CA's PEM");
         assertEquals(chain.getSubjectX500Principal(), leaf.getIssuerX500Principal());
         assertEquals(-1, leaf.getBasicConstraints(), "a leaf, not a CA");
         assertEquals(List.of("1.3.6.1.5.5.7.3.1", "1.3.6.1.5.5.7.3.2"), leaf.getExtendedKeyUsage(),

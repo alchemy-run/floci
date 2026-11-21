@@ -1,0 +1,902 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_xray_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchGetTraces": "BatchGetTracesRequest",
+    "CancelTraceRetrieval": "CancelTraceRetrievalRequest",
+    "CreateGroup": "CreateGroupRequest",
+    "CreateSamplingRule": "CreateSamplingRuleRequest",
+    "DeleteGroup": "DeleteGroupRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "DeleteSamplingRule": "DeleteSamplingRuleRequest",
+    "GetEncryptionConfig": "GetEncryptionConfigRequest",
+    "GetGroup": "GetGroupRequest",
+    "GetGroups": "GetGroupsRequest",
+    "GetIndexingRules": "GetIndexingRulesRequest",
+    "GetInsight": "GetInsightRequest",
+    "GetInsightEvents": "GetInsightEventsRequest",
+    "GetInsightImpactGraph": "GetInsightImpactGraphRequest",
+    "GetInsightSummaries": "GetInsightSummariesRequest",
+    "GetRetrievedTracesGraph": "GetRetrievedTracesGraphRequest",
+    "GetSamplingRules": "GetSamplingRulesRequest",
+    "GetSamplingStatisticSummaries": "GetSamplingStatisticSummariesRequest",
+    "GetSamplingTargets": "GetSamplingTargetsRequest",
+    "GetServiceGraph": "GetServiceGraphRequest",
+    "GetTimeSeriesServiceStatistics": "GetTimeSeriesServiceStatisticsRequest",
+    "GetTraceGraph": "GetTraceGraphRequest",
+    "GetTraceSegmentDestination": "GetTraceSegmentDestinationRequest",
+    "GetTraceSummaries": "GetTraceSummariesRequest",
+    "ListResourcePolicies": "ListResourcePoliciesRequest",
+    "ListRetrievedTraces": "ListRetrievedTracesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutEncryptionConfig": "PutEncryptionConfigRequest",
+    "PutResourcePolicy": "PutResourcePolicyRequest",
+    "PutTelemetryRecords": "PutTelemetryRecordsRequest",
+    "PutTraceSegments": "PutTraceSegmentsRequest",
+    "StartTraceRetrieval": "StartTraceRetrievalRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateGroup": "UpdateGroupRequest",
+    "UpdateIndexingRule": "UpdateIndexingRuleRequest",
+    "UpdateSamplingRule": "UpdateSamplingRuleRequest",
+    "UpdateTraceSegmentDestination": "UpdateTraceSegmentDestinationRequest"
+  },
+  "shapes": {
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "AnomalyCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "AttributeKey": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "AttributeMap": {
+      "type": "map",
+      "max": 5,
+      "key": "AttributeKey",
+      "value": "AttributeValue"
+    },
+    "AttributeValue": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "BackendConnectionErrors": {
+      "type": "structure",
+      "members": {
+        "TimeoutCount": "NullableInteger",
+        "ConnectionRefusedCount": "NullableInteger",
+        "HTTPCode4XXCount": "NullableInteger",
+        "HTTPCode5XXCount": "NullableInteger",
+        "UnknownHostCount": "NullableInteger",
+        "OtherCount": "NullableInteger"
+      }
+    },
+    "BatchGetTracesRequest": {
+      "type": "structure",
+      "required": [
+        "TraceIds"
+      ],
+      "members": {
+        "TraceIds": "TraceIdList",
+        "NextToken": "String"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BorrowCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "CancelTraceRetrievalRequest": {
+      "type": "structure",
+      "required": [
+        "RetrievalToken"
+      ],
+      "members": {
+        "RetrievalToken": "RetrievalToken"
+      }
+    },
+    "ClientID": {
+      "type": "string",
+      "min": 24,
+      "max": 24
+    },
+    "CloudWatchLogsConfiguration": {
+      "type": "structure",
+      "members": {
+        "SpansLogGroupKmsKeyId": "KmsKeyId"
+      }
+    },
+    "CooldownWindowMinutes": {
+      "type": "integer",
+      "min": 0
+    },
+    "CreateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "GroupName"
+      ],
+      "members": {
+        "GroupName": "GroupName",
+        "FilterExpression": "FilterExpression",
+        "InsightsConfiguration": "InsightsConfiguration",
+        "Tags": "TagList"
+      }
+    },
+    "CreateSamplingRuleRequest": {
+      "type": "structure",
+      "required": [
+        "SamplingRule"
+      ],
+      "members": {
+        "SamplingRule": "SamplingRule",
+        "Tags": "TagList"
+      }
+    },
+    "DeleteGroupRequest": {
+      "type": "structure",
+      "members": {
+        "GroupName": "GroupName",
+        "GroupARN": "GroupARN"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyName"
+      ],
+      "members": {
+        "PolicyName": "PolicyName",
+        "PolicyRevisionId": "PolicyRevisionId"
+      }
+    },
+    "DeleteSamplingRuleRequest": {
+      "type": "structure",
+      "members": {
+        "RuleName": "String",
+        "RuleARN": "String"
+      }
+    },
+    "EC2InstanceId": {
+      "type": "string",
+      "max": 20
+    },
+    "EncryptionKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 3000
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "KMS"
+      ]
+    },
+    "EntitySelectorExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "FilterExpression": {
+      "type": "string"
+    },
+    "FixedRate": {
+      "type": "double",
+      "min": 0,
+      "max": 1
+    },
+    "GetEncryptionConfigRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetGroupRequest": {
+      "type": "structure",
+      "members": {
+        "GroupName": "GroupName",
+        "GroupARN": "GroupARN"
+      }
+    },
+    "GetGroupsNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "GetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "GetGroupsNextToken"
+      }
+    },
+    "GetIndexingRulesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String"
+      }
+    },
+    "GetInsightEventsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "GetInsightEventsRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId"
+      ],
+      "members": {
+        "InsightId": "InsightId",
+        "MaxResults": "GetInsightEventsMaxResults",
+        "NextToken": "Token"
+      }
+    },
+    "GetInsightImpactGraphRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "InsightId": "InsightId",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "NextToken": "Token"
+      }
+    },
+    "GetInsightRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId"
+      ],
+      "members": {
+        "InsightId": "InsightId"
+      }
+    },
+    "GetInsightSummariesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "GetInsightSummariesRequest": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "States": "InsightStateList",
+        "GroupARN": "GroupARN",
+        "GroupName": "GroupName",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "MaxResults": "GetInsightSummariesMaxResults",
+        "NextToken": "Token"
+      }
+    },
+    "GetRetrievedTracesGraphRequest": {
+      "type": "structure",
+      "required": [
+        "RetrievalToken"
+      ],
+      "members": {
+        "RetrievalToken": "RetrievalToken",
+        "NextToken": "String"
+      }
+    },
+    "GetSamplingRulesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String"
+      }
+    },
+    "GetSamplingStatisticSummariesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String"
+      }
+    },
+    "GetSamplingTargetsRequest": {
+      "type": "structure",
+      "required": [
+        "SamplingStatisticsDocuments"
+      ],
+      "members": {
+        "SamplingStatisticsDocuments": "SamplingStatisticsDocumentList",
+        "SamplingBoostStatisticsDocuments": "SamplingBoostStatisticsDocumentList"
+      }
+    },
+    "GetServiceGraphRequest": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "GroupName": "GroupName",
+        "GroupARN": "GroupARN",
+        "NextToken": "String"
+      }
+    },
+    "GetTimeSeriesServiceStatisticsRequest": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "GroupName": "GroupName",
+        "GroupARN": "GroupARN",
+        "EntitySelectorExpression": "EntitySelectorExpression",
+        "Period": "NullableInteger",
+        "ForecastStatistics": "NullableBoolean",
+        "NextToken": "String"
+      }
+    },
+    "GetTraceGraphRequest": {
+      "type": "structure",
+      "required": [
+        "TraceIds"
+      ],
+      "members": {
+        "TraceIds": "TraceIdList",
+        "NextToken": "String"
+      }
+    },
+    "GetTraceSegmentDestinationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetTraceSummariesRequest": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "TimeRangeType": "TimeRangeType",
+        "Sampling": "NullableBoolean",
+        "SamplingStrategy": "SamplingStrategy",
+        "FilterExpression": "FilterExpression",
+        "NextToken": "String"
+      }
+    },
+    "GroupARN": {
+      "type": "string",
+      "min": 1,
+      "max": 400
+    },
+    "GroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "HTTPMethod": {
+      "type": "string",
+      "max": 10
+    },
+    "Host": {
+      "type": "string",
+      "max": 64
+    },
+    "Hostname": {
+      "type": "string",
+      "max": 255
+    },
+    "IndexingRuleValueUpdate": {
+      "type": "structure",
+      "members": {
+        "Probabilistic": "ProbabilisticRuleValueUpdate"
+      }
+    },
+    "InsightId": {
+      "type": "string",
+      "pattern": "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+    },
+    "InsightState": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CLOSED"
+      ]
+    },
+    "InsightStateList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "InsightState"
+    },
+    "InsightsConfiguration": {
+      "type": "structure",
+      "members": {
+        "InsightsEnabled": "NullableBoolean",
+        "NotificationsEnabled": "NullableBoolean"
+      }
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ListResourcePoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "ResourcePolicyNextToken"
+      }
+    },
+    "ListRetrievedTracesRequest": {
+      "type": "structure",
+      "required": [
+        "RetrievalToken"
+      ],
+      "members": {
+        "RetrievalToken": "RetrievalToken",
+        "TraceFormat": "TraceFormatType",
+        "NextToken": "String"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "NextToken": "String"
+      }
+    },
+    "MaxRate": {
+      "type": "double",
+      "min": 0,
+      "max": 1
+    },
+    "NullableBoolean": {
+      "type": "boolean"
+    },
+    "NullableDouble": {
+      "type": "double"
+    },
+    "NullableInteger": {
+      "type": "integer"
+    },
+    "PolicyDocument": {
+      "type": "string"
+    },
+    "PolicyName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\w+=,.@-]+"
+    },
+    "PolicyRevisionId": {
+      "type": "string"
+    },
+    "Priority": {
+      "type": "integer",
+      "min": 1,
+      "max": 9999
+    },
+    "ProbabilisticRuleValueUpdate": {
+      "type": "structure",
+      "required": [
+        "DesiredSamplingPercentage"
+      ],
+      "members": {
+        "DesiredSamplingPercentage": "NullableDouble"
+      }
+    },
+    "PutEncryptionConfigRequest": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "KeyId": "EncryptionKeyId",
+        "Type": "EncryptionType"
+      }
+    },
+    "PutResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyName",
+        "PolicyDocument"
+      ],
+      "members": {
+        "PolicyName": "PolicyName",
+        "PolicyDocument": "PolicyDocument",
+        "PolicyRevisionId": "PolicyRevisionId",
+        "BypassPolicyLockoutCheck": "Boolean"
+      }
+    },
+    "PutTelemetryRecordsRequest": {
+      "type": "structure",
+      "required": [
+        "TelemetryRecords"
+      ],
+      "members": {
+        "TelemetryRecords": "TelemetryRecordList",
+        "EC2InstanceId": "EC2InstanceId",
+        "Hostname": "Hostname",
+        "ResourceARN": "ResourceARN"
+      }
+    },
+    "PutTraceSegmentsRequest": {
+      "type": "structure",
+      "required": [
+        "TraceSegmentDocuments"
+      ],
+      "members": {
+        "TraceSegmentDocuments": "TraceSegmentDocumentList"
+      }
+    },
+    "RequestCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "ReservoirSize": {
+      "type": "integer",
+      "min": 0
+    },
+    "ResourceARN": {
+      "type": "string",
+      "max": 500
+    },
+    "ResourcePolicyNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "RetrievalToken": {
+      "type": "string",
+      "min": 0,
+      "max": 1020
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "SampledAnomalyCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "SampledCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "SamplingBoostStatisticsDocument": {
+      "type": "structure",
+      "required": [
+        "RuleName",
+        "ServiceName",
+        "Timestamp",
+        "AnomalyCount",
+        "TotalCount",
+        "SampledAnomalyCount"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "ServiceName": "ServiceName",
+        "Timestamp": "Timestamp",
+        "AnomalyCount": "AnomalyCount",
+        "TotalCount": "TotalCount",
+        "SampledAnomalyCount": "SampledAnomalyCount"
+      }
+    },
+    "SamplingBoostStatisticsDocumentList": {
+      "type": "list",
+      "max": 25,
+      "member": "SamplingBoostStatisticsDocument"
+    },
+    "SamplingRateBoost": {
+      "type": "structure",
+      "required": [
+        "MaxRate",
+        "CooldownWindowMinutes"
+      ],
+      "members": {
+        "MaxRate": "MaxRate",
+        "CooldownWindowMinutes": "CooldownWindowMinutes"
+      }
+    },
+    "SamplingRule": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Priority",
+        "FixedRate",
+        "ReservoirSize",
+        "ServiceName",
+        "ServiceType",
+        "Host",
+        "HTTPMethod",
+        "URLPath",
+        "Version"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "RuleARN": "String",
+        "ResourceARN": "ResourceARN",
+        "Priority": "Priority",
+        "FixedRate": "FixedRate",
+        "ReservoirSize": "ReservoirSize",
+        "ServiceName": "ServiceName",
+        "ServiceType": "ServiceType",
+        "Host": "Host",
+        "HTTPMethod": "HTTPMethod",
+        "URLPath": "URLPath",
+        "Version": "Version",
+        "Attributes": "AttributeMap",
+        "SamplingRateBoost": "SamplingRateBoost"
+      }
+    },
+    "SamplingRuleUpdate": {
+      "type": "structure",
+      "members": {
+        "RuleName": "RuleName",
+        "RuleARN": "String",
+        "ResourceARN": "ResourceARN",
+        "Priority": "NullableInteger",
+        "FixedRate": "NullableDouble",
+        "ReservoirSize": "NullableInteger",
+        "Host": "Host",
+        "ServiceName": "ServiceName",
+        "ServiceType": "ServiceType",
+        "HTTPMethod": "HTTPMethod",
+        "URLPath": "URLPath",
+        "Attributes": "AttributeMap",
+        "SamplingRateBoost": "SamplingRateBoost"
+      }
+    },
+    "SamplingStatisticsDocument": {
+      "type": "structure",
+      "required": [
+        "RuleName",
+        "ClientID",
+        "Timestamp",
+        "RequestCount",
+        "SampledCount"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "ClientID": "ClientID",
+        "Timestamp": "Timestamp",
+        "RequestCount": "RequestCount",
+        "SampledCount": "SampledCount",
+        "BorrowCount": "BorrowCount"
+      }
+    },
+    "SamplingStatisticsDocumentList": {
+      "type": "list",
+      "max": 25,
+      "member": "SamplingStatisticsDocument"
+    },
+    "SamplingStrategy": {
+      "type": "structure",
+      "members": {
+        "Name": "SamplingStrategyName",
+        "Value": "NullableDouble"
+      }
+    },
+    "SamplingStrategyName": {
+      "type": "string",
+      "enum": [
+        "PartialScan",
+        "FixedRate"
+      ]
+    },
+    "ServiceName": {
+      "type": "string",
+      "max": 64
+    },
+    "ServiceType": {
+      "type": "string",
+      "max": 64
+    },
+    "StartTraceRetrievalRequest": {
+      "type": "structure",
+      "required": [
+        "TraceIds",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "TraceIds": "TraceIdListForRetrieval",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TelemetryRecord": {
+      "type": "structure",
+      "required": [
+        "Timestamp"
+      ],
+      "members": {
+        "Timestamp": "Timestamp",
+        "SegmentsReceivedCount": "NullableInteger",
+        "SegmentsSentCount": "NullableInteger",
+        "SegmentsSpilloverCount": "NullableInteger",
+        "SegmentsRejectedCount": "NullableInteger",
+        "BackendConnectionErrors": "BackendConnectionErrors"
+      }
+    },
+    "TelemetryRecordList": {
+      "type": "list",
+      "member": "TelemetryRecord"
+    },
+    "TimeRangeType": {
+      "type": "string",
+      "enum": [
+        "TraceId",
+        "Event",
+        "Service"
+      ]
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Token": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "TotalCount": {
+      "type": "integer",
+      "min": 0
+    },
+    "TraceFormatType": {
+      "type": "string",
+      "enum": [
+        "XRAY",
+        "OTEL"
+      ]
+    },
+    "TraceId": {
+      "type": "string",
+      "min": 1,
+      "max": 35
+    },
+    "TraceIdList": {
+      "type": "list",
+      "member": "TraceId"
+    },
+    "TraceIdListForRetrieval": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "TraceId"
+    },
+    "TraceSegmentDestination": {
+      "type": "string",
+      "enum": [
+        "XRay",
+        "CloudWatchLogs"
+      ]
+    },
+    "TraceSegmentDocument": {
+      "type": "string"
+    },
+    "TraceSegmentDocumentList": {
+      "type": "list",
+      "member": "TraceSegmentDocument"
+    },
+    "URLPath": {
+      "type": "string",
+      "max": 128
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateGroupRequest": {
+      "type": "structure",
+      "members": {
+        "GroupName": "GroupName",
+        "GroupARN": "GroupARN",
+        "FilterExpression": "FilterExpression",
+        "InsightsConfiguration": "InsightsConfiguration"
+      }
+    },
+    "UpdateIndexingRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Rule"
+      ],
+      "members": {
+        "Name": "String",
+        "Rule": "IndexingRuleValueUpdate"
+      }
+    },
+    "UpdateSamplingRuleRequest": {
+      "type": "structure",
+      "required": [
+        "SamplingRuleUpdate"
+      ],
+      "members": {
+        "SamplingRuleUpdate": "SamplingRuleUpdate"
+      }
+    },
+    "UpdateTraceSegmentDestinationRequest": {
+      "type": "structure",
+      "members": {
+        "Destination": "TraceSegmentDestination",
+        "CloudWatchLogsConfiguration": "CloudWatchLogsConfiguration"
+      }
+    },
+    "Version": {
+      "type": "integer",
+      "min": 1
+    }
+  }
+}

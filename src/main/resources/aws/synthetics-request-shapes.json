@@ -1,0 +1,701 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_synthetics_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateResource": "AssociateResourceRequest",
+    "CreateCanary": "CreateCanaryRequest",
+    "CreateGroup": "CreateGroupRequest",
+    "DeleteCanary": "DeleteCanaryRequest",
+    "DeleteGroup": "DeleteGroupRequest",
+    "DescribeCanaries": "DescribeCanariesRequest",
+    "DescribeCanariesLastRun": "DescribeCanariesLastRunRequest",
+    "DescribeRuntimeVersions": "DescribeRuntimeVersionsRequest",
+    "DisassociateResource": "DisassociateResourceRequest",
+    "GetCanary": "GetCanaryRequest",
+    "GetCanaryRuns": "GetCanaryRunsRequest",
+    "GetGroup": "GetGroupRequest",
+    "ListAssociatedGroups": "ListAssociatedGroupsRequest",
+    "ListGroupResources": "ListGroupResourcesRequest",
+    "ListGroups": "ListGroupsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "StartCanary": "StartCanaryRequest",
+    "StartCanaryDryRun": "StartCanaryDryRunRequest",
+    "StopCanary": "StopCanaryRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCanary": "UpdateCanaryRequest"
+  },
+  "shapes": {
+    "AddReplicaLocationInput": {
+      "type": "structure",
+      "required": [
+        "Location"
+      ],
+      "members": {
+        "Location": "Location",
+        "VpcConfig": "VpcConfigInput",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "AddReplicaLocations": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "AddReplicaLocationInput"
+    },
+    "ArtifactConfigInput": {
+      "type": "structure",
+      "members": {
+        "S3Encryption": "S3EncryptionConfig"
+      }
+    },
+    "AssociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "GroupIdentifier",
+        "ResourceArn"
+      ],
+      "members": {
+        "GroupIdentifier": "GroupIdentifier",
+        "ResourceArn": "CanaryArn"
+      }
+    },
+    "BaseScreenshot": {
+      "type": "structure",
+      "required": [
+        "ScreenshotName"
+      ],
+      "members": {
+        "ScreenshotName": "String",
+        "IgnoreCoordinates": "BaseScreenshotIgnoreCoordinates"
+      }
+    },
+    "BaseScreenshotConfigIgnoreCoordinate": {
+      "type": "string",
+      "pattern": "^(-?\\d{1,5}\\.?\\d{0,2},){3}(-?\\d{1,5}\\.?\\d{0,2}){1}$"
+    },
+    "BaseScreenshotIgnoreCoordinates": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "BaseScreenshotConfigIgnoreCoordinate"
+    },
+    "BaseScreenshots": {
+      "type": "list",
+      "member": "BaseScreenshot"
+    },
+    "Blob": {
+      "type": "blob",
+      "min": 1,
+      "max": 10000000
+    },
+    "BlueprintType": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[0-9a-zA-Z_\\-\\.]+"
+    },
+    "BlueprintTypes": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "BlueprintType"
+    },
+    "BrowserConfig": {
+      "type": "structure",
+      "members": {
+        "BrowserType": "BrowserType"
+      }
+    },
+    "BrowserConfigs": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "BrowserConfig"
+    },
+    "BrowserType": {
+      "type": "string",
+      "enum": [
+        "CHROME",
+        "FIREFOX"
+      ]
+    },
+    "CanaryArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*)?:synthetics:[a-z]{2,4}(-[a-z]{2,4})?-[a-z]+-\\d{1}:\\d{12}:canary:[0-9a-z_\\-]{1,255}"
+    },
+    "CanaryCodeInput": {
+      "type": "structure",
+      "members": {
+        "S3Bucket": "String",
+        "S3Key": "String",
+        "S3Version": "String",
+        "ZipFile": "Blob",
+        "Handler": "CodeHandler",
+        "BlueprintTypes": "BlueprintTypes",
+        "Dependencies": "Dependencies"
+      }
+    },
+    "CanaryName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[0-9a-z_\\-]+$"
+    },
+    "CanaryRunConfigInput": {
+      "type": "structure",
+      "members": {
+        "TimeoutInSeconds": "MaxFifteenMinutesInSeconds",
+        "MemoryInMB": "MaxSize3008",
+        "ActiveTracing": "NullableBoolean",
+        "EnvironmentVariables": "EnvironmentVariablesMap",
+        "EphemeralStorage": "EphemeralStorageSize"
+      }
+    },
+    "CanaryScheduleInput": {
+      "type": "structure",
+      "required": [
+        "Expression"
+      ],
+      "members": {
+        "Expression": "String",
+        "DurationInSeconds": "MaxOneYearInSeconds",
+        "RetryConfig": "RetryConfigInput"
+      }
+    },
+    "CodeHandler": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^(([0-9a-zA-Z_-]+(\\/|\\.))*[0-9A-Za-z_\\\\-]+(\\.|::)[A-Za-z_][A-Za-z0-9_]*)?$"
+    },
+    "CreateCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Code",
+        "ArtifactS3Location",
+        "ExecutionRoleArn",
+        "Schedule",
+        "RuntimeVersion"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "Code": "CanaryCodeInput",
+        "ArtifactS3Location": "String",
+        "ExecutionRoleArn": "RoleArn",
+        "Schedule": "CanaryScheduleInput",
+        "RunConfig": "CanaryRunConfigInput",
+        "SuccessRetentionPeriodInDays": "MaxSize1024",
+        "FailureRetentionPeriodInDays": "MaxSize1024",
+        "RuntimeVersion": "String",
+        "VpcConfig": "VpcConfigInput",
+        "ResourcesToReplicateTags": "ResourceList",
+        "ProvisionedResourceCleanup": "ProvisionedResourceCleanupSetting",
+        "BrowserConfigs": "BrowserConfigs",
+        "AddReplicaLocations": "AddReplicaLocations",
+        "Tags": "TagMap",
+        "ArtifactConfig": "ArtifactConfigInput",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "CreateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "GroupName",
+        "Tags": "TagMap"
+      }
+    },
+    "DeleteCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "DeleteLambda": "boolean"
+      }
+    },
+    "DeleteGroupRequest": {
+      "type": "structure",
+      "required": [
+        "GroupIdentifier"
+      ],
+      "members": {
+        "GroupIdentifier": "GroupIdentifier"
+      }
+    },
+    "Dependencies": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "Dependency"
+    },
+    "Dependency": {
+      "type": "structure",
+      "required": [
+        "Reference"
+      ],
+      "members": {
+        "Type": "DependencyType",
+        "Reference": "String"
+      }
+    },
+    "DependencyType": {
+      "type": "string",
+      "enum": [
+        "LambdaLayer"
+      ]
+    },
+    "DescribeCanariesLastRunNameFilter": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CanaryName"
+    },
+    "DescribeCanariesLastRunRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "Token",
+        "MaxResults": "MaxSize100",
+        "Names": "DescribeCanariesLastRunNameFilter",
+        "BrowserType": "BrowserType"
+      }
+    },
+    "DescribeCanariesNameFilter": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CanaryName"
+    },
+    "DescribeCanariesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "Token",
+        "MaxResults": "MaxCanaryResults",
+        "Names": "DescribeCanariesNameFilter"
+      }
+    },
+    "DescribeRuntimeVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "Token",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "DisassociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "GroupIdentifier",
+        "ResourceArn"
+      ],
+      "members": {
+        "GroupIdentifier": "GroupIdentifier",
+        "ResourceArn": "CanaryArn"
+      }
+    },
+    "EncryptionMode": {
+      "type": "string",
+      "enum": [
+        "SSE_S3",
+        "SSE_KMS"
+      ]
+    },
+    "EnvironmentVariableName": {
+      "type": "string",
+      "pattern": "[a-zA-Z]([a-zA-Z0-9_])+"
+    },
+    "EnvironmentVariableValue": {
+      "type": "string"
+    },
+    "EnvironmentVariablesMap": {
+      "type": "map",
+      "key": "EnvironmentVariableName",
+      "value": "EnvironmentVariableValue"
+    },
+    "EphemeralStorageSize": {
+      "type": "integer",
+      "min": 1024,
+      "max": 10240
+    },
+    "GetCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "DryRunId": "UUID"
+      }
+    },
+    "GetCanaryRunsRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "NextToken": "Token",
+        "MaxResults": "MaxSize100",
+        "DryRunId": "UUID",
+        "RunType": "RunType"
+      }
+    },
+    "GetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "GroupIdentifier"
+      ],
+      "members": {
+        "GroupIdentifier": "GroupIdentifier"
+      }
+    },
+    "GroupIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "GroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*)?:kms:[a-z]{2,4}(-[a-z]{2,4})?-[a-z]+-\\d{1}:\\d{12}:key/[\\w\\-\\/]+"
+    },
+    "ListAssociatedGroupsRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxGroupResults",
+        "ResourceArn": "CanaryArn"
+      }
+    },
+    "ListGroupResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "GroupIdentifier"
+      ],
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxGroupResults",
+        "GroupIdentifier": "GroupIdentifier"
+      }
+    },
+    "ListGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxGroupResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn"
+      }
+    },
+    "Location": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "^[a-z]{2}-((iso[a-z]{0,1}-)|(gov-)){0,1}[a-z]+-{0,1}[0-9]{0,1}$"
+    },
+    "MaxCanaryResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "MaxFifteenMinutesInSeconds": {
+      "type": "integer",
+      "min": 3,
+      "max": 840
+    },
+    "MaxGroupResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "MaxOneYearInSeconds": {
+      "type": "long",
+      "min": 0,
+      "max": 31622400
+    },
+    "MaxRetries": {
+      "type": "integer",
+      "min": 0,
+      "max": 2
+    },
+    "MaxSize100": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxSize1024": {
+      "type": "integer",
+      "min": 1,
+      "max": 1024
+    },
+    "MaxSize3008": {
+      "type": "integer",
+      "min": 960,
+      "max": 3008
+    },
+    "NullableBoolean": {
+      "type": "boolean"
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "^.+$"
+    },
+    "ProvisionedResourceCleanupSetting": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "OFF"
+      ]
+    },
+    "RemoveReplicaLocations": {
+      "type": "list",
+      "min": 1,
+      "member": "Location"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*)?:synthetics:[a-z]{2,4}(-[a-z]{2,4})?-[a-z]+-\\d{1}:\\d{12}:(canary|group):[0-9a-z_\\-]+"
+    },
+    "ResourceList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ResourceToTag"
+    },
+    "ResourceToTag": {
+      "type": "string",
+      "enum": [
+        "lambda-function"
+      ]
+    },
+    "RetryConfigInput": {
+      "type": "structure",
+      "required": [
+        "MaxRetries"
+      ],
+      "members": {
+        "MaxRetries": "MaxRetries"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*)?:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+    },
+    "RunType": {
+      "type": "string",
+      "enum": [
+        "CANARY_RUN",
+        "DRY_RUN"
+      ]
+    },
+    "S3EncryptionConfig": {
+      "type": "structure",
+      "members": {
+        "EncryptionMode": "EncryptionMode",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "SecurityGroupId": {
+      "type": "string"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "StartCanaryDryRunRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "Code": "CanaryCodeInput",
+        "RuntimeVersion": "String",
+        "RunConfig": "CanaryRunConfigInput",
+        "VpcConfig": "VpcConfigInput",
+        "ExecutionRoleArn": "RoleArn",
+        "SuccessRetentionPeriodInDays": "MaxSize1024",
+        "FailureRetentionPeriodInDays": "MaxSize1024",
+        "VisualReference": "VisualReferenceInput",
+        "ArtifactS3Location": "String",
+        "ArtifactConfig": "ArtifactConfigInput",
+        "ProvisionedResourceCleanup": "ProvisionedResourceCleanupSetting",
+        "BrowserConfigs": "BrowserConfigs",
+        "VisualReferences": "VisualReferences"
+      }
+    },
+    "StartCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName"
+      }
+    },
+    "StopCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName"
+      }
+    },
+    "String": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "SubnetId": {
+      "type": "string"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 0,
+      "max": 16,
+      "member": "SubnetId"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z+-=._:/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "Tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256
+    },
+    "Token": {
+      "type": "string",
+      "min": 4,
+      "max": 252
+    },
+    "UUID": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateCanaryRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "CanaryName",
+        "Code": "CanaryCodeInput",
+        "ExecutionRoleArn": "RoleArn",
+        "RuntimeVersion": "String",
+        "Schedule": "CanaryScheduleInput",
+        "RunConfig": "CanaryRunConfigInput",
+        "SuccessRetentionPeriodInDays": "MaxSize1024",
+        "FailureRetentionPeriodInDays": "MaxSize1024",
+        "VpcConfig": "VpcConfigInput",
+        "VisualReference": "VisualReferenceInput",
+        "ArtifactS3Location": "String",
+        "ArtifactConfig": "ArtifactConfigInput",
+        "ProvisionedResourceCleanup": "ProvisionedResourceCleanupSetting",
+        "DryRunId": "UUID",
+        "VisualReferences": "VisualReferences",
+        "BrowserConfigs": "BrowserConfigs",
+        "AddReplicaLocations": "AddReplicaLocations",
+        "RemoveReplicaLocations": "RemoveReplicaLocations",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "VisualReferenceInput": {
+      "type": "structure",
+      "required": [
+        "BaseCanaryRunId"
+      ],
+      "members": {
+        "BaseScreenshots": "BaseScreenshots",
+        "BaseCanaryRunId": "String",
+        "BrowserType": "BrowserType"
+      }
+    },
+    "VisualReferences": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "VisualReferenceInput"
+    },
+    "VpcConfigInput": {
+      "type": "structure",
+      "members": {
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "Ipv6AllowedForDualStack": "NullableBoolean"
+      }
+    },
+    "boolean": {
+      "type": "boolean"
+    }
+  }
+}

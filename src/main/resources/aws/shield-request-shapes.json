@@ -1,0 +1,586 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_shield_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateDRTLogBucket": "AssociateDRTLogBucketRequest",
+    "AssociateDRTRole": "AssociateDRTRoleRequest",
+    "AssociateHealthCheck": "AssociateHealthCheckRequest",
+    "AssociateProactiveEngagementDetails": "AssociateProactiveEngagementDetailsRequest",
+    "CreateProtection": "CreateProtectionRequest",
+    "CreateProtectionGroup": "CreateProtectionGroupRequest",
+    "CreateSubscription": "CreateSubscriptionRequest",
+    "DeleteProtection": "DeleteProtectionRequest",
+    "DeleteProtectionGroup": "DeleteProtectionGroupRequest",
+    "DeleteSubscription": "DeleteSubscriptionRequest",
+    "DescribeAttack": "DescribeAttackRequest",
+    "DescribeAttackStatistics": "DescribeAttackStatisticsRequest",
+    "DescribeDRTAccess": "DescribeDRTAccessRequest",
+    "DescribeEmergencyContactSettings": "DescribeEmergencyContactSettingsRequest",
+    "DescribeProtection": "DescribeProtectionRequest",
+    "DescribeProtectionGroup": "DescribeProtectionGroupRequest",
+    "DescribeSubscription": "DescribeSubscriptionRequest",
+    "DisableApplicationLayerAutomaticResponse": "DisableApplicationLayerAutomaticResponseRequest",
+    "DisableProactiveEngagement": "DisableProactiveEngagementRequest",
+    "DisassociateDRTLogBucket": "DisassociateDRTLogBucketRequest",
+    "DisassociateDRTRole": "DisassociateDRTRoleRequest",
+    "DisassociateHealthCheck": "DisassociateHealthCheckRequest",
+    "EnableApplicationLayerAutomaticResponse": "EnableApplicationLayerAutomaticResponseRequest",
+    "EnableProactiveEngagement": "EnableProactiveEngagementRequest",
+    "GetSubscriptionState": "GetSubscriptionStateRequest",
+    "ListAttacks": "ListAttacksRequest",
+    "ListProtectionGroups": "ListProtectionGroupsRequest",
+    "ListProtections": "ListProtectionsRequest",
+    "ListResourcesInProtectionGroup": "ListResourcesInProtectionGroupRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateApplicationLayerAutomaticResponse": "UpdateApplicationLayerAutomaticResponseRequest",
+    "UpdateEmergencyContactSettings": "UpdateEmergencyContactSettingsRequest",
+    "UpdateProtectionGroup": "UpdateProtectionGroupRequest",
+    "UpdateSubscription": "UpdateSubscriptionRequest"
+  },
+  "shapes": {
+    "AssociateDRTLogBucketRequest": {
+      "type": "structure",
+      "required": [
+        "LogBucket"
+      ],
+      "members": {
+        "LogBucket": "LogBucket"
+      }
+    },
+    "AssociateDRTRoleRequest": {
+      "type": "structure",
+      "required": [
+        "RoleArn"
+      ],
+      "members": {
+        "RoleArn": "RoleArn"
+      }
+    },
+    "AssociateHealthCheckRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionId",
+        "HealthCheckArn"
+      ],
+      "members": {
+        "ProtectionId": "ProtectionId",
+        "HealthCheckArn": "HealthCheckArn"
+      }
+    },
+    "AssociateProactiveEngagementDetailsRequest": {
+      "type": "structure",
+      "required": [
+        "EmergencyContactList"
+      ],
+      "members": {
+        "EmergencyContactList": "EmergencyContactList"
+      }
+    },
+    "AttackId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9\\\\-]*"
+    },
+    "AutoRenew": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "BlockAction": {
+      "type": "structure",
+      "members": {}
+    },
+    "ContactNotes": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^[\\w\\s\\.\\-,:/()+@]*$"
+    },
+    "CountAction": {
+      "type": "structure",
+      "members": {}
+    },
+    "CreateProtectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionGroupId",
+        "Aggregation",
+        "Pattern"
+      ],
+      "members": {
+        "ProtectionGroupId": "ProtectionGroupId",
+        "Aggregation": "ProtectionGroupAggregation",
+        "Pattern": "ProtectionGroupPattern",
+        "ResourceType": "ProtectedResourceType",
+        "Members": "ProtectionGroupMembers",
+        "Tags": "TagList"
+      }
+    },
+    "CreateProtectionRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ResourceArn"
+      ],
+      "members": {
+        "Name": "ProtectionName",
+        "ResourceArn": "ResourceArn",
+        "Tags": "TagList"
+      }
+    },
+    "CreateSubscriptionRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteProtectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionGroupId"
+      ],
+      "members": {
+        "ProtectionGroupId": "ProtectionGroupId"
+      }
+    },
+    "DeleteProtectionRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionId"
+      ],
+      "members": {
+        "ProtectionId": "ProtectionId"
+      }
+    },
+    "DeleteSubscriptionRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeAttackRequest": {
+      "type": "structure",
+      "required": [
+        "AttackId"
+      ],
+      "members": {
+        "AttackId": "AttackId"
+      }
+    },
+    "DescribeAttackStatisticsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeDRTAccessRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeEmergencyContactSettingsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeProtectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionGroupId"
+      ],
+      "members": {
+        "ProtectionGroupId": "ProtectionGroupId"
+      }
+    },
+    "DescribeProtectionRequest": {
+      "type": "structure",
+      "members": {
+        "ProtectionId": "ProtectionId",
+        "ResourceArn": "ResourceArn"
+      }
+    },
+    "DescribeSubscriptionRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DisableApplicationLayerAutomaticResponseRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn"
+      }
+    },
+    "DisableProactiveEngagementRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DisassociateDRTLogBucketRequest": {
+      "type": "structure",
+      "required": [
+        "LogBucket"
+      ],
+      "members": {
+        "LogBucket": "LogBucket"
+      }
+    },
+    "DisassociateDRTRoleRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DisassociateHealthCheckRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionId",
+        "HealthCheckArn"
+      ],
+      "members": {
+        "ProtectionId": "ProtectionId",
+        "HealthCheckArn": "HealthCheckArn"
+      }
+    },
+    "EmailAddress": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "^\\S+@\\S+\\.\\S+$"
+    },
+    "EmergencyContact": {
+      "type": "structure",
+      "required": [
+        "EmailAddress"
+      ],
+      "members": {
+        "EmailAddress": "EmailAddress",
+        "PhoneNumber": "PhoneNumber",
+        "ContactNotes": "ContactNotes"
+      }
+    },
+    "EmergencyContactList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "EmergencyContact"
+    },
+    "EnableApplicationLayerAutomaticResponseRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Action"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "Action": "ResponseAction"
+      }
+    },
+    "EnableProactiveEngagementRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetSubscriptionStateRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "HealthCheckArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:route53:::healthcheck/\\S{36}$"
+    },
+    "InclusionProtectionFilters": {
+      "type": "structure",
+      "members": {
+        "ResourceArns": "ResourceArnFilters",
+        "ProtectionNames": "ProtectionNameFilters",
+        "ResourceTypes": "ProtectedResourceTypeFilters"
+      }
+    },
+    "InclusionProtectionGroupFilters": {
+      "type": "structure",
+      "members": {
+        "ProtectionGroupIds": "ProtectionGroupIdFilters",
+        "Patterns": "ProtectionGroupPatternFilters",
+        "ResourceTypes": "ProtectedResourceTypeFilters",
+        "Aggregations": "ProtectionGroupAggregationFilters"
+      }
+    },
+    "ListAttacksRequest": {
+      "type": "structure",
+      "members": {
+        "ResourceArns": "ResourceArnFilterList",
+        "StartTime": "TimeRange",
+        "EndTime": "TimeRange",
+        "NextToken": "Token",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListProtectionGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "Token",
+        "MaxResults": "MaxResults",
+        "InclusionFilters": "InclusionProtectionGroupFilters"
+      }
+    },
+    "ListProtectionsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "Token",
+        "MaxResults": "MaxResults",
+        "InclusionFilters": "InclusionProtectionFilters"
+      }
+    },
+    "ListResourcesInProtectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionGroupId"
+      ],
+      "members": {
+        "ProtectionGroupId": "ProtectionGroupId",
+        "NextToken": "Token",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn"
+      }
+    },
+    "LogBucket": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "^([a-z]|(\\d(?!\\d{0,2}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})))([a-z\\d]|(\\.(?!(\\.|-)))|(-(?!\\.))){1,61}[a-z\\d]$"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "PhoneNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 16,
+      "pattern": "^\\+[1-9]\\d{1,14}$"
+    },
+    "ProtectedResourceType": {
+      "type": "string",
+      "enum": [
+        "CLOUDFRONT_DISTRIBUTION",
+        "ROUTE_53_HOSTED_ZONE",
+        "ELASTIC_IP_ALLOCATION",
+        "CLASSIC_LOAD_BALANCER",
+        "APPLICATION_LOAD_BALANCER",
+        "GLOBAL_ACCELERATOR"
+      ]
+    },
+    "ProtectedResourceTypeFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ProtectedResourceType"
+    },
+    "ProtectionGroupAggregation": {
+      "type": "string",
+      "enum": [
+        "SUM",
+        "MEAN",
+        "MAX"
+      ]
+    },
+    "ProtectionGroupAggregationFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ProtectionGroupAggregation"
+    },
+    "ProtectionGroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9\\\\-]*"
+    },
+    "ProtectionGroupIdFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ProtectionGroupId"
+    },
+    "ProtectionGroupMembers": {
+      "type": "list",
+      "min": 0,
+      "max": 10000,
+      "member": "ResourceArn"
+    },
+    "ProtectionGroupPattern": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "ARBITRARY",
+        "BY_RESOURCE_TYPE"
+      ]
+    },
+    "ProtectionGroupPatternFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ProtectionGroupPattern"
+    },
+    "ProtectionId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9\\\\-]*"
+    },
+    "ProtectionName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[ a-zA-Z0-9_\\\\.\\\\-]*"
+    },
+    "ProtectionNameFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ProtectionName"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^arn:aws.*"
+    },
+    "ResourceArnFilterList": {
+      "type": "list",
+      "member": "ResourceArn"
+    },
+    "ResourceArnFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ResourceArn"
+    },
+    "ResponseAction": {
+      "type": "structure",
+      "members": {
+        "Block": "BlockAction",
+        "Count": "CountAction"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TimeRange": {
+      "type": "structure",
+      "members": {
+        "FromInclusive": "Timestamp",
+        "ToExclusive": "Timestamp"
+      }
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Token": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "^.*$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateApplicationLayerAutomaticResponseRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Action"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "Action": "ResponseAction"
+      }
+    },
+    "UpdateEmergencyContactSettingsRequest": {
+      "type": "structure",
+      "members": {
+        "EmergencyContactList": "EmergencyContactList"
+      }
+    },
+    "UpdateProtectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectionGroupId",
+        "Aggregation",
+        "Pattern"
+      ],
+      "members": {
+        "ProtectionGroupId": "ProtectionGroupId",
+        "Aggregation": "ProtectionGroupAggregation",
+        "Pattern": "ProtectionGroupPattern",
+        "ResourceType": "ProtectedResourceType",
+        "Members": "ProtectionGroupMembers"
+      }
+    },
+    "UpdateSubscriptionRequest": {
+      "type": "structure",
+      "members": {
+        "AutoRenew": "AutoRenew"
+      }
+    }
+  }
+}

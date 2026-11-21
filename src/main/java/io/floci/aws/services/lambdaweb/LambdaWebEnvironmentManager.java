@@ -16,6 +16,7 @@ import io.floci.aws.core.common.docker.ContainerExec;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.EndpointInfo;
+import io.floci.aws.core.common.docker.ContainerReachableUrls;
 import io.floci.aws.core.common.docker.ContainerSpec;
 import io.floci.aws.core.common.docker.ContainerStorageHelper;
 import io.floci.aws.core.common.docker.LaunchedContainerAwsEnv;
@@ -731,7 +732,11 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
         env.add("AWS_ACCOUNT_ID=" + accountId);
         env.add("NODE_PATH=" + TASK_DIR);
         env.addAll(awsEnv.sdkBaselineEnv(region, Optional.empty(), roleCredentials, accountId));
-        userEnv.forEach((name, value) -> env.add(name + "=" + value));
+        // A URL naming the developer's machine (an OTLP collector, a dev server) points at
+        // host.docker.internal, as in Lambda and ECS containers.
+        int gatewayPort = ContainerReachableUrls.gatewayPort(config.port());
+        userEnv.forEach((name, value) ->
+                env.add(name + "=" + ContainerReachableUrls.rewriteFunctionEnv(value, gatewayPort)));
         return env;
     }
 

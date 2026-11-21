@@ -19,6 +19,15 @@ class VendoredPatternsTest {
 
     private static final String ARN = "arn:aws:iam::000000000000:role/r";
 
+    /**
+     * A model's {@code .} is any character: App Runner's runtime environment values, held to
+     * {@code .*}, take a value of several lines, as AWS accepts one.
+     */
+    @Test
+    void aDotMatchesALineBreak() {
+        assertTrue(VendoredPatterns.compile(".*").matcher("first\nsecond").matches());
+    }
+
     @Test
     void aWideEscapeIsReadAsTheCodePointItSpells() {
         assertEquals("[\\x{10000}-\\x{10FFFF}]", VendoredPatterns.rewrite("[\\u10000-\\u10FFFF]"));

@@ -1,0 +1,2485 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_fsx_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateFileSystemAliases": "AssociateFileSystemAliasesRequest",
+    "CancelDataRepositoryTask": "CancelDataRepositoryTaskRequest",
+    "CopyBackup": "CopyBackupRequest",
+    "CopySnapshotAndUpdateVolume": "CopySnapshotAndUpdateVolumeRequest",
+    "CreateAndAttachS3AccessPoint": "CreateAndAttachS3AccessPointRequest",
+    "CreateBackup": "CreateBackupRequest",
+    "CreateDataRepositoryAssociation": "CreateDataRepositoryAssociationRequest",
+    "CreateDataRepositoryTask": "CreateDataRepositoryTaskRequest",
+    "CreateFileCache": "CreateFileCacheRequest",
+    "CreateFileSystem": "CreateFileSystemRequest",
+    "CreateFileSystemFromBackup": "CreateFileSystemFromBackupRequest",
+    "CreateSnapshot": "CreateSnapshotRequest",
+    "CreateStorageVirtualMachine": "CreateStorageVirtualMachineRequest",
+    "CreateVolume": "CreateVolumeRequest",
+    "CreateVolumeFromBackup": "CreateVolumeFromBackupRequest",
+    "DeleteBackup": "DeleteBackupRequest",
+    "DeleteDataRepositoryAssociation": "DeleteDataRepositoryAssociationRequest",
+    "DeleteFileCache": "DeleteFileCacheRequest",
+    "DeleteFileSystem": "DeleteFileSystemRequest",
+    "DeleteSnapshot": "DeleteSnapshotRequest",
+    "DeleteStorageVirtualMachine": "DeleteStorageVirtualMachineRequest",
+    "DeleteVolume": "DeleteVolumeRequest",
+    "DescribeBackups": "DescribeBackupsRequest",
+    "DescribeDataRepositoryAssociations": "DescribeDataRepositoryAssociationsRequest",
+    "DescribeDataRepositoryTasks": "DescribeDataRepositoryTasksRequest",
+    "DescribeFileCaches": "DescribeFileCachesRequest",
+    "DescribeFileSystemAliases": "DescribeFileSystemAliasesRequest",
+    "DescribeFileSystems": "DescribeFileSystemsRequest",
+    "DescribeS3AccessPointAttachments": "DescribeS3AccessPointAttachmentsRequest",
+    "DescribeSharedVpcConfiguration": "DescribeSharedVpcConfigurationRequest",
+    "DescribeSnapshots": "DescribeSnapshotsRequest",
+    "DescribeStorageVirtualMachines": "DescribeStorageVirtualMachinesRequest",
+    "DescribeVolumes": "DescribeVolumesRequest",
+    "DetachAndDeleteS3AccessPoint": "DetachAndDeleteS3AccessPointRequest",
+    "DisassociateFileSystemAliases": "DisassociateFileSystemAliasesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ReleaseFileSystemNfsV3Locks": "ReleaseFileSystemNfsV3LocksRequest",
+    "RestoreVolumeFromSnapshot": "RestoreVolumeFromSnapshotRequest",
+    "StartMisconfiguredStateRecovery": "StartMisconfiguredStateRecoveryRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDataRepositoryAssociation": "UpdateDataRepositoryAssociationRequest",
+    "UpdateFileCache": "UpdateFileCacheRequest",
+    "UpdateFileSystem": "UpdateFileSystemRequest",
+    "UpdateSharedVpcConfiguration": "UpdateSharedVpcConfigurationRequest",
+    "UpdateSnapshot": "UpdateSnapshotRequest",
+    "UpdateStorageVirtualMachine": "UpdateStorageVirtualMachineRequest",
+    "UpdateVolume": "UpdateVolumeRequest"
+  },
+  "shapes": {
+    "AccessPointPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 200000
+    },
+    "ActiveDirectoryFullyQualifiedName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,255}$"
+    },
+    "AdminPassword": {
+      "type": "string",
+      "min": 8,
+      "max": 50,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{8,50}$"
+    },
+    "Aggregate": {
+      "type": "string",
+      "min": 5,
+      "max": 6,
+      "pattern": "^(aggr[0-9]{1,2})$"
+    },
+    "AggregateListMultiplier": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "Aggregates": {
+      "type": "list",
+      "max": 6,
+      "member": "Aggregate"
+    },
+    "AlternateDNSName": {
+      "type": "string",
+      "min": 4,
+      "max": 253,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{4,253}$"
+    },
+    "AlternateDNSNames": {
+      "type": "list",
+      "max": 50,
+      "member": "AlternateDNSName"
+    },
+    "ArchivePath": {
+      "type": "string",
+      "min": 3,
+      "max": 4357,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{3,4357}$"
+    },
+    "AssociateFileSystemAliasesRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId",
+        "Aliases"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemId": "FileSystemId",
+        "Aliases": "AlternateDNSNames"
+      }
+    },
+    "AutoExportPolicy": {
+      "type": "structure",
+      "members": {
+        "Events": "EventTypes"
+      }
+    },
+    "AutoImportPolicy": {
+      "type": "structure",
+      "members": {
+        "Events": "EventTypes"
+      }
+    },
+    "AutoImportPolicyType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "NEW",
+        "NEW_CHANGED",
+        "NEW_CHANGED_DELETED"
+      ]
+    },
+    "AutocommitPeriod": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "AutocommitPeriodType",
+        "Value": "AutocommitPeriodValue"
+      }
+    },
+    "AutocommitPeriodType": {
+      "type": "string",
+      "enum": [
+        "MINUTES",
+        "HOURS",
+        "DAYS",
+        "MONTHS",
+        "YEARS",
+        "NONE"
+      ]
+    },
+    "AutocommitPeriodValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "AutomaticBackupRetentionDays": {
+      "type": "integer",
+      "min": 0,
+      "max": 90
+    },
+    "BackupId": {
+      "type": "string",
+      "min": 12,
+      "max": 128,
+      "pattern": "^(backup-[0-9a-f]{8,})$"
+    },
+    "BackupIds": {
+      "type": "list",
+      "max": 50,
+      "member": "BackupId"
+    },
+    "BatchImportMetaDataOnCreate": {
+      "type": "boolean"
+    },
+    "CancelDataRepositoryTaskRequest": {
+      "type": "structure",
+      "required": [
+        "TaskId"
+      ],
+      "members": {
+        "TaskId": "TaskId"
+      }
+    },
+    "CapacityToRelease": {
+      "type": "long",
+      "min": 1,
+      "max": 2147483647
+    },
+    "ClientRequestToken": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "[A-za-z0-9_.-]{0,63}$"
+    },
+    "CompletionReport": {
+      "type": "structure",
+      "required": [
+        "Enabled"
+      ],
+      "members": {
+        "Enabled": "Flag",
+        "Path": "ArchivePath",
+        "Format": "ReportFormat",
+        "Scope": "ReportScope"
+      }
+    },
+    "CoolingPeriod": {
+      "type": "integer",
+      "min": 2,
+      "max": 183
+    },
+    "CopyBackupRequest": {
+      "type": "structure",
+      "required": [
+        "SourceBackupId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "SourceBackupId": "SourceBackupId",
+        "SourceRegion": "Region",
+        "KmsKeyId": "KmsKeyId",
+        "CopyTags": "Flag",
+        "Tags": "Tags"
+      }
+    },
+    "CopySnapshotAndUpdateVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "VolumeId",
+        "SourceSnapshotARN"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "VolumeId": "VolumeId",
+        "SourceSnapshotARN": "ResourceARN",
+        "CopyStrategy": "OpenZFSCopyStrategy",
+        "Options": "UpdateOpenZFSVolumeOptions"
+      }
+    },
+    "CopyTagsToDataRepositoryAssociations": {
+      "type": "boolean"
+    },
+    "CreateAggregateConfiguration": {
+      "type": "structure",
+      "members": {
+        "Aggregates": "Aggregates",
+        "ConstituentsPerAggregate": "AggregateListMultiplier"
+      }
+    },
+    "CreateAndAttachS3AccessPointOntapConfiguration": {
+      "type": "structure",
+      "required": [
+        "VolumeId",
+        "FileSystemIdentity"
+      ],
+      "members": {
+        "VolumeId": "VolumeId",
+        "FileSystemIdentity": "OntapFileSystemIdentity"
+      }
+    },
+    "CreateAndAttachS3AccessPointOpenZFSConfiguration": {
+      "type": "structure",
+      "required": [
+        "VolumeId",
+        "FileSystemIdentity"
+      ],
+      "members": {
+        "VolumeId": "VolumeId",
+        "FileSystemIdentity": "OpenZFSFileSystemIdentity"
+      }
+    },
+    "CreateAndAttachS3AccessPointRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Type"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "Name": "S3AccessPointAttachmentName",
+        "Type": "S3AccessPointAttachmentType",
+        "OpenZFSConfiguration": "CreateAndAttachS3AccessPointOpenZFSConfiguration",
+        "OntapConfiguration": "CreateAndAttachS3AccessPointOntapConfiguration",
+        "S3AccessPoint": "CreateAndAttachS3AccessPointS3Configuration"
+      }
+    },
+    "CreateAndAttachS3AccessPointS3Configuration": {
+      "type": "structure",
+      "members": {
+        "VpcConfiguration": "S3AccessPointVpcConfiguration",
+        "Policy": "AccessPointPolicy"
+      }
+    },
+    "CreateBackupRequest": {
+      "type": "structure",
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "Tags",
+        "VolumeId": "VolumeId"
+      }
+    },
+    "CreateDataRepositoryAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId",
+        "DataRepositoryPath"
+      ],
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "FileSystemPath": "Namespace",
+        "DataRepositoryPath": "ArchivePath",
+        "BatchImportMetaDataOnCreate": "BatchImportMetaDataOnCreate",
+        "ImportedFileChunkSize": "Megabytes",
+        "S3": "S3DataRepositoryConfiguration",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "Tags"
+      }
+    },
+    "CreateDataRepositoryTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "FileSystemId",
+        "Report"
+      ],
+      "members": {
+        "Type": "DataRepositoryTaskType",
+        "Paths": "DataRepositoryTaskPaths",
+        "FileSystemId": "FileSystemId",
+        "Report": "CompletionReport",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "Tags",
+        "CapacityToRelease": "CapacityToRelease",
+        "ReleaseConfiguration": "ReleaseConfiguration"
+      }
+    },
+    "CreateFileCacheDataRepositoryAssociations": {
+      "type": "list",
+      "max": 8,
+      "member": "FileCacheDataRepositoryAssociation"
+    },
+    "CreateFileCacheLustreConfiguration": {
+      "type": "structure",
+      "required": [
+        "PerUnitStorageThroughput",
+        "DeploymentType",
+        "MetadataConfiguration"
+      ],
+      "members": {
+        "PerUnitStorageThroughput": "PerUnitStorageThroughput",
+        "DeploymentType": "FileCacheLustreDeploymentType",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "MetadataConfiguration": "FileCacheLustreMetadataConfiguration"
+      }
+    },
+    "CreateFileCacheRequest": {
+      "type": "structure",
+      "required": [
+        "FileCacheType",
+        "FileCacheTypeVersion",
+        "StorageCapacity",
+        "SubnetIds"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileCacheType": "FileCacheType",
+        "FileCacheTypeVersion": "FileSystemTypeVersion",
+        "StorageCapacity": "StorageCapacity",
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "Tags": "Tags",
+        "CopyTagsToDataRepositoryAssociations": "CopyTagsToDataRepositoryAssociations",
+        "KmsKeyId": "KmsKeyId",
+        "LustreConfiguration": "CreateFileCacheLustreConfiguration",
+        "DataRepositoryAssociations": "CreateFileCacheDataRepositoryAssociations"
+      }
+    },
+    "CreateFileSystemFromBackupRequest": {
+      "type": "structure",
+      "required": [
+        "BackupId",
+        "SubnetIds"
+      ],
+      "members": {
+        "BackupId": "BackupId",
+        "ClientRequestToken": "ClientRequestToken",
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "Tags": "Tags",
+        "WindowsConfiguration": "CreateFileSystemWindowsConfiguration",
+        "LustreConfiguration": "CreateFileSystemLustreConfiguration",
+        "StorageType": "StorageType",
+        "KmsKeyId": "KmsKeyId",
+        "FileSystemTypeVersion": "FileSystemTypeVersion",
+        "OpenZFSConfiguration": "CreateFileSystemOpenZFSConfiguration",
+        "StorageCapacity": "StorageCapacity",
+        "NetworkType": "NetworkType"
+      }
+    },
+    "CreateFileSystemLustreConfiguration": {
+      "type": "structure",
+      "members": {
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "ImportPath": "ArchivePath",
+        "ExportPath": "ArchivePath",
+        "ImportedFileChunkSize": "Megabytes",
+        "DeploymentType": "LustreDeploymentType",
+        "AutoImportPolicy": "AutoImportPolicyType",
+        "PerUnitStorageThroughput": "PerUnitStorageThroughput",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "CopyTagsToBackups": "Flag",
+        "DriveCacheType": "DriveCacheType",
+        "DataCompressionType": "DataCompressionType",
+        "EfaEnabled": "Flag",
+        "LogConfiguration": "LustreLogCreateConfiguration",
+        "RootSquashConfiguration": "LustreRootSquashConfiguration",
+        "MetadataConfiguration": "CreateFileSystemLustreMetadataConfiguration",
+        "ThroughputCapacity": "ThroughputCapacityMbps",
+        "DataReadCacheConfiguration": "LustreReadCacheConfiguration"
+      }
+    },
+    "CreateFileSystemLustreMetadataConfiguration": {
+      "type": "structure",
+      "required": [
+        "Mode"
+      ],
+      "members": {
+        "Iops": "MetadataIops",
+        "Mode": "MetadataConfigurationMode"
+      }
+    },
+    "CreateFileSystemOntapConfiguration": {
+      "type": "structure",
+      "required": [
+        "DeploymentType"
+      ],
+      "members": {
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "DeploymentType": "OntapDeploymentType",
+        "EndpointIpAddressRange": "IpAddressRange",
+        "FsxAdminPassword": "AdminPassword",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "PreferredSubnetId": "SubnetId",
+        "RouteTableIds": "RouteTableIds",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "HAPairs": "HAPairs",
+        "ThroughputCapacityPerHAPair": "ThroughputCapacityPerHAPair",
+        "EndpointIpv6AddressRange": "Ipv6AddressRange"
+      }
+    },
+    "CreateFileSystemOpenZFSConfiguration": {
+      "type": "structure",
+      "required": [
+        "DeploymentType",
+        "ThroughputCapacity"
+      ],
+      "members": {
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "CopyTagsToBackups": "Flag",
+        "CopyTagsToVolumes": "Flag",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "DeploymentType": "OpenZFSDeploymentType",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "RootVolumeConfiguration": "OpenZFSCreateRootVolumeConfiguration",
+        "PreferredSubnetId": "SubnetId",
+        "EndpointIpAddressRange": "IpAddressRange",
+        "EndpointIpv6AddressRange": "Ipv6AddressRange",
+        "RouteTableIds": "RouteTableIds",
+        "ReadCacheConfiguration": "OpenZFSReadCacheConfiguration"
+      }
+    },
+    "CreateFileSystemRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemType",
+        "SubnetIds"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemType": "FileSystemType",
+        "StorageCapacity": "StorageCapacity",
+        "StorageType": "StorageType",
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "Tags": "Tags",
+        "KmsKeyId": "KmsKeyId",
+        "WindowsConfiguration": "CreateFileSystemWindowsConfiguration",
+        "LustreConfiguration": "CreateFileSystemLustreConfiguration",
+        "OntapConfiguration": "CreateFileSystemOntapConfiguration",
+        "FileSystemTypeVersion": "FileSystemTypeVersion",
+        "OpenZFSConfiguration": "CreateFileSystemOpenZFSConfiguration",
+        "NetworkType": "NetworkType"
+      }
+    },
+    "CreateFileSystemWindowsConfiguration": {
+      "type": "structure",
+      "required": [
+        "ThroughputCapacity"
+      ],
+      "members": {
+        "ActiveDirectoryId": "DirectoryId",
+        "SelfManagedActiveDirectoryConfiguration": "SelfManagedActiveDirectoryConfiguration",
+        "DeploymentType": "WindowsDeploymentType",
+        "PreferredSubnetId": "SubnetId",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "CopyTagsToBackups": "Flag",
+        "Aliases": "AlternateDNSNames",
+        "AuditLogConfiguration": "WindowsAuditLogCreateConfiguration",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "FsrmConfiguration": "WindowsFsrmConfiguration"
+      }
+    },
+    "CreateOntapVolumeConfiguration": {
+      "type": "structure",
+      "required": [
+        "StorageVirtualMachineId"
+      ],
+      "members": {
+        "JunctionPath": "JunctionPath",
+        "SecurityStyle": "SecurityStyle",
+        "SizeInMegabytes": "VolumeCapacity",
+        "StorageEfficiencyEnabled": "Flag",
+        "StorageVirtualMachineId": "StorageVirtualMachineId",
+        "TieringPolicy": "TieringPolicy",
+        "OntapVolumeType": "InputOntapVolumeType",
+        "SnapshotPolicy": "SnapshotPolicy",
+        "CopyTagsToBackups": "Flag",
+        "SnaplockConfiguration": "CreateSnaplockConfiguration",
+        "VolumeStyle": "VolumeStyle",
+        "AggregateConfiguration": "CreateAggregateConfiguration",
+        "SizeInBytes": "VolumeCapacityBytes"
+      }
+    },
+    "CreateOpenZFSOriginSnapshotConfiguration": {
+      "type": "structure",
+      "required": [
+        "SnapshotARN",
+        "CopyStrategy"
+      ],
+      "members": {
+        "SnapshotARN": "ResourceARN",
+        "CopyStrategy": "OpenZFSCopyStrategy"
+      }
+    },
+    "CreateOpenZFSVolumeConfiguration": {
+      "type": "structure",
+      "required": [
+        "ParentVolumeId"
+      ],
+      "members": {
+        "ParentVolumeId": "VolumeId",
+        "StorageCapacityReservationGiB": "IntegerNoMaxFromNegativeOne",
+        "StorageCapacityQuotaGiB": "IntegerNoMaxFromNegativeOne",
+        "RecordSizeKiB": "IntegerRecordSizeKiB",
+        "DataCompressionType": "OpenZFSDataCompressionType",
+        "CopyTagsToSnapshots": "Flag",
+        "OriginSnapshot": "CreateOpenZFSOriginSnapshotConfiguration",
+        "ReadOnly": "ReadOnly",
+        "NfsExports": "OpenZFSNfsExports",
+        "UserAndGroupQuotas": "OpenZFSUserAndGroupQuotas"
+      }
+    },
+    "CreateSnaplockConfiguration": {
+      "type": "structure",
+      "required": [
+        "SnaplockType"
+      ],
+      "members": {
+        "AuditLogVolume": "Flag",
+        "AutocommitPeriod": "AutocommitPeriod",
+        "PrivilegedDelete": "PrivilegedDelete",
+        "RetentionPeriod": "SnaplockRetentionPeriod",
+        "SnaplockType": "SnaplockType",
+        "VolumeAppendModeEnabled": "Flag"
+      }
+    },
+    "CreateSnapshotRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "VolumeId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "Name": "SnapshotName",
+        "VolumeId": "VolumeId",
+        "Tags": "Tags"
+      }
+    },
+    "CreateStorageVirtualMachineRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId",
+        "Name"
+      ],
+      "members": {
+        "ActiveDirectoryConfiguration": "CreateSvmActiveDirectoryConfiguration",
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemId": "FileSystemId",
+        "Name": "StorageVirtualMachineName",
+        "SvmAdminPassword": "AdminPassword",
+        "Tags": "Tags",
+        "RootVolumeSecurityStyle": "StorageVirtualMachineRootVolumeSecurityStyle"
+      }
+    },
+    "CreateSvmActiveDirectoryConfiguration": {
+      "type": "structure",
+      "required": [
+        "NetBiosName"
+      ],
+      "members": {
+        "NetBiosName": "NetBiosAlias",
+        "SelfManagedActiveDirectoryConfiguration": "SelfManagedActiveDirectoryConfiguration"
+      }
+    },
+    "CreateVolumeFromBackupRequest": {
+      "type": "structure",
+      "required": [
+        "BackupId",
+        "Name"
+      ],
+      "members": {
+        "BackupId": "BackupId",
+        "ClientRequestToken": "ClientRequestToken",
+        "Name": "VolumeName",
+        "OntapConfiguration": "CreateOntapVolumeConfiguration",
+        "Tags": "Tags"
+      }
+    },
+    "CreateVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "VolumeType",
+        "Name"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "VolumeType": "VolumeType",
+        "Name": "VolumeName",
+        "OntapConfiguration": "CreateOntapVolumeConfiguration",
+        "Tags": "Tags",
+        "OpenZFSConfiguration": "CreateOpenZFSVolumeConfiguration"
+      }
+    },
+    "CustomerSecretsManagerARN": {
+      "type": "string",
+      "min": 64,
+      "max": 1024,
+      "pattern": "^arn:[^:]{1,63}:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9/_+=.@-]+-[a-zA-Z0-9]{6}$"
+    },
+    "DailyTime": {
+      "type": "string",
+      "min": 5,
+      "max": 5,
+      "pattern": "^([01]\\d|2[0-3]):?([0-5]\\d)$"
+    },
+    "DataCompressionType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "LZ4"
+      ]
+    },
+    "DataRepositoryAssociationId": {
+      "type": "string",
+      "min": 13,
+      "max": 23,
+      "pattern": "^(dra-[0-9a-f]{8,})$"
+    },
+    "DataRepositoryAssociationIds": {
+      "type": "list",
+      "max": 50,
+      "member": "DataRepositoryAssociationId"
+    },
+    "DataRepositoryTaskFilter": {
+      "type": "structure",
+      "members": {
+        "Name": "DataRepositoryTaskFilterName",
+        "Values": "DataRepositoryTaskFilterValues"
+      }
+    },
+    "DataRepositoryTaskFilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id",
+        "task-lifecycle",
+        "data-repository-association-id",
+        "file-cache-id"
+      ]
+    },
+    "DataRepositoryTaskFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "DataRepositoryTaskFilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "DataRepositoryTaskFilterValue"
+    },
+    "DataRepositoryTaskFilters": {
+      "type": "list",
+      "max": 3,
+      "member": "DataRepositoryTaskFilter"
+    },
+    "DataRepositoryTaskPath": {
+      "type": "string",
+      "min": 0,
+      "max": 4096,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{0,4096}$"
+    },
+    "DataRepositoryTaskPaths": {
+      "type": "list",
+      "max": 100,
+      "member": "DataRepositoryTaskPath"
+    },
+    "DataRepositoryTaskType": {
+      "type": "string",
+      "enum": [
+        "EXPORT_TO_REPOSITORY",
+        "IMPORT_METADATA_FROM_REPOSITORY",
+        "RELEASE_DATA_FROM_FILESYSTEM",
+        "AUTO_RELEASE_DATA"
+      ]
+    },
+    "DeleteBackupRequest": {
+      "type": "structure",
+      "required": [
+        "BackupId"
+      ],
+      "members": {
+        "BackupId": "BackupId",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "DeleteDataInFileSystem": {
+      "type": "boolean"
+    },
+    "DeleteDataRepositoryAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "AssociationId"
+      ],
+      "members": {
+        "AssociationId": "DataRepositoryAssociationId",
+        "ClientRequestToken": "ClientRequestToken",
+        "DeleteDataInFileSystem": "DeleteDataInFileSystem"
+      }
+    },
+    "DeleteFileCacheRequest": {
+      "type": "structure",
+      "required": [
+        "FileCacheId"
+      ],
+      "members": {
+        "FileCacheId": "FileCacheId",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "DeleteFileSystemLustreConfiguration": {
+      "type": "structure",
+      "members": {
+        "SkipFinalBackup": "Flag",
+        "FinalBackupTags": "Tags"
+      }
+    },
+    "DeleteFileSystemOpenZFSConfiguration": {
+      "type": "structure",
+      "members": {
+        "SkipFinalBackup": "Flag",
+        "FinalBackupTags": "Tags",
+        "Options": "DeleteFileSystemOpenZFSOptions"
+      }
+    },
+    "DeleteFileSystemOpenZFSOption": {
+      "type": "string",
+      "enum": [
+        "DELETE_CHILD_VOLUMES_AND_SNAPSHOTS"
+      ]
+    },
+    "DeleteFileSystemOpenZFSOptions": {
+      "type": "list",
+      "max": 1,
+      "member": "DeleteFileSystemOpenZFSOption"
+    },
+    "DeleteFileSystemRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId"
+      ],
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "ClientRequestToken": "ClientRequestToken",
+        "WindowsConfiguration": "DeleteFileSystemWindowsConfiguration",
+        "LustreConfiguration": "DeleteFileSystemLustreConfiguration",
+        "OpenZFSConfiguration": "DeleteFileSystemOpenZFSConfiguration"
+      }
+    },
+    "DeleteFileSystemWindowsConfiguration": {
+      "type": "structure",
+      "members": {
+        "SkipFinalBackup": "Flag",
+        "FinalBackupTags": "Tags"
+      }
+    },
+    "DeleteOpenZFSVolumeOption": {
+      "type": "string",
+      "enum": [
+        "DELETE_CHILD_VOLUMES_AND_SNAPSHOTS"
+      ]
+    },
+    "DeleteOpenZFSVolumeOptions": {
+      "type": "list",
+      "max": 1,
+      "member": "DeleteOpenZFSVolumeOption"
+    },
+    "DeleteSnapshotRequest": {
+      "type": "structure",
+      "required": [
+        "SnapshotId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "SnapshotId": "SnapshotId"
+      }
+    },
+    "DeleteStorageVirtualMachineRequest": {
+      "type": "structure",
+      "required": [
+        "StorageVirtualMachineId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "StorageVirtualMachineId": "StorageVirtualMachineId"
+      }
+    },
+    "DeleteVolumeOntapConfiguration": {
+      "type": "structure",
+      "members": {
+        "SkipFinalBackup": "Flag",
+        "FinalBackupTags": "Tags",
+        "BypassSnaplockEnterpriseRetention": "Flag"
+      }
+    },
+    "DeleteVolumeOpenZFSConfiguration": {
+      "type": "structure",
+      "members": {
+        "Options": "DeleteOpenZFSVolumeOptions"
+      }
+    },
+    "DeleteVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "VolumeId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "VolumeId": "VolumeId",
+        "OntapConfiguration": "DeleteVolumeOntapConfiguration",
+        "OpenZFSConfiguration": "DeleteVolumeOpenZFSConfiguration"
+      }
+    },
+    "DescribeBackupsRequest": {
+      "type": "structure",
+      "members": {
+        "BackupIds": "BackupIds",
+        "Filters": "Filters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeDataRepositoryAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "AssociationIds": "DataRepositoryAssociationIds",
+        "Filters": "Filters",
+        "MaxResults": "LimitedMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeDataRepositoryTasksRequest": {
+      "type": "structure",
+      "members": {
+        "TaskIds": "TaskIds",
+        "Filters": "DataRepositoryTaskFilters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeFileCachesRequest": {
+      "type": "structure",
+      "members": {
+        "FileCacheIds": "FileCacheIds",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeFileSystemAliasesRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemId": "FileSystemId",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeFileSystemsRequest": {
+      "type": "structure",
+      "members": {
+        "FileSystemIds": "FileSystemIds",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeS3AccessPointAttachmentsRequest": {
+      "type": "structure",
+      "members": {
+        "Names": "S3AccessPointAttachmentNames",
+        "Filters": "S3AccessPointAttachmentsFilters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeSharedVpcConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeSnapshotsRequest": {
+      "type": "structure",
+      "members": {
+        "SnapshotIds": "SnapshotIds",
+        "Filters": "SnapshotFilters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "IncludeShared": "IncludeShared"
+      }
+    },
+    "DescribeStorageVirtualMachinesRequest": {
+      "type": "structure",
+      "members": {
+        "StorageVirtualMachineIds": "StorageVirtualMachineIds",
+        "Filters": "StorageVirtualMachineFilters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeVolumesRequest": {
+      "type": "structure",
+      "members": {
+        "VolumeIds": "VolumeIds",
+        "Filters": "VolumeFilters",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DetachAndDeleteS3AccessPointRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "Name": "S3AccessPointAttachmentName"
+      }
+    },
+    "DirectoryId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^d-[0-9a-f]{10}$"
+    },
+    "DirectoryPassword": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^.{1,256}$"
+    },
+    "DirectoryUserName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,256}$"
+    },
+    "DisassociateFileSystemAliasesRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId",
+        "Aliases"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemId": "FileSystemId",
+        "Aliases": "AlternateDNSNames"
+      }
+    },
+    "DiskIopsConfiguration": {
+      "type": "structure",
+      "members": {
+        "Mode": "DiskIopsConfigurationMode",
+        "Iops": "Iops"
+      }
+    },
+    "DiskIopsConfigurationMode": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "USER_PROVISIONED"
+      ]
+    },
+    "DnsIps": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "IpAddress"
+    },
+    "DriveCacheType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "READ"
+      ]
+    },
+    "DurationSinceLastAccess": {
+      "type": "structure",
+      "members": {
+        "Unit": "Unit",
+        "Value": "Value"
+      }
+    },
+    "EventType": {
+      "type": "string",
+      "enum": [
+        "NEW",
+        "CHANGED",
+        "DELETED"
+      ]
+    },
+    "EventTypes": {
+      "type": "list",
+      "max": 3,
+      "member": "EventType"
+    },
+    "FileCacheDataRepositoryAssociation": {
+      "type": "structure",
+      "required": [
+        "FileCachePath",
+        "DataRepositoryPath"
+      ],
+      "members": {
+        "FileCachePath": "Namespace",
+        "DataRepositoryPath": "ArchivePath",
+        "DataRepositorySubdirectories": "SubDirectoriesPaths",
+        "NFS": "FileCacheNFSConfiguration"
+      }
+    },
+    "FileCacheId": {
+      "type": "string",
+      "min": 11,
+      "max": 21,
+      "pattern": "^(fc-[0-9a-f]{8,})$"
+    },
+    "FileCacheIds": {
+      "type": "list",
+      "max": 50,
+      "member": "FileCacheId"
+    },
+    "FileCacheLustreDeploymentType": {
+      "type": "string",
+      "enum": [
+        "CACHE_1"
+      ]
+    },
+    "FileCacheLustreMetadataConfiguration": {
+      "type": "structure",
+      "required": [
+        "StorageCapacity"
+      ],
+      "members": {
+        "StorageCapacity": "MetadataStorageCapacity"
+      }
+    },
+    "FileCacheNFSConfiguration": {
+      "type": "structure",
+      "required": [
+        "Version"
+      ],
+      "members": {
+        "Version": "NfsVersion",
+        "DnsIps": "RepositoryDnsIps"
+      }
+    },
+    "FileCacheType": {
+      "type": "string",
+      "enum": [
+        "LUSTRE"
+      ]
+    },
+    "FileSystemAdministratorsGroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,256}$"
+    },
+    "FileSystemGID": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "FileSystemId": {
+      "type": "string",
+      "min": 11,
+      "max": 21,
+      "pattern": "^(fs-[0-9a-f]{8,})$"
+    },
+    "FileSystemIds": {
+      "type": "list",
+      "max": 50,
+      "member": "FileSystemId"
+    },
+    "FileSystemSecondaryGIDs": {
+      "type": "list",
+      "max": 15,
+      "member": "FileSystemGID"
+    },
+    "FileSystemType": {
+      "type": "string",
+      "enum": [
+        "WINDOWS",
+        "LUSTRE",
+        "ONTAP",
+        "OPENZFS"
+      ]
+    },
+    "FileSystemTypeVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "^[0-9](.[0-9]*)*$"
+    },
+    "FileSystemUID": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "Filter": {
+      "type": "structure",
+      "members": {
+        "Name": "FilterName",
+        "Values": "FilterValues"
+      }
+    },
+    "FilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id",
+        "backup-type",
+        "file-system-type",
+        "volume-id",
+        "data-repository-type",
+        "file-cache-id",
+        "file-cache-type"
+      ]
+    },
+    "FilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "FilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "FilterValue"
+    },
+    "Filters": {
+      "type": "list",
+      "max": 10,
+      "member": "Filter"
+    },
+    "Flag": {
+      "type": "boolean"
+    },
+    "GeneralARN": {
+      "type": "string",
+      "min": 8,
+      "max": 1024,
+      "pattern": "^arn:[^:]{1,63}:[^:]{0,63}:[^:]{0,63}:(?:|\\d{12}):[^/].{0,1023}$"
+    },
+    "HAPairs": {
+      "type": "integer",
+      "min": 1,
+      "max": 12
+    },
+    "IncludeShared": {
+      "type": "boolean"
+    },
+    "InputOntapVolumeType": {
+      "type": "string",
+      "enum": [
+        "RW",
+        "DP"
+      ]
+    },
+    "IntegerNoMax": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "IntegerNoMaxFromNegativeOne": {
+      "type": "integer",
+      "min": -1,
+      "max": 2147483647
+    },
+    "IntegerRecordSizeKiB": {
+      "type": "integer",
+      "min": 4,
+      "max": 4096
+    },
+    "Iops": {
+      "type": "long",
+      "min": 0,
+      "max": 2147483647
+    },
+    "IpAddress": {
+      "type": "string",
+      "min": 1,
+      "max": 45,
+      "pattern": "(^((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))$|^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$)"
+    },
+    "IpAddressRange": {
+      "type": "string",
+      "min": 9,
+      "max": 17,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{9,17}$"
+    },
+    "Ipv6AddressRange": {
+      "type": "string",
+      "min": 4,
+      "max": 43,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{4,43}$"
+    },
+    "JunctionPath": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,255}$"
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^.{1,2048}$"
+    },
+    "LimitedMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "ResourceARN",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "LustreAccessAuditLogLevel": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "WARN_ONLY",
+        "ERROR_ONLY",
+        "WARN_ERROR"
+      ]
+    },
+    "LustreDeploymentType": {
+      "type": "string",
+      "enum": [
+        "SCRATCH_1",
+        "SCRATCH_2",
+        "PERSISTENT_1",
+        "PERSISTENT_2"
+      ]
+    },
+    "LustreLogCreateConfiguration": {
+      "type": "structure",
+      "required": [
+        "Level"
+      ],
+      "members": {
+        "Level": "LustreAccessAuditLogLevel",
+        "Destination": "GeneralARN"
+      }
+    },
+    "LustreNoSquashNid": {
+      "type": "string",
+      "min": 11,
+      "max": 43,
+      "pattern": "^([0-9\\[\\]\\-]*\\.){3}([0-9\\[\\]\\-]*)@tcp$"
+    },
+    "LustreNoSquashNids": {
+      "type": "list",
+      "max": 64,
+      "member": "LustreNoSquashNid"
+    },
+    "LustreReadCacheConfiguration": {
+      "type": "structure",
+      "members": {
+        "SizingMode": "LustreReadCacheSizingMode",
+        "SizeGiB": "StorageCapacity"
+      }
+    },
+    "LustreReadCacheSizingMode": {
+      "type": "string",
+      "enum": [
+        "NO_CACHE",
+        "USER_PROVISIONED",
+        "PROPORTIONAL_TO_THROUGHPUT_CAPACITY"
+      ]
+    },
+    "LustreRootSquash": {
+      "type": "string",
+      "min": 3,
+      "max": 21,
+      "pattern": "^([0-9]{1,10}):([0-9]{1,10})$"
+    },
+    "LustreRootSquashConfiguration": {
+      "type": "structure",
+      "members": {
+        "RootSquash": "LustreRootSquash",
+        "NoSquashNids": "LustreNoSquashNids"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 2147483647
+    },
+    "Megabytes": {
+      "type": "integer",
+      "min": 1,
+      "max": 512000
+    },
+    "MegabytesPerSecond": {
+      "type": "integer",
+      "min": 8,
+      "max": 2147483647
+    },
+    "MetadataConfigurationMode": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "USER_PROVISIONED"
+      ]
+    },
+    "MetadataIops": {
+      "type": "integer",
+      "min": 1500,
+      "max": 192000
+    },
+    "MetadataStorageCapacity": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "Namespace": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,4096}$"
+    },
+    "NetBiosAlias": {
+      "type": "string",
+      "min": 1,
+      "max": 15,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,255}$"
+    },
+    "NetworkType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "DUAL"
+      ]
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^(?:[A-Za-z0-9+\\/]{4})*(?:[A-Za-z0-9+\\/]{2}==|[A-Za-z0-9+\\/]{3}=)?$"
+    },
+    "NfsVersion": {
+      "type": "string",
+      "enum": [
+        "NFS3"
+      ]
+    },
+    "OntapDeploymentType": {
+      "type": "string",
+      "enum": [
+        "MULTI_AZ_1",
+        "SINGLE_AZ_1",
+        "SINGLE_AZ_2",
+        "MULTI_AZ_2"
+      ]
+    },
+    "OntapFileSystemIdentity": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "OntapFileSystemUserType",
+        "UnixUser": "OntapUnixFileSystemUser",
+        "WindowsUser": "OntapWindowsFileSystemUser"
+      }
+    },
+    "OntapFileSystemUserName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,256}$"
+    },
+    "OntapFileSystemUserType": {
+      "type": "string",
+      "enum": [
+        "UNIX",
+        "WINDOWS"
+      ]
+    },
+    "OntapUnixFileSystemUser": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "OntapFileSystemUserName"
+      }
+    },
+    "OntapWindowsFileSystemUser": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "OntapFileSystemUserName"
+      }
+    },
+    "OpenZFSClientConfiguration": {
+      "type": "structure",
+      "required": [
+        "Clients",
+        "Options"
+      ],
+      "members": {
+        "Clients": "OpenZFSClients",
+        "Options": "OpenZFSNfsExportOptions"
+      }
+    },
+    "OpenZFSClientConfigurations": {
+      "type": "list",
+      "max": 25,
+      "member": "OpenZFSClientConfiguration"
+    },
+    "OpenZFSClients": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[ -~]{1,128}$"
+    },
+    "OpenZFSCopyStrategy": {
+      "type": "string",
+      "enum": [
+        "CLONE",
+        "FULL_COPY",
+        "INCREMENTAL_COPY"
+      ]
+    },
+    "OpenZFSCreateRootVolumeConfiguration": {
+      "type": "structure",
+      "members": {
+        "RecordSizeKiB": "IntegerRecordSizeKiB",
+        "DataCompressionType": "OpenZFSDataCompressionType",
+        "NfsExports": "OpenZFSNfsExports",
+        "UserAndGroupQuotas": "OpenZFSUserAndGroupQuotas",
+        "CopyTagsToSnapshots": "Flag",
+        "ReadOnly": "ReadOnly"
+      }
+    },
+    "OpenZFSDataCompressionType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "ZSTD",
+        "LZ4"
+      ]
+    },
+    "OpenZFSDeploymentType": {
+      "type": "string",
+      "enum": [
+        "SINGLE_AZ_1",
+        "SINGLE_AZ_2",
+        "SINGLE_AZ_HA_1",
+        "SINGLE_AZ_HA_2",
+        "MULTI_AZ_1"
+      ]
+    },
+    "OpenZFSFileSystemIdentity": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "OpenZFSFileSystemUserType",
+        "PosixUser": "OpenZFSPosixFileSystemUser"
+      }
+    },
+    "OpenZFSFileSystemUserType": {
+      "type": "string",
+      "enum": [
+        "POSIX"
+      ]
+    },
+    "OpenZFSNfsExport": {
+      "type": "structure",
+      "required": [
+        "ClientConfigurations"
+      ],
+      "members": {
+        "ClientConfigurations": "OpenZFSClientConfigurations"
+      }
+    },
+    "OpenZFSNfsExportOption": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[ -~]{1,128}$"
+    },
+    "OpenZFSNfsExportOptions": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "OpenZFSNfsExportOption"
+    },
+    "OpenZFSNfsExports": {
+      "type": "list",
+      "max": 1,
+      "member": "OpenZFSNfsExport"
+    },
+    "OpenZFSPosixFileSystemUser": {
+      "type": "structure",
+      "required": [
+        "Uid",
+        "Gid"
+      ],
+      "members": {
+        "Uid": "FileSystemUID",
+        "Gid": "FileSystemGID",
+        "SecondaryGids": "FileSystemSecondaryGIDs"
+      }
+    },
+    "OpenZFSQuotaType": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "GROUP"
+      ]
+    },
+    "OpenZFSReadCacheConfiguration": {
+      "type": "structure",
+      "members": {
+        "SizingMode": "OpenZFSReadCacheSizingMode",
+        "SizeGiB": "StorageCapacity"
+      }
+    },
+    "OpenZFSReadCacheSizingMode": {
+      "type": "string",
+      "enum": [
+        "NO_CACHE",
+        "USER_PROVISIONED",
+        "PROPORTIONAL_TO_THROUGHPUT_CAPACITY"
+      ]
+    },
+    "OpenZFSUserAndGroupQuotas": {
+      "type": "list",
+      "max": 500,
+      "member": "OpenZFSUserOrGroupQuota"
+    },
+    "OpenZFSUserOrGroupQuota": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "Id",
+        "StorageCapacityQuotaGiB"
+      ],
+      "members": {
+        "Type": "OpenZFSQuotaType",
+        "Id": "IntegerNoMax",
+        "StorageCapacityQuotaGiB": "IntegerNoMax"
+      }
+    },
+    "OrganizationalUnitDistinguishedName": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,2000}$"
+    },
+    "PerUnitStorageThroughput": {
+      "type": "integer",
+      "min": 12,
+      "max": 1000
+    },
+    "PrivilegedDelete": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED",
+        "PERMANENTLY_DISABLED"
+      ]
+    },
+    "ReadOnly": {
+      "type": "boolean"
+    },
+    "Region": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "^[a-z0-9-]{1,20}$"
+    },
+    "ReleaseConfiguration": {
+      "type": "structure",
+      "members": {
+        "DurationSinceLastAccess": "DurationSinceLastAccess"
+      }
+    },
+    "ReleaseFileSystemNfsV3LocksRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId"
+      ],
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "ReportFormat": {
+      "type": "string",
+      "enum": [
+        "REPORT_CSV_20191124"
+      ]
+    },
+    "ReportScope": {
+      "type": "string",
+      "enum": [
+        "FAILED_FILES_ONLY"
+      ]
+    },
+    "RepositoryDnsIps": {
+      "type": "list",
+      "max": 10,
+      "member": "IpAddress"
+    },
+    "ResourceARN": {
+      "type": "string",
+      "min": 8,
+      "max": 512,
+      "pattern": "^arn:(?=[^:]+:fsx:[^:]+:\\d{12}:)((|(?=[a-z0-9-.]{1,63})(?!\\d{1,3}(\\.\\d{1,3}){3})(?![^:]*-{2})(?![^:]*-\\.)(?![^:]*\\.-)[a-z0-9].*(?<!-)):){4}(?!/).{0,1024}$"
+    },
+    "RestoreOpenZFSVolumeOption": {
+      "type": "string",
+      "enum": [
+        "DELETE_INTERMEDIATE_SNAPSHOTS",
+        "DELETE_CLONED_VOLUMES"
+      ]
+    },
+    "RestoreOpenZFSVolumeOptions": {
+      "type": "list",
+      "max": 2,
+      "member": "RestoreOpenZFSVolumeOption"
+    },
+    "RestoreVolumeFromSnapshotRequest": {
+      "type": "structure",
+      "required": [
+        "VolumeId",
+        "SnapshotId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "VolumeId": "VolumeId",
+        "SnapshotId": "SnapshotId",
+        "Options": "RestoreOpenZFSVolumeOptions"
+      }
+    },
+    "RetentionPeriod": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "RetentionPeriodType",
+        "Value": "RetentionPeriodValue"
+      }
+    },
+    "RetentionPeriodType": {
+      "type": "string",
+      "enum": [
+        "SECONDS",
+        "MINUTES",
+        "HOURS",
+        "DAYS",
+        "MONTHS",
+        "YEARS",
+        "INFINITE",
+        "UNSPECIFIED"
+      ]
+    },
+    "RetentionPeriodValue": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "RouteTableId": {
+      "type": "string",
+      "min": 12,
+      "max": 21,
+      "pattern": "^(rtb-[0-9a-f]{8,})$"
+    },
+    "RouteTableIds": {
+      "type": "list",
+      "max": 50,
+      "member": "RouteTableId"
+    },
+    "S3AccessPointAttachmentName": {
+      "type": "string",
+      "min": 3,
+      "max": 50,
+      "pattern": "^(?=[a-z0-9])[a-z0-9-]{1,48}[a-z0-9]$"
+    },
+    "S3AccessPointAttachmentNames": {
+      "type": "list",
+      "max": 50,
+      "member": "S3AccessPointAttachmentName"
+    },
+    "S3AccessPointAttachmentType": {
+      "type": "string",
+      "enum": [
+        "OPENZFS",
+        "ONTAP"
+      ]
+    },
+    "S3AccessPointAttachmentsFilter": {
+      "type": "structure",
+      "members": {
+        "Name": "S3AccessPointAttachmentsFilterName",
+        "Values": "S3AccessPointAttachmentsFilterValues"
+      }
+    },
+    "S3AccessPointAttachmentsFilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id",
+        "volume-id",
+        "type"
+      ]
+    },
+    "S3AccessPointAttachmentsFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "S3AccessPointAttachmentsFilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "S3AccessPointAttachmentsFilterValue"
+    },
+    "S3AccessPointAttachmentsFilters": {
+      "type": "list",
+      "max": 2,
+      "member": "S3AccessPointAttachmentsFilter"
+    },
+    "S3AccessPointVpcConfiguration": {
+      "type": "structure",
+      "members": {
+        "VpcId": "VpcId"
+      }
+    },
+    "S3DataRepositoryConfiguration": {
+      "type": "structure",
+      "members": {
+        "AutoImportPolicy": "AutoImportPolicy",
+        "AutoExportPolicy": "AutoExportPolicy"
+      }
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 11,
+      "max": 20,
+      "pattern": "^(sg-[0-9a-f]{8,})$"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "max": 50,
+      "member": "SecurityGroupId"
+    },
+    "SecurityStyle": {
+      "type": "string",
+      "enum": [
+        "UNIX",
+        "NTFS",
+        "MIXED"
+      ]
+    },
+    "SelfManagedActiveDirectoryConfiguration": {
+      "type": "structure",
+      "required": [
+        "DomainName",
+        "DnsIps"
+      ],
+      "members": {
+        "DomainName": "ActiveDirectoryFullyQualifiedName",
+        "OrganizationalUnitDistinguishedName": "OrganizationalUnitDistinguishedName",
+        "FileSystemAdministratorsGroup": "FileSystemAdministratorsGroupName",
+        "UserName": "DirectoryUserName",
+        "Password": "DirectoryPassword",
+        "DnsIps": "DnsIps",
+        "DomainJoinServiceAccountSecret": "CustomerSecretsManagerARN"
+      }
+    },
+    "SelfManagedActiveDirectoryConfigurationUpdates": {
+      "type": "structure",
+      "members": {
+        "UserName": "DirectoryUserName",
+        "Password": "DirectoryPassword",
+        "DnsIps": "DnsIps",
+        "DomainName": "ActiveDirectoryFullyQualifiedName",
+        "OrganizationalUnitDistinguishedName": "OrganizationalUnitDistinguishedName",
+        "FileSystemAdministratorsGroup": "FileSystemAdministratorsGroupName",
+        "DomainJoinServiceAccountSecret": "CustomerSecretsManagerARN"
+      }
+    },
+    "SnaplockRetentionPeriod": {
+      "type": "structure",
+      "required": [
+        "DefaultRetention",
+        "MinimumRetention",
+        "MaximumRetention"
+      ],
+      "members": {
+        "DefaultRetention": "RetentionPeriod",
+        "MinimumRetention": "RetentionPeriod",
+        "MaximumRetention": "RetentionPeriod"
+      }
+    },
+    "SnaplockType": {
+      "type": "string",
+      "enum": [
+        "COMPLIANCE",
+        "ENTERPRISE"
+      ]
+    },
+    "SnapshotFilter": {
+      "type": "structure",
+      "members": {
+        "Name": "SnapshotFilterName",
+        "Values": "SnapshotFilterValues"
+      }
+    },
+    "SnapshotFilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id",
+        "volume-id"
+      ]
+    },
+    "SnapshotFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "SnapshotFilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "SnapshotFilterValue"
+    },
+    "SnapshotFilters": {
+      "type": "list",
+      "max": 2,
+      "member": "SnapshotFilter"
+    },
+    "SnapshotId": {
+      "type": "string",
+      "min": 11,
+      "max": 28,
+      "pattern": "^((fs)?volsnap-[0-9a-f]{8,})$"
+    },
+    "SnapshotIds": {
+      "type": "list",
+      "max": 50,
+      "member": "SnapshotId"
+    },
+    "SnapshotName": {
+      "type": "string",
+      "min": 1,
+      "max": 203,
+      "pattern": "^[a-zA-Z0-9_:.-]{1,203}$"
+    },
+    "SnapshotPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "SourceBackupId": {
+      "type": "string",
+      "min": 12,
+      "max": 128,
+      "pattern": "^(backup-[0-9a-f]{8,})$"
+    },
+    "StartMisconfiguredStateRecoveryRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "FileSystemId": "FileSystemId"
+      }
+    },
+    "StorageCapacity": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "StorageType": {
+      "type": "string",
+      "enum": [
+        "SSD",
+        "HDD",
+        "INTELLIGENT_TIERING"
+      ]
+    },
+    "StorageVirtualMachineFilter": {
+      "type": "structure",
+      "members": {
+        "Name": "StorageVirtualMachineFilterName",
+        "Values": "StorageVirtualMachineFilterValues"
+      }
+    },
+    "StorageVirtualMachineFilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id"
+      ]
+    },
+    "StorageVirtualMachineFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "StorageVirtualMachineFilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "StorageVirtualMachineFilterValue"
+    },
+    "StorageVirtualMachineFilters": {
+      "type": "list",
+      "max": 1,
+      "member": "StorageVirtualMachineFilter"
+    },
+    "StorageVirtualMachineId": {
+      "type": "string",
+      "min": 21,
+      "max": 21,
+      "pattern": "^(svm-[0-9a-f]{17,})$"
+    },
+    "StorageVirtualMachineIds": {
+      "type": "list",
+      "max": 50,
+      "member": "StorageVirtualMachineId"
+    },
+    "StorageVirtualMachineName": {
+      "type": "string",
+      "min": 1,
+      "max": 47,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,47}$"
+    },
+    "StorageVirtualMachineRootVolumeSecurityStyle": {
+      "type": "string",
+      "enum": [
+        "UNIX",
+        "NTFS",
+        "MIXED"
+      ]
+    },
+    "SubDirectoriesPaths": {
+      "type": "list",
+      "max": 500,
+      "member": "Namespace"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 15,
+      "max": 24,
+      "pattern": "^(subnet-[0-9a-f]{8,})$"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "max": 50,
+      "member": "SubnetId"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "ResourceARN",
+        "Tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "Tags": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TaskId": {
+      "type": "string",
+      "min": 12,
+      "max": 128,
+      "pattern": "^(task-[0-9a-f]{17,})$"
+    },
+    "TaskIds": {
+      "type": "list",
+      "max": 50,
+      "member": "TaskId"
+    },
+    "ThroughputCapacityMbps": {
+      "type": "integer",
+      "min": 4000,
+      "max": 2000000
+    },
+    "ThroughputCapacityPerHAPair": {
+      "type": "integer",
+      "min": 128,
+      "max": 2147483647
+    },
+    "TieringPolicy": {
+      "type": "structure",
+      "members": {
+        "CoolingPeriod": "CoolingPeriod",
+        "Name": "TieringPolicyName"
+      }
+    },
+    "TieringPolicyName": {
+      "type": "string",
+      "enum": [
+        "SNAPSHOT_ONLY",
+        "AUTO",
+        "ALL",
+        "NONE"
+      ]
+    },
+    "Unit": {
+      "type": "string",
+      "enum": [
+        "DAYS"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "ResourceARN",
+        "TagKeys": "TagKeys"
+      }
+    },
+    "UpdateDataRepositoryAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "AssociationId"
+      ],
+      "members": {
+        "AssociationId": "DataRepositoryAssociationId",
+        "ClientRequestToken": "ClientRequestToken",
+        "ImportedFileChunkSize": "Megabytes",
+        "S3": "S3DataRepositoryConfiguration"
+      }
+    },
+    "UpdateFileCacheLustreConfiguration": {
+      "type": "structure",
+      "members": {
+        "WeeklyMaintenanceStartTime": "WeeklyTime"
+      }
+    },
+    "UpdateFileCacheRequest": {
+      "type": "structure",
+      "required": [
+        "FileCacheId"
+      ],
+      "members": {
+        "FileCacheId": "FileCacheId",
+        "ClientRequestToken": "ClientRequestToken",
+        "LustreConfiguration": "UpdateFileCacheLustreConfiguration"
+      }
+    },
+    "UpdateFileSystemLustreConfiguration": {
+      "type": "structure",
+      "members": {
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "AutoImportPolicy": "AutoImportPolicyType",
+        "DataCompressionType": "DataCompressionType",
+        "LogConfiguration": "LustreLogCreateConfiguration",
+        "RootSquashConfiguration": "LustreRootSquashConfiguration",
+        "PerUnitStorageThroughput": "PerUnitStorageThroughput",
+        "MetadataConfiguration": "UpdateFileSystemLustreMetadataConfiguration",
+        "ThroughputCapacity": "ThroughputCapacityMbps",
+        "DataReadCacheConfiguration": "LustreReadCacheConfiguration"
+      }
+    },
+    "UpdateFileSystemLustreMetadataConfiguration": {
+      "type": "structure",
+      "members": {
+        "Iops": "MetadataIops",
+        "Mode": "MetadataConfigurationMode"
+      }
+    },
+    "UpdateFileSystemOntapConfiguration": {
+      "type": "structure",
+      "members": {
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "FsxAdminPassword": "AdminPassword",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "AddRouteTableIds": "RouteTableIds",
+        "RemoveRouteTableIds": "RouteTableIds",
+        "ThroughputCapacityPerHAPair": "ThroughputCapacityPerHAPair",
+        "HAPairs": "HAPairs",
+        "EndpointIpv6AddressRange": "Ipv6AddressRange"
+      }
+    },
+    "UpdateFileSystemOpenZFSConfiguration": {
+      "type": "structure",
+      "members": {
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "CopyTagsToBackups": "Flag",
+        "CopyTagsToVolumes": "Flag",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "AddRouteTableIds": "RouteTableIds",
+        "RemoveRouteTableIds": "RouteTableIds",
+        "ReadCacheConfiguration": "OpenZFSReadCacheConfiguration",
+        "EndpointIpv6AddressRange": "Ipv6AddressRange"
+      }
+    },
+    "UpdateFileSystemRequest": {
+      "type": "structure",
+      "required": [
+        "FileSystemId"
+      ],
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "ClientRequestToken": "ClientRequestToken",
+        "StorageCapacity": "StorageCapacity",
+        "WindowsConfiguration": "UpdateFileSystemWindowsConfiguration",
+        "LustreConfiguration": "UpdateFileSystemLustreConfiguration",
+        "OntapConfiguration": "UpdateFileSystemOntapConfiguration",
+        "OpenZFSConfiguration": "UpdateFileSystemOpenZFSConfiguration",
+        "StorageType": "StorageType",
+        "FileSystemTypeVersion": "FileSystemTypeVersion",
+        "NetworkType": "NetworkType"
+      }
+    },
+    "UpdateFileSystemWindowsConfiguration": {
+      "type": "structure",
+      "members": {
+        "WeeklyMaintenanceStartTime": "WeeklyTime",
+        "DailyAutomaticBackupStartTime": "DailyTime",
+        "AutomaticBackupRetentionDays": "AutomaticBackupRetentionDays",
+        "ThroughputCapacity": "MegabytesPerSecond",
+        "SelfManagedActiveDirectoryConfiguration": "SelfManagedActiveDirectoryConfigurationUpdates",
+        "AuditLogConfiguration": "WindowsAuditLogCreateConfiguration",
+        "DiskIopsConfiguration": "DiskIopsConfiguration",
+        "FsrmConfiguration": "WindowsFsrmConfiguration"
+      }
+    },
+    "UpdateOntapVolumeConfiguration": {
+      "type": "structure",
+      "members": {
+        "JunctionPath": "JunctionPath",
+        "SecurityStyle": "SecurityStyle",
+        "SizeInMegabytes": "VolumeCapacity",
+        "StorageEfficiencyEnabled": "Flag",
+        "TieringPolicy": "TieringPolicy",
+        "SnapshotPolicy": "SnapshotPolicy",
+        "CopyTagsToBackups": "Flag",
+        "SnaplockConfiguration": "UpdateSnaplockConfiguration",
+        "SizeInBytes": "VolumeCapacityBytes"
+      }
+    },
+    "UpdateOpenZFSVolumeConfiguration": {
+      "type": "structure",
+      "members": {
+        "StorageCapacityReservationGiB": "IntegerNoMaxFromNegativeOne",
+        "StorageCapacityQuotaGiB": "IntegerNoMaxFromNegativeOne",
+        "RecordSizeKiB": "IntegerRecordSizeKiB",
+        "DataCompressionType": "OpenZFSDataCompressionType",
+        "NfsExports": "OpenZFSNfsExports",
+        "UserAndGroupQuotas": "OpenZFSUserAndGroupQuotas",
+        "ReadOnly": "ReadOnly"
+      }
+    },
+    "UpdateOpenZFSVolumeOption": {
+      "type": "string",
+      "enum": [
+        "DELETE_INTERMEDIATE_SNAPSHOTS",
+        "DELETE_CLONED_VOLUMES",
+        "DELETE_INTERMEDIATE_DATA"
+      ]
+    },
+    "UpdateOpenZFSVolumeOptions": {
+      "type": "list",
+      "member": "UpdateOpenZFSVolumeOption"
+    },
+    "UpdateSharedVpcConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "EnableFsxRouteTableUpdatesFromParticipantAccounts": "VerboseFlag",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "UpdateSnaplockConfiguration": {
+      "type": "structure",
+      "members": {
+        "AuditLogVolume": "Flag",
+        "AutocommitPeriod": "AutocommitPeriod",
+        "PrivilegedDelete": "PrivilegedDelete",
+        "RetentionPeriod": "SnaplockRetentionPeriod",
+        "VolumeAppendModeEnabled": "Flag"
+      }
+    },
+    "UpdateSnapshotRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "SnapshotId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "Name": "SnapshotName",
+        "SnapshotId": "SnapshotId"
+      }
+    },
+    "UpdateStorageVirtualMachineRequest": {
+      "type": "structure",
+      "required": [
+        "StorageVirtualMachineId"
+      ],
+      "members": {
+        "ActiveDirectoryConfiguration": "UpdateSvmActiveDirectoryConfiguration",
+        "ClientRequestToken": "ClientRequestToken",
+        "StorageVirtualMachineId": "StorageVirtualMachineId",
+        "SvmAdminPassword": "AdminPassword"
+      }
+    },
+    "UpdateSvmActiveDirectoryConfiguration": {
+      "type": "structure",
+      "members": {
+        "SelfManagedActiveDirectoryConfiguration": "SelfManagedActiveDirectoryConfigurationUpdates",
+        "NetBiosName": "NetBiosAlias"
+      }
+    },
+    "UpdateVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "VolumeId"
+      ],
+      "members": {
+        "ClientRequestToken": "ClientRequestToken",
+        "VolumeId": "VolumeId",
+        "OntapConfiguration": "UpdateOntapVolumeConfiguration",
+        "Name": "VolumeName",
+        "OpenZFSConfiguration": "UpdateOpenZFSVolumeConfiguration"
+      }
+    },
+    "Value": {
+      "type": "long",
+      "min": 0
+    },
+    "VerboseFlag": {
+      "type": "string",
+      "min": 4,
+      "max": 5,
+      "pattern": "^(?i)(true|false)$"
+    },
+    "VolumeCapacity": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "VolumeCapacityBytes": {
+      "type": "long",
+      "min": 0,
+      "max": 22517998000000000
+    },
+    "VolumeFilter": {
+      "type": "structure",
+      "members": {
+        "Name": "VolumeFilterName",
+        "Values": "VolumeFilterValues"
+      }
+    },
+    "VolumeFilterName": {
+      "type": "string",
+      "enum": [
+        "file-system-id",
+        "storage-virtual-machine-id"
+      ]
+    },
+    "VolumeFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9a-zA-Z\\*\\.\\\\/\\?\\-\\_]*$"
+    },
+    "VolumeFilterValues": {
+      "type": "list",
+      "max": 20,
+      "member": "VolumeFilterValue"
+    },
+    "VolumeFilters": {
+      "type": "list",
+      "max": 2,
+      "member": "VolumeFilter"
+    },
+    "VolumeId": {
+      "type": "string",
+      "min": 23,
+      "max": 23,
+      "pattern": "^(fsvol-[0-9a-f]{17,})$"
+    },
+    "VolumeIds": {
+      "type": "list",
+      "max": 50,
+      "member": "VolumeId"
+    },
+    "VolumeName": {
+      "type": "string",
+      "min": 1,
+      "max": 203,
+      "pattern": "^[^\\u0000\\u0085\\u2028\\u2029\\r\\n]{1,203}$"
+    },
+    "VolumeStyle": {
+      "type": "string",
+      "enum": [
+        "FLEXVOL",
+        "FLEXGROUP"
+      ]
+    },
+    "VolumeType": {
+      "type": "string",
+      "enum": [
+        "ONTAP",
+        "OPENZFS"
+      ]
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 12,
+      "max": 21,
+      "pattern": "^(vpc-[0-9a-f]{8,})$"
+    },
+    "WeeklyTime": {
+      "type": "string",
+      "min": 7,
+      "max": 7,
+      "pattern": "^[1-7]:([01]\\d|2[0-3]):?([0-5]\\d)$"
+    },
+    "WindowsAccessAuditLogLevel": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "SUCCESS_ONLY",
+        "FAILURE_ONLY",
+        "SUCCESS_AND_FAILURE"
+      ]
+    },
+    "WindowsAuditLogCreateConfiguration": {
+      "type": "structure",
+      "required": [
+        "FileAccessAuditLogLevel",
+        "FileShareAccessAuditLogLevel"
+      ],
+      "members": {
+        "FileAccessAuditLogLevel": "WindowsAccessAuditLogLevel",
+        "FileShareAccessAuditLogLevel": "WindowsAccessAuditLogLevel",
+        "AuditLogDestination": "GeneralARN"
+      }
+    },
+    "WindowsDeploymentType": {
+      "type": "string",
+      "enum": [
+        "MULTI_AZ_1",
+        "SINGLE_AZ_1",
+        "SINGLE_AZ_2"
+      ]
+    },
+    "WindowsFsrmConfiguration": {
+      "type": "structure",
+      "required": [
+        "FsrmServiceEnabled"
+      ],
+      "members": {
+        "FsrmServiceEnabled": "Flag",
+        "EventLogDestination": "GeneralARN"
+      }
+    }
+  }
+}

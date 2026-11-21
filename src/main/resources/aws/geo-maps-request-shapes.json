@@ -1,0 +1,361 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_location_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetGlyphs": "GetGlyphsRequest",
+    "GetSprites": "GetSpritesRequest",
+    "GetStaticMap": "GetStaticMapRequest",
+    "GetStyleDescriptor": "GetStyleDescriptorRequest",
+    "GetTile": "GetTileRequest"
+  },
+  "shapes": {
+    "ApiKey": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "Buildings": {
+      "type": "string",
+      "enum": [
+        "Buildings3D"
+      ]
+    },
+    "ColorScheme": {
+      "type": "string",
+      "enum": [
+        "Light",
+        "Dark"
+      ]
+    },
+    "CompactOverlay": {
+      "type": "string",
+      "min": 1,
+      "max": 5000
+    },
+    "ContourDensity": {
+      "type": "string",
+      "enum": [
+        "Low",
+        "Medium",
+        "High"
+      ]
+    },
+    "CountryCode": {
+      "type": "string",
+      "min": 2,
+      "max": 3,
+      "pattern": "([A-Z]{2}|[A-Z]{3})"
+    },
+    "DistanceMeters": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "GeoJsonOverlay": {
+      "type": "string",
+      "min": 1,
+      "max": 4200
+    },
+    "GetGlyphsRequest": {
+      "type": "structure",
+      "required": [
+        "FontStack",
+        "FontUnicodeRange"
+      ],
+      "members": {
+        "FontStack": "GetGlyphsRequestFontStackString",
+        "FontUnicodeRange": "GetGlyphsRequestFontUnicodeRangeString"
+      }
+    },
+    "GetGlyphsRequestFontStackString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "GetGlyphsRequestFontUnicodeRangeString": {
+      "type": "string",
+      "min": 0,
+      "max": 50,
+      "pattern": "[0-9]+-[0-9]+\\.pbf"
+    },
+    "GetSpritesRequest": {
+      "type": "structure",
+      "required": [
+        "FileName",
+        "Style",
+        "ColorScheme",
+        "Variant"
+      ],
+      "members": {
+        "FileName": "GetSpritesRequestFileNameString",
+        "Style": "MapStyle",
+        "ColorScheme": "ColorScheme",
+        "Variant": "Variant"
+      }
+    },
+    "GetSpritesRequestFileNameString": {
+      "type": "string",
+      "pattern": "sprites(@2x)?\\.(png|json)"
+    },
+    "GetStaticMapRequest": {
+      "type": "structure",
+      "required": [
+        "Height",
+        "FileName",
+        "Width"
+      ],
+      "members": {
+        "BoundingBox": "GetStaticMapRequestBoundingBoxString",
+        "BoundedPositions": "GetStaticMapRequestBoundedPositionsString",
+        "Center": "PositionString",
+        "ColorScheme": "ColorScheme",
+        "CompactOverlay": "CompactOverlay",
+        "CropLabels": "Boolean",
+        "GeoJsonOverlay": "GeoJsonOverlay",
+        "Height": "GetStaticMapRequestHeightInteger",
+        "Key": "ApiKey",
+        "LabelSize": "LabelSize",
+        "Language": "LanguageTag",
+        "Padding": "GetStaticMapRequestPaddingInteger",
+        "PoliticalView": "CountryCode",
+        "PointsOfInterests": "MapFeatureMode",
+        "Radius": "DistanceMeters",
+        "FileName": "GetStaticMapRequestFileNameString",
+        "ScaleBarUnit": "ScaleBarUnit",
+        "Style": "StaticMapStyle",
+        "Width": "GetStaticMapRequestWidthInteger",
+        "Zoom": "GetStaticMapRequestZoomFloat"
+      }
+    },
+    "GetStaticMapRequestBoundedPositionsString": {
+      "type": "string",
+      "min": 0,
+      "max": 5000,
+      "pattern": "(-?\\d{1,3}(\\.\\d{1,14})?,-?\\d{1,2}(\\.\\d{1,14})?)(,(-?\\d{1,3}(\\.\\d{1,14})?,-?\\d{1,2}(\\.\\d{1,14})?))*"
+    },
+    "GetStaticMapRequestBoundingBoxString": {
+      "type": "string",
+      "min": 0,
+      "max": 100,
+      "pattern": "(-?\\d{1,3}(\\.\\d{1,14})?,-?\\d{1,2}(\\.\\d{1,14})?)(,(-?\\d{1,3}(\\.\\d{1,14})?,-?\\d{1,2}(\\.\\d{1,14})?))*"
+    },
+    "GetStaticMapRequestFileNameString": {
+      "type": "string",
+      "pattern": "map(@2x)?"
+    },
+    "GetStaticMapRequestHeightInteger": {
+      "type": "integer",
+      "min": 64,
+      "max": 1400
+    },
+    "GetStaticMapRequestPaddingInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 350
+    },
+    "GetStaticMapRequestWidthInteger": {
+      "type": "integer",
+      "min": 64,
+      "max": 1400
+    },
+    "GetStaticMapRequestZoomFloat": {
+      "type": "float",
+      "min": 0,
+      "max": 20
+    },
+    "GetStyleDescriptorRequest": {
+      "type": "structure",
+      "required": [
+        "Style"
+      ],
+      "members": {
+        "Style": "MapStyle",
+        "ColorScheme": "ColorScheme",
+        "PoliticalView": "CountryCode",
+        "Terrain": "Terrain",
+        "ContourDensity": "ContourDensity",
+        "Traffic": "Traffic",
+        "TravelModes": "TravelModeList",
+        "Buildings": "Buildings",
+        "PoiDensity": "PoiDensity",
+        "PoiCategories": "PoiCategoryList",
+        "Key": "ApiKey"
+      }
+    },
+    "GetTileRequest": {
+      "type": "structure",
+      "required": [
+        "Tileset",
+        "Z",
+        "X",
+        "Y"
+      ],
+      "members": {
+        "AdditionalFeatures": "TileAdditionalFeatureList",
+        "Tileset": "Tileset",
+        "Z": "GetTileRequestZString",
+        "X": "GetTileRequestXString",
+        "Y": "GetTileRequestYString",
+        "Key": "ApiKey"
+      }
+    },
+    "GetTileRequestXString": {
+      "type": "string",
+      "min": 0,
+      "max": 7,
+      "pattern": ".*\\d+.*"
+    },
+    "GetTileRequestYString": {
+      "type": "string",
+      "min": 0,
+      "max": 7,
+      "pattern": ".*\\d+.*"
+    },
+    "GetTileRequestZString": {
+      "type": "string",
+      "min": 0,
+      "max": 2,
+      "pattern": ".*\\d+.*"
+    },
+    "LabelSize": {
+      "type": "string",
+      "enum": [
+        "Small",
+        "Large"
+      ]
+    },
+    "LanguageTag": {
+      "type": "string",
+      "min": 2,
+      "max": 35
+    },
+    "MapFeatureMode": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ]
+    },
+    "MapStyle": {
+      "type": "string",
+      "enum": [
+        "Standard",
+        "Monochrome",
+        "Hybrid",
+        "Satellite"
+      ]
+    },
+    "PoiCategory": {
+      "type": "string",
+      "enum": [
+        "FoodAndDrink",
+        "Entertainment",
+        "SightsAndMuseums",
+        "Transportation",
+        "Accommodations",
+        "LeisureAndOutdoor",
+        "Shopping",
+        "BusinessAndServices",
+        "FacilitiesAndBuildings"
+      ]
+    },
+    "PoiCategoryList": {
+      "type": "list",
+      "min": 0,
+      "max": 9,
+      "member": "PoiCategory"
+    },
+    "PoiDensity": {
+      "type": "string",
+      "enum": [
+        "Off",
+        "VerySparse",
+        "Sparse",
+        "Default",
+        "Dense",
+        "VeryDense"
+      ]
+    },
+    "PositionString": {
+      "type": "string",
+      "min": 3,
+      "max": 36,
+      "pattern": "-?\\d{1,3}(\\.\\d{1,14})?,-?\\d{1,2}(\\.\\d{1,14})?"
+    },
+    "ScaleBarUnit": {
+      "type": "string",
+      "enum": [
+        "Kilometers",
+        "KilometersMiles",
+        "Miles",
+        "MilesKilometers"
+      ]
+    },
+    "StaticMapStyle": {
+      "type": "string",
+      "enum": [
+        "Satellite",
+        "Standard"
+      ]
+    },
+    "Terrain": {
+      "type": "string",
+      "enum": [
+        "Hillshade",
+        "Terrain3D"
+      ]
+    },
+    "TileAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "ContourLines",
+        "Hillshade",
+        "Logistics",
+        "Transit"
+      ]
+    },
+    "TileAdditionalFeatureList": {
+      "type": "list",
+      "min": 0,
+      "max": 4,
+      "member": "TileAdditionalFeature"
+    },
+    "Tileset": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[-.\\w]+"
+    },
+    "Traffic": {
+      "type": "string",
+      "enum": [
+        "All",
+        "Congestion"
+      ]
+    },
+    "TravelMode": {
+      "type": "string",
+      "enum": [
+        "Transit",
+        "Truck"
+      ]
+    },
+    "TravelModeList": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "TravelMode"
+    },
+    "Variant": {
+      "type": "string",
+      "enum": [
+        "Default"
+      ]
+    }
+  }
+}

@@ -14,7 +14,7 @@ import static org.hamcrest.Matchers.not;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class S3AccelerateIntegrationTest {
 
-    private static final String BUCKET = "accelerate-int-test";
+    private static final String BUCKET = "accelerate-status-int-test";
 
     @Test
     @Order(1)

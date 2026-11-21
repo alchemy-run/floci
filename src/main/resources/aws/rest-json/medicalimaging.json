@@ -1,0 +1,453 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "medicalimaging",
+ "apiVersion": "2023-07-19",
+ "operations": {
+  "CopyImageSet": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{sourceImageSetId}/copyImageSet",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "sourceImageSetId": {
+      "location": "uri",
+      "name": "sourceImageSetId"
+     },
+     "copyImageSetInformation": {
+      "location": "payload",
+      "type": "structure"
+     },
+     "force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     },
+     "promoteToPrimary": {
+      "location": "querystring",
+      "name": "promoteToPrimary",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDatastore": {
+   "method": "POST",
+   "requestUri": "/datastore",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDatastore": {
+   "method": "DELETE",
+   "requestUri": "/datastore/{datastoreId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteImageSet": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/deleteImageSet",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDICOMImportJob": {
+   "method": "GET",
+   "requestUri": "/getDICOMImportJob/datastore/{datastoreId}/job/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDatastore": {
+   "method": "GET",
+   "requestUri": "/datastore/{datastoreId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetImageFrame": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/getImageFrame",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     },
+     "imageFrameInformation": {
+      "location": "payload",
+      "type": "structure"
+     }
+    }
+   },
+   "output": {
+    "members": {
+     "imageFrameBlob": {
+      "location": "payload",
+      "type": "blob"
+     },
+     "contentType": {
+      "location": "header",
+      "name": "Content-Type"
+     }
+    }
+   }
+  },
+  "GetImageSet": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/getImageSet",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     },
+     "versionId": {
+      "location": "querystring",
+      "name": "version"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetImageSetMetadata": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/getImageSetMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     },
+     "versionId": {
+      "location": "querystring",
+      "name": "version"
+     }
+    }
+   },
+   "output": {
+    "members": {
+     "imageSetMetadataBlob": {
+      "location": "payload",
+      "type": "blob"
+     },
+     "contentType": {
+      "location": "header",
+      "name": "Content-Type"
+     },
+     "contentEncoding": {
+      "location": "header",
+      "name": "Content-Encoding"
+     }
+    }
+   }
+  },
+  "ListDICOMImportJobs": {
+   "method": "GET",
+   "requestUri": "/listDICOMImportJobs/datastore/{datastoreId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "jobStatus": {
+      "location": "querystring",
+      "name": "jobStatus"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDatastores": {
+   "method": "GET",
+   "requestUri": "/datastore",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreStatus": {
+      "location": "querystring",
+      "name": "datastoreStatus"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListImageSetVersions": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/listImageSetVersions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchImageSets": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/searchImageSets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "searchCriteria": {
+      "location": "payload",
+      "type": "structure"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "searchCriteria.filters[].values[].createdAt",
+     "searchCriteria.filters[].values[].updatedAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartDICOMImportJob": {
+   "method": "POST",
+   "requestUri": "/startDICOMImportJob/datastore/{datastoreId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     },
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateImageSetMetadata": {
+   "method": "POST",
+   "requestUri": "/datastore/{datastoreId}/imageSet/{imageSetId}/updateImageSetMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "datastoreId": {
+      "location": "uri",
+      "name": "datastoreId"
+     },
+     "imageSetId": {
+      "location": "uri",
+      "name": "imageSetId"
+     },
+     "latestVersionId": {
+      "location": "querystring",
+      "name": "latestVersion"
+     },
+     "force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     },
+     "includeStudyImageSets": {
+      "location": "querystring",
+      "name": "includeStudyImageSets",
+      "type": "boolean"
+     },
+     "updateImageSetMetadataUpdates": {
+      "location": "payload",
+      "type": "structure"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

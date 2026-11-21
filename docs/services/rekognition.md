@@ -13,12 +13,68 @@
 | `DetectText` | Detect text in an image |
 | `CompareFaces` | Compare a face in a source image with faces in a target image |
 | `DetectModerationLabels` | Detect unsafe or inappropriate content in an image |
+| `DetectProtectiveEquipment` | Detect persons and the protective equipment they wear |
+| `RecognizeCelebrities` | Recognize celebrities in an image |
+| `GetCelebrityInfo` | Get a celebrity's name and links by id |
+| `CreateCollection` | Create a face collection |
+| `DescribeCollection` | Get a collection's face and user counts |
+| `ListCollections` | List collections |
+| `DeleteCollection` | Delete a collection |
+| `IndexFaces` | Index the faces in an image into a collection |
+| `ListFaces` | List a collection's faces |
+| `DeleteFaces` | Delete faces from a collection |
+| `SearchFaces` | Search a collection for faces like a stored face |
+| `SearchFacesByImage` | Search a collection for faces like the largest face in an image |
+| `CreateUser` | Create a user in a collection |
+| `DeleteUser` | Delete a user |
+| `ListUsers` | List a collection's users |
+| `AssociateFaces` | Associate faces with a user |
+| `DisassociateFaces` | Disassociate faces from a user |
+| `SearchUsers` | Search a collection for users like a user or face |
+| `SearchUsersByImage` | Search a collection for users like the largest face in an image |
+| `CreateFaceLivenessSession` | Create a Face Liveness session |
+| `GetFaceLivenessSessionResults` | Get a Face Liveness session's status |
+| `CreateProject` | Create a Custom Labels project |
+| `DeleteProject` | Delete a project |
+| `DescribeProjects` | List projects |
+| `DescribeProjectVersions` | List a project's model versions |
+| `DetectCustomLabels` | Detect custom labels with a trained model |
+| `StartProjectVersion` | Start a model version |
+| `StopProjectVersion` | Stop a model version |
+| `CreateStreamProcessor` | Create a stream processor |
+| `DescribeStreamProcessor` | Get a stream processor |
+| `ListStreamProcessors` | List stream processors |
+| `StartStreamProcessor` | Start a stream processor |
+| `StopStreamProcessor` | Stop a stream processor |
+| `DeleteStreamProcessor` | Delete a stream processor |
+| `TagResource` | Tag a collection, project, or stream processor |
+| `UntagResource` | Remove tags |
+| `ListTagsForResource` | List tags |
+| `StartCelebrityRecognition` | Start a stored-video celebrity recognition job |
+| `StartContentModeration` | Start a stored-video content moderation job |
+| `StartFaceDetection` | Start a stored-video face detection job |
+| `StartFaceSearch` | Start a stored-video face search job |
+| `StartLabelDetection` | Start a stored-video label detection job |
+| `StartPersonTracking` | Start a stored-video person tracking job |
+| `StartSegmentDetection` | Start a stored-video segment detection job |
+| `StartTextDetection` | Start a stored-video text detection job |
+| `GetCelebrityRecognition` | Get a stored-video celebrity recognition job's results |
+| `GetContentModeration` | Get a stored-video content moderation job's results |
+| `GetFaceDetection` | Get a stored-video face detection job's results |
+| `GetFaceSearch` | Get a stored-video face search job's results |
+| `GetLabelDetection` | Get a stored-video label detection job's results |
+| `GetPersonTracking` | Get a stored-video person tracking job's results |
+| `GetSegmentDetection` | Get a stored-video segment detection job's results |
+| `GetTextDetection` | Get a stored-video text detection job's results |
+| `StartMediaAnalysisJob` | Start a media analysis job over a manifest |
+| `GetMediaAnalysisJob` | Get a media analysis job |
+| `ListMediaAnalysisJobs` | List media analysis jobs |
 <!-- floci:actions:end -->
 
 ## Emulation Behavior
 
-- **Stub responses:** every action returns a fixed, AWS-shaped response. No image
-  analysis is performed: what an image shows never changes the result.
+- **No image analysis:** Floci reads no pixels, so what an image shows never changes
+  the result unless the mock config names it (see "Mock Responses").
 - **Images are checked as Rekognition checks them:** an image Rekognition refuses is
   refused here, with Rekognition's error, before any response. Measured against
   Rekognition in us-east-2, for each operation and for both `Bytes` and `S3Object`:
@@ -45,15 +101,30 @@
       `InvalidImageFormatException` by the other operations.
     - Two documented limits are not enforced, because Rekognition does not enforce them:
       images under 80 pixels are accepted, and an S3 object over 15 MB is accepted.
-- **Content-listing operations return one canned entry:** `DetectLabels` and
-  `DetectText` always report a single stub label/text detection, matching the
-  Textract stub's block-hierarchy convention.
-- **Face/moderation operations return empty results:** `DetectFaces`,
-  `CompareFaces`, and `DetectModerationLabels` always report nothing found
-  (empty `FaceDetails`/`FaceMatches`/`ModerationLabels`) rather than fabricating
-  biometric attributes or a moderation flag for content that was never analyzed
-  — an honest "nothing detected" response, matching the Comprehend PII-detection
-  stub's precedent.
+- **One canned label:** `DetectLabels` reports a single label, as every photo has one.
+- **Nothing else is detected:** `DetectText`, `DetectFaces`, `DetectModerationLabels`,
+  `DetectProtectiveEquipment`, and `RecognizeCelebrities` report nothing found rather
+  than fabricating text, biometric attributes, or a moderation flag for content that
+  was never analyzed. `CompareFaces` refuses a source image without a face with
+  `InvalidParameterException`, as Rekognition does, and `GetCelebrityInfo` knows no
+  celebrity unless the mock config names its id.
+- **Face collections:** collections, their faces and users, and tags are stored.
+  `IndexFaces` indexes the `FaceDetails` of the image's `DetectFaces` mock (nothing
+  without one); `SearchFacesByImage` and `SearchUsersByImage` refuse an image without a
+  face with `InvalidParameterException`. Unknown face ids in `DeleteFaces`,
+  `AssociateFaces`, and `DisassociateFaces` are reported per face (`FACE_NOT_FOUND`),
+  not as an error.
+- **Face Liveness:** a session is `CREATED` until it expires three minutes after
+  creation; Floci runs no liveness check.
+- **Stored video and media analysis:** starting a job checks that the S3 object is
+  readable (`InvalidS3ObjectException`), that a face search's collection exists, and that
+  a segment detection names its segment types. A job reports `IN_PROGRESS` for two
+  seconds, then `SUCCEEDED` with an empty result list. The same `ClientRequestToken`
+  returns the same job. No SNS notification is sent.
+- **Stream processors:** create, describe, list, start, stop, and delete, with tags;
+  starting moves one to `RUNNING`, stopping back to `STOPPED`.
+- **Custom Labels:** projects can be created, listed, and deleted, but never trained, so
+  every project version ARN is unknown (`ResourceNotFoundException`).
 - **Real input validation:** `Image` (or `SourceImage`/`TargetImage` for
   `CompareFaces`) is required, must be a JSON structure, and must specify
   `Bytes` (string-typed) or `S3Object` (structure-typed) — matching AWS's own
@@ -62,11 +133,7 @@
 - **Both `Bytes` and `S3Object`:** supplying both is accepted rather than rejected,
   since nothing in the Rekognition API model declares that combination invalid. The
   bytes are what is checked.
-- **Out of scope:** face-collection persistence (`CreateCollection`,
-  `IndexFaces`, `SearchFaces`), custom-model training (`Projects`, `Datasets`,
-  `ProjectVersions`), live video (`StreamProcessor`), async video jobs
-  (`Start*`/`Get*` Celebrity/Content/Face/Label/Person/Segment/Text detection),
-  and Face Liveness sessions are not implemented.
+- **Out of scope:** model training (`Datasets`, `CreateProjectVersion`).
 
 ## Configuration
 
@@ -77,8 +144,7 @@
 
 ## Mock Responses
 
-The default stub responses above are the same for every call. To exercise application
-logic that branches on detection results, point `AI_MOCK_CONFIG` at a JSON file shared
+To exercise application logic that branches on detection results, point `AI_MOCK_CONFIG` at a JSON file shared
 across Rekognition, Textract, and Comprehend:
 
 ```json
@@ -100,10 +166,12 @@ that was never uploaded fails with `InvalidS3ObjectException`, as it does on AWS
 
 The lookup key is **`"<Bucket>/<Name>"`** from `Image.S3Object` (or `SourceImage.S3Object`
 for `CompareFaces` — `TargetImage` has no independent key in this scheme). A `Bytes`-backed
-image has no such key, so mocking only applies to S3Object-based calls. The file is re-read
+image is keyed by **`"sha256:<hex>"`** of its decoded bytes, as Textract documents are, so a mock
+can answer for a fixed image wherever it comes from. The file is re-read
 when its modification time changes, so it can be edited without restarting the emulator. A
-missing file, an unset `AI_MOCK_CONFIG`, or no matching entry all fall back to the default
-stub.
+missing file, an unset `AI_MOCK_CONFIG`, or no matching entry all fall back to the defaults
+above. A `DetectFaces` mock also gives `IndexFaces` and the by-image searches their faces, and
+`GetCelebrityInfo` is keyed by the celebrity id.
 
 ## Examples
 

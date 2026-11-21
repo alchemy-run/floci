@@ -21,17 +21,17 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 /**
- * Dummy response builder for Amazon Textract. Stateless for sync operations.
- * Async operations (Start* and Get*) use an in-memory job store.
- * No real OCR or document analysis is performed: every call returns a fixed
- * stub Block list matching the AWS Textract wire format by default.
+ * Response builder for Amazon Textract. Stateless for sync operations; async
+ * operations (Start* and Get*) use an in-memory job store. No OCR runs: a call
+ * returns a fixed stub Block list matching the AWS Textract wire format, unless
+ * {@link AiMockConfigLoader} has an answer for the document.
  * <p>
- * Callers can override the sync-action default per exact "Bucket/Name" S3Object
- * key via {@link AiMockConfigLoader} — see {@code docs/services/textract.md}
- * "Mock Responses". A Bytes-backed Document has no such key, so mock lookup is
- * simply skipped for it. The async Start and Get action pairs do not support
- * mocking (the mock key would need to be persisted alongside the job id) — out
- * of scope.
+ * A document's mock is looked up by each of its keys in turn (see
+ * {@link TextractDocuments}): its {@code "Bucket/Name"}, then {@code "sha256:<hex>"}
+ * of its bytes. Async jobs look their document up when they start, so a job's
+ * results follow the same mock (DetectDocumentText for text detection,
+ * AnalyzeDocument for analysis, AnalyzeExpense for expense analysis, and
+ * DetectDocumentText's blocks for the pages of a lending analysis).
  *
  * @see <a href="https://docs.aws.amazon.com/textract/latest/dg/API_Operations.html">Textract API Reference</a>
  */
@@ -66,30 +66,169 @@ public class TextractService implements Resettable {
      * DetectDocumentText — returns a stub PAGE + LINE + WORD block hierarchy.
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_DetectDocumentText.html
      */
-    public Response detectDocumentText(String mockKey) {
-        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "DetectDocumentText");
-        if (mock.isPresent()) {
-            return Response.ok(mock.get()).build();
+    public Response detectDocumentText(List<String> keys) {
+        return Response.ok(textDetection(keys)).build();
+    }
+
+    private ObjectNode textDetection(List<String> keys) {
+        Optional<JsonNode> mock = mocked(keys, "DetectDocumentText");
+        if (mock.isPresent() && mock.get().isObject()) {
+            return (ObjectNode) mock.get().deepCopy();
         }
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
         root.set("Blocks", buildStubBlocks());
         root.put("DetectDocumentTextModelVersion", MODEL_VERSION);
-        return Response.ok(root).build();
+        return root;
+    }
+
+    /** The document's mock for {@code action} under the first of its keys that has one. */
+    private Optional<JsonNode> mocked(List<String> keys, String action) {
+        for (String key : keys) {
+            Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, key, action);
+            if (mock.isPresent()) {
+                return mock;
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** The document's blocks: its DetectDocumentText mock's, or the stub hierarchy. */
+    private ArrayNode blocks(List<String> keys) {
+        JsonNode blocks = textDetection(keys).get("Blocks");
+        return blocks != null && blocks.isArray() ? (ArrayNode) blocks.deepCopy() : buildStubBlocks();
     }
     /**
      * AnalyzeDocument — returns the same stub blocks; FeatureTypes are accepted but ignored.
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeDocument.html
      */
-    public Response analyzeDocument(String mockKey) {
-        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "AnalyzeDocument");
-        if (mock.isPresent()) {
-            return Response.ok(mock.get()).build();
+    public Response analyzeDocument(List<String> keys) {
+        return Response.ok(documentAnalysis(keys)).build();
+    }
+
+    /** AnalyzeDocument: its own mock, else the document's text blocks. */
+    private ObjectNode documentAnalysis(List<String> keys) {
+        Optional<JsonNode> mock = mocked(keys, "AnalyzeDocument");
+        if (mock.isPresent() && mock.get().isObject()) {
+            return (ObjectNode) mock.get().deepCopy();
         }
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
-        root.set("Blocks", buildStubBlocks());
+        root.set("Blocks", blocks(keys));
         root.put("AnalyzeDocumentModelVersion", MODEL_VERSION);
+        return root;
+    }
+
+    /**
+     * AnalyzeExpense — one expense document per page with no summary fields or line
+     * items unless mocked; its blocks are the document's text blocks.
+     * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeExpense.html
+     */
+    public Response analyzeExpense(List<String> keys) {
+        return Response.ok(expenseAnalysis(keys)).build();
+    }
+
+    private ObjectNode expenseAnalysis(List<String> keys) {
+        Optional<JsonNode> mock = mocked(keys, "AnalyzeExpense");
+        if (mock.isPresent() && mock.get().isObject()) {
+            return (ObjectNode) mock.get().deepCopy();
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("DocumentMetadata", buildDocumentMetadata(1));
+        ObjectNode document = root.putArray("ExpenseDocuments").addObject();
+        document.put("ExpenseIndex", 1);
+        document.putArray("SummaryFields");
+        document.putArray("LineItemGroups");
+        document.set("Blocks", blocks(keys));
+        return root;
+    }
+
+    /**
+     * AnalyzeID — one identity document per page (Textract reads each page as one),
+     * with no fields unless the page's AnalyzeID mock gives them.
+     * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeID.html
+     */
+    public Response analyzeID(List<List<String>> pages) {
+        if (pages.isEmpty() || pages.size() > 2) {
+            throw new AwsException("InvalidParameterException", "DocumentPages must contain 1 or 2 pages.", 400);
+        }
+        if (pages.size() == 1) {
+            Optional<JsonNode> mock = mocked(pages.getFirst(), "AnalyzeID");
+            if (mock.isPresent()) {
+                return Response.ok(mock.get()).build();
+            }
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode documents = root.putArray("IdentityDocuments");
+        for (int index = 0; index < pages.size(); index++) {
+            ObjectNode document = documents.addObject();
+            document.put("DocumentIndex", index + 1);
+            document.putArray("IdentityDocumentFields");
+            document.set("Blocks", blocks(pages.get(index)));
+        }
+        root.set("DocumentMetadata", buildDocumentMetadata(pages.size()));
+        root.put("AnalyzeIDModelVersion", MODEL_VERSION);
+        return Response.ok(root).build();
+    }
+
+    /** StartExpenseAnalysis — completes at once with the document's expense analysis. */
+    public Response startExpenseAnalysis(List<String> keys) {
+        ObjectNode result = expenseAnalysis(keys);
+        result.put("JobStatus", "SUCCEEDED");
+        result.put("AnalyzeExpenseModelVersion", MODEL_VERSION);
+        return started("EXPENSE_ANALYSIS", result);
+    }
+
+    public Response getExpenseAnalysis(String jobId) {
+        return Response.ok(requireJobResult(jobId, "EXPENSE_ANALYSIS")).build();
+    }
+
+    /**
+     * StartLendingAnalysis — completes at once. Each page is classified
+     * {@code UNCLASSIFIED} with no extractions, and the summary groups the
+     * pages into one {@code UNCLASSIFIED} document.
+     */
+    public Response startLendingAnalysis(List<String> keys) {
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("JobStatus", "SUCCEEDED");
+        result.set("DocumentMetadata", buildDocumentMetadata(1));
+        ObjectNode page = result.putArray("Results").addObject();
+        page.put("Page", 1);
+        ObjectNode classification = page.putObject("PageClassification");
+        classification.putArray("PageType").addObject().put("Value", "UNCLASSIFIED").put("Confidence", 99.0);
+        classification.putArray("PageNumber").addObject().put("Value", "1").put("Confidence", 99.0);
+        page.putArray("Extractions");
+        result.put("AnalyzeLendingModelVersion", MODEL_VERSION);
+        return started("LENDING_ANALYSIS", result);
+    }
+
+    public Response getLendingAnalysis(String jobId) {
+        return Response.ok(requireJobResult(jobId, "LENDING_ANALYSIS")).build();
+    }
+
+    public Response getLendingAnalysisSummary(String jobId) {
+        ObjectNode analysis = requireJobResult(jobId, "LENDING_ANALYSIS");
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("JobStatus", "SUCCEEDED");
+        root.set("DocumentMetadata", analysis.path("DocumentMetadata").deepCopy());
+        ObjectNode summary = root.putObject("Summary");
+        ObjectNode group = summary.putArray("DocumentGroups").addObject();
+        group.put("Type", "UNCLASSIFIED");
+        ObjectNode split = group.putArray("SplitDocuments").addObject();
+        split.put("Index", 1);
+        split.putArray("Pages").add(1);
+        group.putArray("DetectedSignatures");
+        group.putArray("UndetectedSignatures");
+        summary.putArray("UndetectedDocumentTypes");
+        root.put("AnalyzeLendingModelVersion", MODEL_VERSION);
+        return Response.ok(root).build();
+    }
+
+    private Response started(String jobType, ObjectNode result) {
+        String jobId = UUID.randomUUID().toString().replace("-", "");
+        storeJob(jobId, jobType, result);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("JobId", jobId);
         return Response.ok(root).build();
     }
     /**
@@ -97,8 +236,15 @@ public class TextractService implements Resettable {
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_StartDocumentTextDetection.html
      */
     public Response startDocumentTextDetection() {
+        return startDocumentTextDetection(List.of());
+    }
+
+    /** StartDocumentTextDetection for the document with these mock keys. */
+    public Response startDocumentTextDetection(List<String> keys) {
         String jobId = UUID.randomUUID().toString();
-        storeJob(jobId, "TEXT_DETECTION", buildTextDetectionResult());
+        ObjectNode result = textDetection(keys);
+        result.put("JobStatus", "SUCCEEDED");
+        storeJob(jobId, "TEXT_DETECTION", result);
         ObjectNode root = objectMapper.createObjectNode();
         root.put("JobId", jobId);
         return Response.ok(root).build();
@@ -115,8 +261,15 @@ public class TextractService implements Resettable {
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_StartDocumentAnalysis.html
      */
     public Response startDocumentAnalysis() {
+        return startDocumentAnalysis(List.of());
+    }
+
+    /** StartDocumentAnalysis for the document with these mock keys. */
+    public Response startDocumentAnalysis(List<String> keys) {
         String jobId = UUID.randomUUID().toString();
-        storeJob(jobId, "DOCUMENT_ANALYSIS", buildDocumentAnalysisResult());
+        ObjectNode result = documentAnalysis(keys);
+        result.put("JobStatus", "SUCCEEDED");
+        storeJob(jobId, "DOCUMENT_ANALYSIS", result);
         ObjectNode root = objectMapper.createObjectNode();
         root.put("JobId", jobId);
         return Response.ok(root).build();
@@ -127,22 +280,6 @@ public class TextractService implements Resettable {
      */
     public Response getDocumentAnalysis(String jobId) {
         return Response.ok(requireJobResult(jobId, "DOCUMENT_ANALYSIS")).build();
-    }
-    private ObjectNode buildTextDetectionResult() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("JobStatus", "SUCCEEDED");
-        root.set("DocumentMetadata", buildDocumentMetadata(1));
-        root.set("Blocks", buildStubBlocks());
-        root.put("DetectDocumentTextModelVersion", MODEL_VERSION);
-        return root;
-    }
-    private ObjectNode buildDocumentAnalysisResult() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("JobStatus", "SUCCEEDED");
-        root.set("DocumentMetadata", buildDocumentMetadata(1));
-        root.set("Blocks", buildStubBlocks());
-        root.put("AnalyzeDocumentModelVersion", MODEL_VERSION);
-        return root;
     }
     private void storeJob(String jobId, String jobType, ObjectNode result) {
         sweepExpired();

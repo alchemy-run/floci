@@ -502,6 +502,105 @@ public class RedshiftContainerManager {
         restoreSnapshot(accountId, clusterIdentifier, username, "dev", sqlDumpFile);
     }
 
+    /** Where {@link #restoreTable} puts one table of a dump. */
+    public record TableRestore(String sourceSchema, String sourceTable, String targetDatabase, String targetSchema,
+                               String newTable) {}
+
+    /**
+     * Restores one table of {@code sqlDumpFile} into a live database under a new name, the way
+     * Redshift's table restore does: the dump is replayed into a scratch database, the table is moved
+     * to the target schema and renamed there, and only that table (with the sequences it owns) is
+     * dumped again and replayed into {@code restore.targetDatabase()}. The scratch database is always
+     * dropped. Fails with a message the caller can report when the table is not in the dump or the
+     * target table already exists.
+     */
+    public void restoreTable(String accountId, String clusterIdentifier, String username, Path sqlDumpFile,
+                             TableRestore restore) {
+        RedshiftContainerHandle handle = requireHandle(accountId, clusterIdentifier);
+        if (sqlDumpFile == null || !Files.exists(sqlDumpFile)) {
+            throw new AwsException("InternalFailure", "The data of the snapshot is no longer available.", 500);
+        }
+        String user = userOrDefault(username);
+        String scratch = "floci_restore_" + Long.toHexString(System.nanoTime());
+        String staging = "floci_restore_out";
+        String containerId = handle.getContainerId();
+        String target = quoteIdent(restore.targetSchema()) + "." + quoteIdent(restore.newTable());
+        try {
+            RetryingTarCopier.copyHostResource(lifecycleManager.getDockerClient(), containerId, "/tmp",
+                    sqlDumpFile.toString(), RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, retryBackoffMillis);
+            String exists = psqlValue(containerId, user, restore.targetDatabase(),
+                    "SELECT to_regclass(" + quoteLiteral(target) + ") IS NOT NULL");
+            if ("t".equals(exists)) {
+                throw new AwsException("ValidationException", "The table " + restore.targetSchema() + "."
+                        + restore.newTable() + " already exists in database " + restore.targetDatabase() + ".", 400);
+            }
+            exec(containerId, new String[]{"createdb", "-U", user, scratch}, 30, "create the scratch database");
+            try {
+                // Lenient on purpose: only the one table has to come back, not every object of the dump.
+                exec(containerId, new String[]{"psql", "-q", "-U", user, "-d", scratch, "-f",
+                        "/tmp/" + sqlDumpFile.getFileName()}, 60, "replay the snapshot");
+                String source = quoteIdent(restore.sourceSchema()) + "." + quoteIdent(restore.sourceTable());
+                if (!"t".equals(psqlValue(containerId, user, scratch,
+                        "SELECT to_regclass(" + quoteLiteral(source) + ") IS NOT NULL"))) {
+                    throw new AwsException("ValidationException", "The table " + restore.sourceSchema() + "."
+                            + restore.sourceTable() + " is not in the snapshot.", 400);
+                }
+                String move = "CREATE SCHEMA " + staging + "; ALTER TABLE " + source + " SET SCHEMA " + staging
+                        + "; ALTER TABLE " + staging + "." + quoteIdent(restore.sourceTable()) + " RENAME TO "
+                        + quoteIdent(restore.newTable()) + "; DROP SCHEMA IF EXISTS "
+                        + quoteIdent(restore.targetSchema()) + " CASCADE; ALTER SCHEMA " + staging + " RENAME TO "
+                        + quoteIdent(restore.targetSchema()) + ";";
+                exec(containerId, new String[]{"psql", "-U", user, "-d", scratch, "-v", "ON_ERROR_STOP=1",
+                        "-c", move}, 30, "stage the table");
+                exec(containerId, new String[]{"pg_dump", "-U", user, "--no-owner", "--no-privileges", "-t", target,
+                        scratch, "-f", "/tmp/table-restore.sql"}, 30, "dump the table");
+            } finally {
+                try {
+                    exec(containerId, new String[]{"dropdb", "-U", user, "--if-exists", scratch}, 30,
+                            "drop the scratch database");
+                } catch (AwsException e) {
+                    LOG.warnv("Could not drop the scratch database {0} of {1}: {2}", scratch, clusterIdentifier,
+                            e.getMessage());
+                }
+            }
+            exec(containerId, new String[]{"psql", "-U", user, "-d", restore.targetDatabase(), "-v", "ON_ERROR_STOP=1",
+                    "-c", "CREATE SCHEMA IF NOT EXISTS " + quoteIdent(restore.targetSchema())}, 30,
+                    "create the target schema");
+            exec(containerId, new String[]{"psql", "-U", user, "-d", restore.targetDatabase(), "-v", "ON_ERROR_STOP=1",
+                    "-1", "-f", "/tmp/table-restore.sql"}, 60, "restore the table");
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorv(e, "Error restoring a table of {0}", clusterIdentifier);
+            throw new AwsException("InternalFailure", "Failed to restore the table: " + e.getMessage(), 500);
+        }
+    }
+
+    private void exec(String containerId, String[] cmd, int timeoutSeconds, String step) {
+        ContainerExec.Result result = execInContainer(containerId, cmd, timeoutSeconds);
+        if (result.exitCode() != 0) {
+            throw new AwsException("InternalFailure", "Could not " + step + ": " + result.summary(), 500);
+        }
+    }
+
+    private String psqlValue(String containerId, String user, String database, String sql) {
+        ContainerExec.Result result = execInContainer(containerId,
+                new String[]{"psql", "-U", user, "-d", database, "-tA", "-c", sql}, 15);
+        if (result.exitCode() != 0) {
+            throw new AwsException("ValidationException", "Could not query database " + database + ": "
+                    + result.summary(), 400);
+        }
+        return result.stdout() == null ? "" : result.stdout().trim();
+    }
+
+    private static String quoteIdent(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    private static String quoteLiteral(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
     public void restoreSnapshot(String accountId, Cluster cluster, Path sqlDumpFile) {
         if (cluster == null) {
             throw new AwsException("InvalidParameterValue", "Cluster cannot be null", 400);

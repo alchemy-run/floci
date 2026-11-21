@@ -49,6 +49,8 @@ public class PricingService {
     private static final Logger LOG = Logger.getLogger(PricingService.class);
 
     static final String DEFAULT_FORMAT_VERSION = "aws_v1";
+    /** The most results any Price List operation returns per page. */
+    private static final int MAX_RESULTS = 100;
     private static final String SERVICES_FILE = "services.json";
     private static final String ATTRIBUTE_VALUES_DIR = "attribute-values";
     private static final String PRODUCTS_DIR = "products";
@@ -185,9 +187,13 @@ public class PricingService {
                                    String nextToken, Integer maxResults) {
         requireNonEmpty(serviceCode, "ServiceCode");
         requireSafePathSegment(serviceCode, "ServiceCode");
+        // AWS answers an unknown service code with no products, not an error.
         if (!servicesByCode.containsKey(serviceCode)) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid ServiceCode: " + serviceCode, 400);
+            paginate(List.of(), nextToken, maxResults);
+            ObjectNode empty = objectMapper.createObjectNode();
+            empty.put("FormatVersion", resolveFormatVersion(formatVersion));
+            empty.putArray("PriceList");
+            return empty;
         }
 
         String region = resolveRegionFromFilters(filters);
@@ -366,11 +372,15 @@ public class PricingService {
     }
 
     private static <T> Page<T> paginate(List<T> items, String nextToken, Integer maxResults) {
+        if (maxResults != null && (maxResults < 1 || maxResults > MAX_RESULTS)) {
+            throw new AwsException("InvalidParameterException",
+                    "MaxResults must be between 1 and " + MAX_RESULTS + ".", 400);
+        }
         int start = decodeToken(nextToken);
         if (start < 0 || start > items.size()) {
             throw new AwsException("ExpiredNextTokenException", "Invalid NextToken.", 400);
         }
-        int limit = (maxResults == null || maxResults <= 0) ? items.size() : Math.min(maxResults, items.size() - start);
+        int limit = maxResults == null ? items.size() : Math.min(maxResults, items.size() - start);
         int end = Math.min(items.size(), start + limit);
         List<T> sliced = items.subList(start, end);
         String next = (end < items.size()) ? encodeToken(end) : null;

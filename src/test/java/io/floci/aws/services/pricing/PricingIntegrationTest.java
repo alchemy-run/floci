@@ -162,17 +162,52 @@ class PricingIntegrationTest {
     }
 
     @Test
-    void getProducts_unknownServiceCode_returns400() {
+    void getProducts_unknownServiceCode_returnsAnEmptyPriceList() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "AWSPriceListService.GetProducts")
             .header("Authorization", AUTH_HEADER)
-            .body("{\"ServiceCode\":\"AmazonBogus\"}")
+            .body("{\"ServiceCode\":\"AmazonBogus\",\"MaxResults\":1}")
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("InvalidParameterException"));
+            .statusCode(200)
+            .body("PriceList", hasSize(0));
+    }
+
+    @Test
+    void everyOperation_rejectsMaxResultsOutsideOneToOneHundred() {
+        for (String body : new String[]{
+                "AWSPriceListService.GetProducts|{\"ServiceCode\":\"AmazonEC2\",\"MaxResults\":0}",
+                "AWSPriceListService.GetProducts|{\"ServiceCode\":\"AmazonEC2\",\"MaxResults\":101}",
+                "AWSPriceListService.DescribeServices|{\"MaxResults\":0}",
+                "AWSPriceListService.GetAttributeValues|{\"ServiceCode\":\"AmazonEC2\",\"AttributeName\":\"tenancy\",\"MaxResults\":0}"}) {
+            String[] parts = body.split("\\|", 2);
+            given()
+                .contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", parts[0])
+                .header("Authorization", AUTH_HEADER)
+                .body(parts[1])
+            .when()
+                .post("/")
+            .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"));
+        }
+    }
+
+    @Test
+    void getAttributeValues_listsEc2VolumeTypes() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSPriceListService.GetAttributeValues")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"ServiceCode\":\"AmazonEC2\",\"AttributeName\":\"volumeType\",\"MaxResults\":25}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AttributeValues.Value", hasItems("General Purpose", "Provisioned IOPS"));
     }
 
     @Test

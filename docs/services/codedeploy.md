@@ -65,6 +65,7 @@ existing application storage and region visibility.
 | `BatchGetDeployments` | Returns info for multiple deployments |
 | `ListDeploymentTargets` | Returns target IDs for a deployment |
 | `BatchGetDeploymentTargets` | Returns target details including lifecycle event status |
+| `GetDeploymentTarget` | Returns one target of a deployment |
 | `PutLifecycleEventHookExecutionStatus` | Called by lifecycle hook Lambda to report `Succeeded` or `Failed`; failure triggers auto-rollback |
 
 ### Tagging

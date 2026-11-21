@@ -3,6 +3,7 @@ package io.floci.aws.services.acm;
 import io.floci.aws.config.FlociCertificateAuthority;
 import io.floci.aws.services.acm.model.KeyAlgorithm;
 import io.floci.aws.testing.AcmDnsRecordValidationProfile;
+import io.floci.aws.testing.PrivateCaFixture;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -25,6 +26,16 @@ import static org.hamcrest.Matchers.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmImportExportTest {
+
+    private static String privateCa;
+
+    /** An ACTIVE AWS Private CA the class's private certificates are signed by. */
+    private static synchronized String privateCa() {
+        if (privateCa == null) {
+            privateCa = PrivateCaFixture.activeRoot("acm-tests.floci.test");
+        }
+        return privateCa;
+    }
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
 
@@ -200,9 +211,9 @@ class AcmImportExportTest {
             .body("""
                 {
                     "DomainName": "exportable.example.com",
-                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+                    "CertificateAuthorityArn": "PRIVATE_CA_ARN"
                 }
-                """)
+                """.replace("PRIVATE_CA_ARN", privateCa()))
         .when()
             .post("/")
         .then()
@@ -215,7 +226,8 @@ class AcmImportExportTest {
     @Order(11)
     void exportCertificate() {
         String passphrase = Base64.getEncoder().encodeToString("testpassphrase".getBytes());
-        String localCa = given().when().get("/_floci/ca.pem").then().statusCode(200).extract().asString();
+        String issuingCa = PrivateCaFixture.call("GetCertificateAuthorityCertificate",
+                "{\"CertificateAuthorityArn\":\"" + privateCa() + "\"}").statusCode(200).extract().path("Certificate");
 
         given()
             .header("X-Amz-Target", "CertificateManager.ExportCertificate")
@@ -231,7 +243,7 @@ class AcmImportExportTest {
         .then()
             .statusCode(200)
             .body("Certificate", startsWith("-----BEGIN CERTIFICATE-----"))
-            .body("CertificateChain", equalTo(localCa))
+            .body("CertificateChain", equalTo(issuingCa))
             .body("PrivateKey", startsWith("-----BEGIN ENCRYPTED PRIVATE KEY-----"));
     }
 

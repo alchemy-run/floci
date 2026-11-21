@@ -1,0 +1,199 @@
+# OpenSearch Ingestion's pipeline blueprints: ready-made configurations for common sources and sinks.
+- BlueprintName: AWS-LogAggregationWithConditionalRouting
+  DisplayName: Log aggregation with conditional routing
+  DisplayDescription: Receive logs over HTTP, parse them with grok, and route errors and the rest to separate indexes.
+  Service: Amazon OpenSearch Service
+  UseCase: Log analytics
+  PipelineConfigurationBody: |
+    version: "2"
+    log-pipeline:
+      source:
+        http:
+          path: "/${pipelineName}/logs"
+      processor:
+        - grok:
+            match:
+              log: ["%{COMMONAPACHELOG}"]
+      route:
+        - errors: '/response >= 400'
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index: "error-logs"
+            routes: [errors]
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index: "application-logs"
+- BlueprintName: AWS-ApacheLogPipeline
+  DisplayName: Apache log pipeline
+  DisplayDescription: Parse Apache access logs received over HTTP and index them.
+  Service: Amazon OpenSearch Service
+  UseCase: Log analytics
+  PipelineConfigurationBody: |
+    version: "2"
+    apache-log-pipeline:
+      source:
+        http:
+          path: "/${pipelineName}/logs"
+      processor:
+        - grok:
+            match:
+              log: ["%{COMMONAPACHELOG_DATATYPED}"]
+        - date:
+            match:
+              - key: timestamp
+                patterns: ["dd/MMM/yyyy:HH:mm:ss Z"]
+            destination: "@timestamp"
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index: "apache-logs"
+- BlueprintName: AWS-OtelLogsPipeline
+  DisplayName: OpenTelemetry logs
+  DisplayDescription: Receive OpenTelemetry logs and index them.
+  Service: Amazon OpenSearch Service
+  UseCase: Observability
+  PipelineConfigurationBody: |
+    version: "2"
+    otel-logs-pipeline:
+      source:
+        otel_logs_source:
+          path: "/${pipelineName}/v1/logs"
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index: "otel-logs"
+- BlueprintName: AWS-TraceAnalyticsPipeline
+  DisplayName: Trace analytics
+  DisplayDescription: Receive OpenTelemetry traces, build the service map, and index raw spans.
+  Service: Amazon OpenSearch Service
+  UseCase: Trace analytics
+  PipelineConfigurationBody: |
+    version: "2"
+    entry-pipeline:
+      source:
+        otel_trace_source:
+          path: "/${pipelineName}/v1/traces"
+      sink:
+        - pipeline:
+            name: "span-pipeline"
+        - pipeline:
+            name: "service-map-pipeline"
+    span-pipeline:
+      source:
+        pipeline:
+          name: "entry-pipeline"
+      processor:
+        - otel_traces:
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index_type: "trace-analytics-raw"
+    service-map-pipeline:
+      source:
+        pipeline:
+          name: "entry-pipeline"
+      processor:
+        - service_map:
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index_type: "trace-analytics-service-map"
+- BlueprintName: AWS-S3ToOpenSearchPipeline
+  DisplayName: Amazon S3 to OpenSearch
+  DisplayDescription: Read new S3 objects announced on an SQS queue and index their lines.
+  Service: Amazon S3
+  UseCase: Log analytics
+  PipelineConfigurationBody: |
+    version: "2"
+    s3-log-pipeline:
+      source:
+        s3:
+          notification_type: "sqs"
+          codec:
+            newline:
+          sqs:
+            queue_url: "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue"
+          compression: "none"
+          aws:
+            region: "us-east-1"
+            sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            index: "s3-logs"
+- BlueprintName: AWS-HttpToS3Pipeline
+  DisplayName: HTTP to Amazon S3
+  DisplayDescription: Receive events over HTTP and archive them to S3 as newline-delimited JSON.
+  Service: Amazon S3
+  UseCase: Archival
+  PipelineConfigurationBody: |
+    version: "2"
+    archive-pipeline:
+      source:
+        http:
+          path: "/${pipelineName}/events"
+      sink:
+        - s3:
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"
+            bucket: "my-archive-bucket"
+            threshold:
+              event_collect_timeout: "60s"
+            codec:
+              ndjson:
+- BlueprintName: AWS-DynamoDBChangeDataCapturePipeline
+  DisplayName: DynamoDB change data capture
+  DisplayDescription: Load a DynamoDB table's export and stream its changes into an index.
+  Service: Amazon DynamoDB
+  UseCase: Search
+  PipelineConfigurationBody: |
+    version: "2"
+    dynamodb-pipeline:
+      source:
+        dynamodb:
+          acknowledgments: true
+          tables:
+            - table_arn: "arn:aws:dynamodb:us-east-1:123456789012:table/MyTable"
+              stream:
+                start_position: "LATEST"
+              export:
+                s3_bucket: "my-export-bucket"
+                s3_region: "us-east-1"
+          aws:
+            sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+            region: "us-east-1"
+      sink:
+        - opensearch:
+            hosts: ["https://search-mydomain.us-east-1.es.amazonaws.com"]
+            index: "table-index"
+            index_type: custom
+            document_id: '${getMetadata("primary_key")}'
+            action: '${getMetadata("opensearch_action")}'
+            document_version: '${getMetadata("document_version")}'
+            document_version_type: "external"
+            aws:
+              sts_role_arn: "arn:aws:iam::123456789012:role/Example-Role"
+              region: "us-east-1"

@@ -26,9 +26,24 @@
         ],
         "DetectDocumentTextModelVersion": "1.0"
       }
+    },
+    "sha256:a81e5965a9b687bddb7c7700ae20d1ccbd7f0d17dbb6eb10b6aa958c64de5bfe": {
+      "DetectDocumentText": {
+        "DocumentMetadata": { "Pages": 1 },
+        "Blocks": [
+          { "BlockType": "LINE", "Id": "hashed-line-1", "Confidence": 99.0, "Text": "HASHED" }
+        ],
+        "DetectDocumentTextModelVersion": "1.0"
+      }
     }
   },
   "rekognition": {
+    "sha256:2096fd12c84360f0b35e0f26e2ca80f335739f4a5e6a9dbe520ac5f2c5ed3676": {
+      "DetectLabels": {
+        "Labels": [ { "Name": "Text", "Confidence": 99.1 } ],
+        "LabelModelVersion": "3.0"
+      }
+    },
     "mock-bucket/cat.jpg": {
       "DetectLabels": {
         "Labels": [
@@ -45,6 +60,17 @@
         "TranslatedText": "Hola mundo",
         "SourceLanguageCode": "en",
         "TargetLanguageCode": "es"
+      }
+    }
+  },
+  "comprehendmedical": {
+    "Mocked clinical note.": {
+      "DetectPHI": {
+        "Entities": [
+          { "Id": 0, "BeginOffset": 0, "EndOffset": 6, "Score": 0.99, "Text": "Mocked",
+            "Category": "PROTECTED_HEALTH_INFORMATION", "Type": "NAME", "Traits": [] }
+        ],
+        "ModelVersion": "mock"
       }
     }
   }

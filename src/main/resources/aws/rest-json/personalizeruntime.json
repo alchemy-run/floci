@@ -1,0 +1,43 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "personalizeruntime",
+ "apiVersion": "2018-05-22",
+ "operations": {
+  "GetActionRecommendations": {
+   "method": "POST",
+   "requestUri": "/action-recommendations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPersonalizedRanking": {
+   "method": "POST",
+   "requestUri": "/personalize-ranking",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetRecommendations": {
+   "method": "POST",
+   "requestUri": "/recommendations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

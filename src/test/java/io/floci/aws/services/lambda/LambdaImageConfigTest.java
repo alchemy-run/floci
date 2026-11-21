@@ -239,6 +239,8 @@ class LambdaImageConfigTest {
             when(config.services()).thenReturn(services);
             when(services.lambda()).thenReturn(lambda);
             when(lambda.dockerNetwork()).thenReturn(Optional.empty());
+            // X-Ray is off, so the launcher adds no tracing environment.
+            lenient().when(services.xray()).thenReturn(mock(EmulatorConfig.XRayServiceConfig.class));
             when(config.docker()).thenReturn(docker);
             when(docker.logMaxSize()).thenReturn("10m");
             when(docker.logMaxFile()).thenReturn("3");

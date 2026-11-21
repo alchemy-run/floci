@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -103,6 +104,15 @@ class RequestConstraintCheckTest {
                 + "\"count\":10,\"labels\":{\"ab\":\"cd\"},\"kind\":\"B\",\"unmodeled\":true,\"items2\":null}")));
         // A null member is treated as absent, as the walker found it before it moved here.
         assertDoesNotThrow(() -> CHECK.check("Put", json("{\"name\":\"abc\",\"count\":null}")));
+    }
+
+    @Test
+    void aLenientShapeSkipsItsLengthAndPatternButNotItsType() {
+        RequestConstraintCheck lenient = CHECK.withLenientShapes(Set.of("Name"));
+        assertDoesNotThrow(() -> lenient.check("Put", json("{\"name\":\"subnet-default-us-east-1-a\"}")));
+        AwsException wrongType = assertThrows(AwsException.class, () -> lenient.check("Put", json("{\"name\":7}")));
+        assertEquals("type Put.name string", wrongType.getMessage());
+        assertEquals("bounds Put.count integer 1..10 0", violation("{\"name\":\"ab\",\"count\":0}"));
     }
 
     @Test

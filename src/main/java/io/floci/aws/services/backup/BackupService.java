@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
@@ -85,15 +86,22 @@ public class BackupService {
         return vaultLocks.computeIfAbsent(vaultKey, k -> new Object());
     }
 
+    private final BackupIndexes indexes;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "backup-job-scheduler");
         t.setDaemon(true);
         return t;
     });
 
-    @Inject
     public BackupService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
                          ObjectMapper objectMapper, SnsService snsService) {
+        this(storageFactory, config, regionResolver, objectMapper, snsService, null);
+    }
+
+    @Inject
+    public BackupService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                         ObjectMapper objectMapper, SnsService snsService, BackupIndexes indexes) {
+        this.indexes = indexes;
         this.vaultStore     = storageFactory.create("backup", "backup-vaults.json",     new TypeReference<>() {});
         this.planStore      = storageFactory.create("backup", "backup-plans.json",      new TypeReference<>() {});
         this.selectionStore = storageFactory.create("backup", "backup-selections.json", new TypeReference<>() {});
@@ -763,6 +771,19 @@ public class BackupService {
 
     public BackupJob startBackupJob(String vaultName, String resourceArn, String iamRoleArn,
                                      Lifecycle lifecycle, String region) {
+        return startBackupJob(vaultName, resourceArn, iamRoleArn, lifecycle, null, null, region);
+    }
+
+    /**
+     * Starts a backup job. With {@code index} {@code ENABLED}, its recovery point is indexed for AWS Backup
+     * Search when the job completes; only S3 and EBS backups can be indexed.
+     */
+    public BackupJob startBackupJob(String vaultName, String resourceArn, String iamRoleArn, Lifecycle lifecycle,
+                                    String index, Map<String, String> recoveryPointTags, String region) {
+        if ("ENABLED".equals(index) && !BackupIndexes.indexable(inferResourceType(resourceArn))) {
+            throw new AwsException("InvalidParameterValueException", "Only S3 and EBS backups can be indexed; "
+                    + resourceArn + " is a " + inferResourceType(resourceArn) + " resource.", 400);
+        }
         BackupVault vault = describeBackupVault(vaultName, region);
         if (resourceArn == null || resourceArn.isBlank() || iamRoleArn == null || iamRoleArn.isBlank()) {
             throw new AwsException("MissingParameterValueException", "ResourceArn and IamRoleArn are required", 400);
@@ -785,6 +806,8 @@ public class BackupService {
         job.setCreationDate(now);
         job.setExpectedCompletionDate(now + jobCompletionDelaySeconds);
         job.setStartBy(now + 3600L);
+        job.setIndex(index);
+        job.setRecoveryPointTags(recoveryPointTags);
         String accountId = regionResolver.getAccountId();
         job.setAccountId(accountId);
         jobStore.put(jobId, job);
@@ -878,8 +901,83 @@ public class BackupService {
                 }
             }
             recoveryStore.delete(recoveryPointArn);
+            if (indexes != null) {
+                indexes.delete(recoveryPointArn);
+            }
             decrementVaultCount(vaultName, region);
         }
+    }
+
+    // ── Backup indexes ─────────────────────────────────────────────────────────
+
+    /**
+     * Turns a recovery point's backup index on (it's built now) or off (it's deleted). Returns the index's
+     * status: {@code ACTIVE} or {@code FAILED} once built, {@code DELETING} when turned off.
+     */
+    public String updateRecoveryPointIndex(String vaultName, String recoveryPointArn, String index, String region) {
+        synchronized (lockFor(vaultKey(region, vaultName))) {
+            RecoveryPoint rp = describeRecoveryPoint(vaultName, recoveryPointArn, region);
+            if (!BackupIndexes.indexable(rp.getResourceType())) {
+                throw new AwsException("InvalidParameterValueException", "Only S3 and EBS recovery points can be "
+                        + "indexed; " + recoveryPointArn + " is a " + rp.getResourceType() + " backup.", 400);
+            }
+            if (!"COMPLETED".equals(rp.getStatus())) {
+                throw new AwsException("InvalidRequestException", "The recovery point is " + rp.getStatus()
+                        + "; only a completed recovery point can be indexed.", 400);
+            }
+            if ("DISABLED".equals(index)) {
+                indexes.delete(recoveryPointArn);
+                rp.setIndexStatus(null);
+                rp.setIndexStatusMessage(null);
+                recoveryStore.put(recoveryPointArn, rp);
+                return "DELETING";
+            }
+            Map<String, String> tags = indexes.get(recoveryPointArn).map(i -> objectMapper.convertValue(
+                    i.path("Tags"), new TypeReference<Map<String, String>>() {})).orElse(null);
+            indexes.build(rp, tags);
+            recoveryStore.put(recoveryPointArn, rp);
+            return rp.getIndexStatus();
+        }
+    }
+
+    public ObjectNode recoveryPointIndex(String vaultName, String recoveryPointArn, String region) {
+        describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        ObjectNode index = indexes.get(recoveryPointArn).orElseThrow(() -> new AwsException(
+                "ResourceNotFoundException", "The recovery point " + recoveryPointArn + " has no backup index.", 400))
+                .deepCopy();
+        index.remove("Items");
+        index.remove("Tags");
+        index.remove("BackupVaultName");
+        index.remove("IamRoleArn");
+        index.remove("BackupCreationDate");
+        index.remove("ResourceType");
+        return index;
+    }
+
+    /** Indexed recovery points of the Region, with the API's filters. */
+    public List<ObjectNode> listIndexedRecoveryPoints(String sourceResourceArn, Long createdBefore, Long createdAfter,
+                                                      String resourceType, String indexStatus, String region) {
+        List<ObjectNode> out = new ArrayList<>();
+        for (ObjectNode index : indexes.all(region)) {
+            long created = index.path("BackupCreationDate").asLong();
+            if (sourceResourceArn != null && !sourceResourceArn.equals(index.path("SourceResourceArn").asText())
+                    || createdBefore != null && created >= createdBefore
+                    || createdAfter != null && created <= createdAfter
+                    || resourceType != null && !resourceType.equals(index.path("ResourceType").asText())
+                    || indexStatus != null && !indexStatus.equals(index.path("IndexStatus").asText())) {
+                continue;
+            }
+            ObjectNode item = objectMapper.createObjectNode();
+            for (String field : List.of("RecoveryPointArn", "SourceResourceArn", "IamRoleArn", "BackupCreationDate",
+                    "ResourceType", "IndexCreationDate", "IndexStatus", "IndexStatusMessage", "BackupVaultArn")) {
+                if (index.has(field)) {
+                    item.set(field, index.get(field));
+                }
+            }
+            out.add(item);
+        }
+        out.sort(Comparator.comparing(i -> i.path("BackupCreationDate").asLong()));
+        return out;
     }
 
     // ── Tags ───────────────────────────────────────────────────────────────────
@@ -963,6 +1061,9 @@ public class BackupService {
                     rp.setBackupSizeInBytes(0L);
                     rp.setStorageClass("WARM");
                     rp.setEncrypted(false);
+                    if (indexes != null && "ENABLED".equals(job.getIndex())) {
+                        indexes.build(rp, job.getRecoveryPointTags());
+                    }
                     recoveryStore.put(rpArn, rp);
                     currentVault.setNumberOfRecoveryPoints(currentVault.getNumberOfRecoveryPoints() + 1);
                 } else {

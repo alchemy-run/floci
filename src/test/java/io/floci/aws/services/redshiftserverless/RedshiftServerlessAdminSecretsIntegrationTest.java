@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -81,7 +82,7 @@ class RedshiftServerlessAdminSecretsIntegrationTest {
         cleanup.register(secrets::close);
         when(runtime.generatePassword()).thenReturn(GENERATED_PASSWORD);
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
     }
 

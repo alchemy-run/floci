@@ -1,0 +1,405 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_repostspace_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchAddChannelRoleToAccessors": "BatchAddChannelRoleToAccessorsInput",
+    "BatchAddRole": "BatchAddRoleInput",
+    "BatchRemoveChannelRoleFromAccessors": "BatchRemoveChannelRoleFromAccessorsInput",
+    "BatchRemoveRole": "BatchRemoveRoleInput",
+    "CreateChannel": "CreateChannelInput",
+    "CreateSpace": "CreateSpaceInput",
+    "DeleteSpace": "DeleteSpaceInput",
+    "DeregisterAdmin": "DeregisterAdminInput",
+    "GetChannel": "GetChannelInput",
+    "GetSpace": "GetSpaceInput",
+    "ListChannels": "ListChannelsInput",
+    "ListSpaces": "ListSpacesInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RegisterAdmin": "RegisterAdminInput",
+    "SendInvites": "SendInvitesInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateChannel": "UpdateChannelInput",
+    "UpdateSpace": "UpdateSpaceInput"
+  },
+  "shapes": {
+    "AccessorId": {
+      "type": "string"
+    },
+    "AccessorIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 1000,
+      "member": "AccessorId"
+    },
+    "AdminId": {
+      "type": "string"
+    },
+    "AllowedDomainsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "EmailDomain"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "BatchAddChannelRoleToAccessorsInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "channelId",
+        "accessorIds",
+        "channelRole"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "channelId": "ChannelId",
+        "accessorIds": "AccessorIdList",
+        "channelRole": "ChannelRole"
+      }
+    },
+    "BatchAddRoleInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "accessorIds",
+        "role"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "accessorIds": "AccessorIdList",
+        "role": "Role"
+      }
+    },
+    "BatchRemoveChannelRoleFromAccessorsInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "channelId",
+        "accessorIds",
+        "channelRole"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "channelId": "ChannelId",
+        "accessorIds": "AccessorIdList",
+        "channelRole": "ChannelRole"
+      }
+    },
+    "BatchRemoveRoleInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "accessorIds",
+        "role"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "accessorIds": "AccessorIdList",
+        "role": "Role"
+      }
+    },
+    "ChannelDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "ChannelId": {
+      "type": "string",
+      "min": 24,
+      "max": 24
+    },
+    "ChannelName": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ChannelRole": {
+      "type": "string",
+      "enum": [
+        "ASKER",
+        "EXPERT",
+        "MODERATOR",
+        "SUPPORTREQUESTOR"
+      ]
+    },
+    "CreateChannelInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "channelName"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "channelName": "ChannelName",
+        "channelDescription": "ChannelDescription"
+      }
+    },
+    "CreateSpaceInput": {
+      "type": "structure",
+      "required": [
+        "name",
+        "subdomain",
+        "tier"
+      ],
+      "members": {
+        "name": "SpaceName",
+        "subdomain": "SpaceSubdomain",
+        "tier": "TierLevel",
+        "description": "SpaceDescription",
+        "userKMSKey": "KMSKey",
+        "tags": "Tags",
+        "roleArn": "Arn",
+        "supportedEmailDomains": "SupportedEmailDomainsParameters"
+      }
+    },
+    "DeleteSpaceInput": {
+      "type": "structure",
+      "required": [
+        "spaceId"
+      ],
+      "members": {
+        "spaceId": "SpaceId"
+      }
+    },
+    "DeregisterAdminInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "adminId"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "adminId": "AdminId"
+      }
+    },
+    "EmailDomain": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "FeatureEnableParameter": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "GetChannelInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "channelId"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "channelId": "ChannelId"
+      }
+    },
+    "GetSpaceInput": {
+      "type": "structure",
+      "required": [
+        "spaceId"
+      ],
+      "members": {
+        "spaceId": "SpaceId"
+      }
+    },
+    "InviteBody": {
+      "type": "string",
+      "min": 1,
+      "max": 600
+    },
+    "InviteTitle": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "KMSKey": {
+      "type": "string"
+    },
+    "ListChannelsInput": {
+      "type": "structure",
+      "required": [
+        "spaceId"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "nextToken": "String",
+        "maxResults": "ListChannelsLimit"
+      }
+    },
+    "ListChannelsLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListSpacesInput": {
+      "type": "structure",
+      "members": {
+        "nextToken": "String",
+        "maxResults": "ListSpacesLimit"
+      }
+    },
+    "ListSpacesLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "RegisterAdminInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "adminId"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "adminId": "AdminId"
+      }
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "EXPERT",
+        "MODERATOR",
+        "ADMINISTRATOR",
+        "SUPPORTREQUESTOR"
+      ]
+    },
+    "SendInvitesInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "accessorIds",
+        "title",
+        "body"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "accessorIds": "AccessorIdList",
+        "title": "InviteTitle",
+        "body": "InviteBody"
+      }
+    },
+    "SpaceDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "SpaceId": {
+      "type": "string"
+    },
+    "SpaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 30
+    },
+    "SpaceSubdomain": {
+      "type": "string",
+      "min": 1,
+      "max": 63
+    },
+    "String": {
+      "type": "string"
+    },
+    "SupportedEmailDomainsParameters": {
+      "type": "structure",
+      "members": {
+        "enabled": "FeatureEnableParameter",
+        "allowedDomains": "AllowedDomainsList"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "(?!aws:)[a-zA-Z+-=._:/]+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "Tags": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TierLevel": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "STANDARD"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateChannelInput": {
+      "type": "structure",
+      "required": [
+        "spaceId",
+        "channelId",
+        "channelName"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "channelId": "ChannelId",
+        "channelName": "ChannelName",
+        "channelDescription": "ChannelDescription"
+      }
+    },
+    "UpdateSpaceInput": {
+      "type": "structure",
+      "required": [
+        "spaceId"
+      ],
+      "members": {
+        "spaceId": "SpaceId",
+        "description": "SpaceDescription",
+        "tier": "TierLevel",
+        "roleArn": "Arn",
+        "supportedEmailDomains": "SupportedEmailDomainsParameters"
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.dns.EmbeddedDnsServer;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
@@ -44,6 +45,9 @@ public class NeptuneService {
     private final StorageBackend<String, NeptuneInstance> instances;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
+    /** Absent when a test builds the service directly, which removes a deleted resource at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private final NeptuneContainerManager containerManager;
     private final NeptuneProxyManager proxyManager;
     private final Set<Integer> usedPorts = ConcurrentHashMap.newKeySet();
@@ -254,6 +258,10 @@ public class NeptuneService {
                 new AwsException("DBClusterNotFoundFault",
                         "Neptune cluster " + id + " not found.", 404));
 
+        // A second delete of a cluster already deleting is accepted and changes nothing.
+        if (deletePending("neptune-cluster:" + regionResolver.getRegion() + ":" + id)) {
+            return;
+        }
         if (cluster.isDeletionProtection()) {
             throw new AwsException("InvalidParameterCombination",
                     "Cannot delete protected Cluster, please disable deletion protection and try again.", 400);
@@ -265,7 +273,24 @@ public class NeptuneService {
 
         cluster.setStatus("deleting");
         putCluster(cluster);
+        // DescribeDBClusters answers deleting until the cluster is gone.
+        afterDeleting("neptune-cluster:" + regionResolver.getRegion() + ":" + id, () -> removeCluster(id, cluster));
+    }
 
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
+    }
+
+    private void removeCluster(String id, NeptuneCluster cluster) {
         String identity = resourceIdentity(cluster);
         proxyManager.stopProxy(identity);
 
@@ -425,16 +450,22 @@ public class NeptuneService {
         NeptuneInstance instance = getStoredInstance(id).orElseThrow(() ->
                 new AwsException("DBInstanceNotFound",
                         "Neptune instance " + id + " not found.", 404));
-
-        String clusterId = instance.getDbClusterIdentifier();
-        NeptuneCluster cluster = getStoredCluster(clusterId).orElse(null);
-        if (cluster != null) {
-            cluster.getDbClusterMembers().remove(id);
-            putCluster(cluster);
+        if (deletePending("neptune-instance:" + regionResolver.getRegion() + ":" + id)) {
+            throw new AwsException("InvalidDBInstanceState", "Instance " + id + " is already being deleted.", 400);
         }
-
-        deleteInstance(instance);
-        LOG.infov("Neptune instance {0} deleted", id);
+        // DescribeDBInstances answers deleting, and the cluster keeps it as a member, until it is gone.
+        instance.setStatus("deleting");
+        putInstance(instance);
+        afterDeleting("neptune-instance:" + regionResolver.getRegion() + ":" + id, () -> {
+            String clusterId = instance.getDbClusterIdentifier();
+            NeptuneCluster cluster = getStoredCluster(clusterId).orElse(null);
+            if (cluster != null) {
+                cluster.getDbClusterMembers().remove(id);
+                putCluster(cluster);
+            }
+            deleteInstance(instance);
+            LOG.infov("Neptune instance {0} deleted", id);
+        });
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────

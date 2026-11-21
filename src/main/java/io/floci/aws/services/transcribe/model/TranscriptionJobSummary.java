@@ -12,7 +12,8 @@ public record TranscriptionJobSummary(
         @JsonProperty("LanguageCode") String languageCode,
         @JsonProperty("CreationTime") Long creationTime,
         @JsonProperty("StartTime") Long startTime,
-        @JsonProperty("CompletionTime") Long completionTime
+        @JsonProperty("CompletionTime") Long completionTime,
+        @JsonProperty("FailureReason") String failureReason
 ) {
     public static TranscriptionJobSummary from(TranscriptionJob job) {
         return new TranscriptionJobSummary(
@@ -21,6 +22,7 @@ public record TranscriptionJobSummary(
                 job.languageCode(),
                 job.creationTime(),
                 job.startTime(),
-                job.completionTime());
+                job.completionTime(),
+                job.failureReason());
     }
 }

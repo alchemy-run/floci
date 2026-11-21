@@ -1,0 +1,1503 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_databrew_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchDeleteRecipeVersion": "BatchDeleteRecipeVersionRequest",
+    "CreateDataset": "CreateDatasetRequest",
+    "CreateProfileJob": "CreateProfileJobRequest",
+    "CreateProject": "CreateProjectRequest",
+    "CreateRecipe": "CreateRecipeRequest",
+    "CreateRecipeJob": "CreateRecipeJobRequest",
+    "CreateRuleset": "CreateRulesetRequest",
+    "CreateSchedule": "CreateScheduleRequest",
+    "DeleteDataset": "DeleteDatasetRequest",
+    "DeleteJob": "DeleteJobRequest",
+    "DeleteProject": "DeleteProjectRequest",
+    "DeleteRecipeVersion": "DeleteRecipeVersionRequest",
+    "DeleteRuleset": "DeleteRulesetRequest",
+    "DeleteSchedule": "DeleteScheduleRequest",
+    "DescribeDataset": "DescribeDatasetRequest",
+    "DescribeJob": "DescribeJobRequest",
+    "DescribeJobRun": "DescribeJobRunRequest",
+    "DescribeProject": "DescribeProjectRequest",
+    "DescribeRecipe": "DescribeRecipeRequest",
+    "DescribeRuleset": "DescribeRulesetRequest",
+    "DescribeSchedule": "DescribeScheduleRequest",
+    "ListDatasets": "ListDatasetsRequest",
+    "ListJobRuns": "ListJobRunsRequest",
+    "ListJobs": "ListJobsRequest",
+    "ListProjects": "ListProjectsRequest",
+    "ListRecipeVersions": "ListRecipeVersionsRequest",
+    "ListRecipes": "ListRecipesRequest",
+    "ListRulesets": "ListRulesetsRequest",
+    "ListSchedules": "ListSchedulesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PublishRecipe": "PublishRecipeRequest",
+    "SendProjectSessionAction": "SendProjectSessionActionRequest",
+    "StartJobRun": "StartJobRunRequest",
+    "StartProjectSession": "StartProjectSessionRequest",
+    "StopJobRun": "StopJobRunRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDataset": "UpdateDatasetRequest",
+    "UpdateProfileJob": "UpdateProfileJobRequest",
+    "UpdateProject": "UpdateProjectRequest",
+    "UpdateRecipe": "UpdateRecipeRequest",
+    "UpdateRecipeJob": "UpdateRecipeJobRequest",
+    "UpdateRuleset": "UpdateRulesetRequest",
+    "UpdateSchedule": "UpdateScheduleRequest"
+  },
+  "shapes": {
+    "AllowedStatisticList": {
+      "type": "list",
+      "min": 1,
+      "member": "AllowedStatistics"
+    },
+    "AllowedStatistics": {
+      "type": "structure",
+      "required": [
+        "Statistics"
+      ],
+      "members": {
+        "Statistics": "StatisticList"
+      }
+    },
+    "AnalyticsMode": {
+      "type": "string",
+      "enum": [
+        "ENABLE",
+        "DISABLE"
+      ]
+    },
+    "Arn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "AssumeControl": {
+      "type": "boolean"
+    },
+    "BatchDeleteRecipeVersionRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RecipeVersions"
+      ],
+      "members": {
+        "Name": "RecipeName",
+        "RecipeVersions": "RecipeVersionList"
+      }
+    },
+    "Bucket": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "BucketOwner": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^[0-9]{12}$"
+    },
+    "CatalogId": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "ClientSessionId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$"
+    },
+    "ColumnName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "ColumnNameList": {
+      "type": "list",
+      "max": 200,
+      "member": "ColumnName"
+    },
+    "ColumnRange": {
+      "type": "integer",
+      "min": 0,
+      "max": 20
+    },
+    "ColumnSelector": {
+      "type": "structure",
+      "members": {
+        "Regex": "ColumnName",
+        "Name": "ColumnName"
+      }
+    },
+    "ColumnSelectorList": {
+      "type": "list",
+      "min": 1,
+      "member": "ColumnSelector"
+    },
+    "ColumnStatisticsConfiguration": {
+      "type": "structure",
+      "required": [
+        "Statistics"
+      ],
+      "members": {
+        "Selectors": "ColumnSelectorList",
+        "Statistics": "StatisticsConfiguration"
+      }
+    },
+    "ColumnStatisticsConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "ColumnStatisticsConfiguration"
+    },
+    "CompressionFormat": {
+      "type": "string",
+      "enum": [
+        "GZIP",
+        "LZ4",
+        "SNAPPY",
+        "BZIP2",
+        "DEFLATE",
+        "LZO",
+        "BROTLI",
+        "ZSTD",
+        "ZLIB"
+      ]
+    },
+    "Condition": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Z\\_]+$"
+    },
+    "ConditionExpression": {
+      "type": "structure",
+      "required": [
+        "Condition",
+        "TargetColumn"
+      ],
+      "members": {
+        "Condition": "Condition",
+        "Value": "ConditionValue",
+        "TargetColumn": "TargetColumn"
+      }
+    },
+    "ConditionExpressionList": {
+      "type": "list",
+      "member": "ConditionExpression"
+    },
+    "ConditionValue": {
+      "type": "string",
+      "max": 1024
+    },
+    "CreateColumn": {
+      "type": "boolean"
+    },
+    "CreateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Input"
+      ],
+      "members": {
+        "Name": "DatasetName",
+        "Format": "InputFormat",
+        "FormatOptions": "FormatOptions",
+        "Input": "Input",
+        "PathOptions": "PathOptions",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateProfileJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetName",
+        "Name",
+        "OutputLocation",
+        "RoleArn"
+      ],
+      "members": {
+        "DatasetName": "DatasetName",
+        "EncryptionKeyArn": "EncryptionKeyArn",
+        "EncryptionMode": "EncryptionMode",
+        "Name": "JobName",
+        "LogSubscription": "LogSubscription",
+        "MaxCapacity": "MaxCapacity",
+        "MaxRetries": "MaxRetries",
+        "OutputLocation": "S3Location",
+        "Configuration": "ProfileConfiguration",
+        "ValidationConfigurations": "ValidationConfigurationList",
+        "RoleArn": "Arn",
+        "Tags": "TagMap",
+        "Timeout": "Timeout",
+        "JobSample": "JobSample"
+      }
+    },
+    "CreateProjectRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetName",
+        "Name",
+        "RecipeName",
+        "RoleArn"
+      ],
+      "members": {
+        "DatasetName": "DatasetName",
+        "Name": "ProjectName",
+        "RecipeName": "RecipeName",
+        "Sample": "Sample",
+        "RoleArn": "Arn",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateRecipeJobRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RoleArn"
+      ],
+      "members": {
+        "DatasetName": "DatasetName",
+        "EncryptionKeyArn": "EncryptionKeyArn",
+        "EncryptionMode": "EncryptionMode",
+        "Name": "JobName",
+        "LogSubscription": "LogSubscription",
+        "MaxCapacity": "MaxCapacity",
+        "MaxRetries": "MaxRetries",
+        "Outputs": "OutputList",
+        "DataCatalogOutputs": "DataCatalogOutputList",
+        "DatabaseOutputs": "DatabaseOutputList",
+        "ProjectName": "ProjectName",
+        "RecipeReference": "RecipeReference",
+        "RoleArn": "Arn",
+        "Tags": "TagMap",
+        "Timeout": "Timeout"
+      }
+    },
+    "CreateRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Steps"
+      ],
+      "members": {
+        "Description": "RecipeDescription",
+        "Name": "RecipeName",
+        "Steps": "RecipeStepList",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "TargetArn",
+        "Rules"
+      ],
+      "members": {
+        "Name": "RulesetName",
+        "Description": "RulesetDescription",
+        "TargetArn": "Arn",
+        "Rules": "RuleList",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "CronExpression",
+        "Name"
+      ],
+      "members": {
+        "JobNames": "JobNameList",
+        "CronExpression": "CronExpression",
+        "Tags": "TagMap",
+        "Name": "ScheduleName"
+      }
+    },
+    "CronExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "CsvOptions": {
+      "type": "structure",
+      "members": {
+        "Delimiter": "Delimiter",
+        "HeaderRow": "HeaderRow"
+      }
+    },
+    "CsvOutputOptions": {
+      "type": "structure",
+      "members": {
+        "Delimiter": "Delimiter"
+      }
+    },
+    "DataCatalogInputDefinition": {
+      "type": "structure",
+      "required": [
+        "DatabaseName",
+        "TableName"
+      ],
+      "members": {
+        "CatalogId": "CatalogId",
+        "DatabaseName": "DatabaseName",
+        "TableName": "TableName",
+        "TempDirectory": "S3Location"
+      }
+    },
+    "DataCatalogOutput": {
+      "type": "structure",
+      "required": [
+        "DatabaseName",
+        "TableName"
+      ],
+      "members": {
+        "CatalogId": "CatalogId",
+        "DatabaseName": "DatabaseName",
+        "TableName": "TableName",
+        "S3Options": "S3TableOutputOptions",
+        "DatabaseOptions": "DatabaseTableOutputOptions",
+        "Overwrite": "OverwriteOutput"
+      }
+    },
+    "DataCatalogOutputList": {
+      "type": "list",
+      "min": 1,
+      "member": "DataCatalogOutput"
+    },
+    "DatabaseInputDefinition": {
+      "type": "structure",
+      "required": [
+        "GlueConnectionName"
+      ],
+      "members": {
+        "GlueConnectionName": "GlueConnectionName",
+        "DatabaseTableName": "DatabaseTableName",
+        "TempDirectory": "S3Location",
+        "QueryString": "QueryString"
+      }
+    },
+    "DatabaseName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DatabaseOutput": {
+      "type": "structure",
+      "required": [
+        "GlueConnectionName",
+        "DatabaseOptions"
+      ],
+      "members": {
+        "GlueConnectionName": "GlueConnectionName",
+        "DatabaseOptions": "DatabaseTableOutputOptions",
+        "DatabaseOutputMode": "DatabaseOutputMode"
+      }
+    },
+    "DatabaseOutputList": {
+      "type": "list",
+      "min": 1,
+      "member": "DatabaseOutput"
+    },
+    "DatabaseOutputMode": {
+      "type": "string",
+      "enum": [
+        "NEW_TABLE"
+      ]
+    },
+    "DatabaseTableName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DatabaseTableOutputOptions": {
+      "type": "structure",
+      "required": [
+        "TableName"
+      ],
+      "members": {
+        "TempDirectory": "S3Location",
+        "TableName": "DatabaseTableName"
+      }
+    },
+    "DatasetName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DatasetParameter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Type"
+      ],
+      "members": {
+        "Name": "PathParameterName",
+        "Type": "ParameterType",
+        "DatetimeOptions": "DatetimeOptions",
+        "CreateColumn": "CreateColumn",
+        "Filter": "FilterExpression"
+      }
+    },
+    "DatetimeFormat": {
+      "type": "string",
+      "min": 2,
+      "max": 100
+    },
+    "DatetimeOptions": {
+      "type": "structure",
+      "required": [
+        "Format"
+      ],
+      "members": {
+        "Format": "DatetimeFormat",
+        "TimezoneOffset": "TimezoneOffset",
+        "LocaleCode": "LocaleCode"
+      }
+    },
+    "DeleteDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DatasetName"
+      }
+    },
+    "DeleteJobRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "JobName"
+      }
+    },
+    "DeleteProjectRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ProjectName"
+      }
+    },
+    "DeleteRecipeVersionRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RecipeVersion"
+      ],
+      "members": {
+        "Name": "RecipeName",
+        "RecipeVersion": "RecipeVersion"
+      }
+    },
+    "DeleteRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "RulesetName"
+      }
+    },
+    "DeleteScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ScheduleName"
+      }
+    },
+    "Delimiter": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "DescribeDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DatasetName"
+      }
+    },
+    "DescribeJobRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "JobName"
+      }
+    },
+    "DescribeJobRunRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RunId"
+      ],
+      "members": {
+        "Name": "JobName",
+        "RunId": "JobRunId"
+      }
+    },
+    "DescribeProjectRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ProjectName"
+      }
+    },
+    "DescribeRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "RecipeName",
+        "RecipeVersion": "RecipeVersion"
+      }
+    },
+    "DescribeRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "RulesetName"
+      }
+    },
+    "DescribeScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ScheduleName"
+      }
+    },
+    "Disabled": {
+      "type": "boolean"
+    },
+    "EncryptionKeyArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "EncryptionMode": {
+      "type": "string",
+      "enum": [
+        "SSE-KMS",
+        "SSE-S3"
+      ]
+    },
+    "EntityDetectorConfiguration": {
+      "type": "structure",
+      "required": [
+        "EntityTypes"
+      ],
+      "members": {
+        "EntityTypes": "EntityTypeList",
+        "AllowedStatistics": "AllowedStatisticList"
+      }
+    },
+    "EntityType": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Z_][A-Z\\\\d_]*$"
+    },
+    "EntityTypeList": {
+      "type": "list",
+      "min": 1,
+      "member": "EntityType"
+    },
+    "ExcelOptions": {
+      "type": "structure",
+      "members": {
+        "SheetNames": "SheetNameList",
+        "SheetIndexes": "SheetIndexList",
+        "HeaderRow": "HeaderRow"
+      }
+    },
+    "Expression": {
+      "type": "string",
+      "min": 4,
+      "max": 1024,
+      "pattern": "^[<>0-9A-Za-z_.,:)(!= ]+$"
+    },
+    "FilesLimit": {
+      "type": "structure",
+      "required": [
+        "MaxFiles"
+      ],
+      "members": {
+        "MaxFiles": "MaxFiles",
+        "OrderedBy": "OrderedBy",
+        "Order": "Order"
+      }
+    },
+    "FilterExpression": {
+      "type": "structure",
+      "required": [
+        "Expression",
+        "ValuesMap"
+      ],
+      "members": {
+        "Expression": "Expression",
+        "ValuesMap": "ValuesMap"
+      }
+    },
+    "FormatOptions": {
+      "type": "structure",
+      "members": {
+        "Json": "JsonOptions",
+        "Excel": "ExcelOptions",
+        "Csv": "CsvOptions"
+      }
+    },
+    "GlueConnectionName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "HeaderRow": {
+      "type": "boolean"
+    },
+    "HiddenColumnList": {
+      "type": "list",
+      "member": "ColumnName"
+    },
+    "Input": {
+      "type": "structure",
+      "members": {
+        "S3InputDefinition": "S3Location",
+        "DataCatalogInputDefinition": "DataCatalogInputDefinition",
+        "DatabaseInputDefinition": "DatabaseInputDefinition",
+        "Metadata": "Metadata"
+      }
+    },
+    "InputFormat": {
+      "type": "string",
+      "enum": [
+        "CSV",
+        "JSON",
+        "PARQUET",
+        "EXCEL",
+        "ORC"
+      ]
+    },
+    "JobName": {
+      "type": "string",
+      "min": 1,
+      "max": 240
+    },
+    "JobNameList": {
+      "type": "list",
+      "max": 50,
+      "member": "JobName"
+    },
+    "JobRunId": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "JobSample": {
+      "type": "structure",
+      "members": {
+        "Mode": "SampleMode",
+        "Size": "JobSize"
+      }
+    },
+    "JobSize": {
+      "type": "long"
+    },
+    "JsonOptions": {
+      "type": "structure",
+      "members": {
+        "MultiLine": "MultiLine"
+      }
+    },
+    "Key": {
+      "type": "string",
+      "min": 1,
+      "max": 1280
+    },
+    "ListDatasetsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListJobRunsRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "JobName",
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListJobsRequest": {
+      "type": "structure",
+      "members": {
+        "DatasetName": "DatasetName",
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken",
+        "ProjectName": "ProjectName"
+      }
+    },
+    "ListProjectsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults100"
+      }
+    },
+    "ListRecipeVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken",
+        "Name": "RecipeName"
+      }
+    },
+    "ListRecipesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken",
+        "RecipeVersion": "RecipeVersion"
+      }
+    },
+    "ListRulesetsRequest": {
+      "type": "structure",
+      "members": {
+        "TargetArn": "Arn",
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListSchedulesRequest": {
+      "type": "structure",
+      "members": {
+        "JobName": "JobName",
+        "MaxResults": "MaxResults100",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "LocaleCode": {
+      "type": "string",
+      "min": 2,
+      "max": 100,
+      "pattern": "^[A-Za-z0-9_\\.#@\\-]+$"
+    },
+    "LogSubscription": {
+      "type": "string",
+      "enum": [
+        "ENABLE",
+        "DISABLE"
+      ]
+    },
+    "MaxCapacity": {
+      "type": "integer"
+    },
+    "MaxFiles": {
+      "type": "integer",
+      "min": 1
+    },
+    "MaxOutputFiles": {
+      "type": "integer",
+      "min": 1,
+      "max": 999
+    },
+    "MaxResults100": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxRetries": {
+      "type": "integer",
+      "min": 0
+    },
+    "Metadata": {
+      "type": "structure",
+      "members": {
+        "SourceArn": "Arn"
+      }
+    },
+    "MultiLine": {
+      "type": "boolean"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "Operation": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Z\\_]+$"
+    },
+    "Order": {
+      "type": "string",
+      "enum": [
+        "DESCENDING",
+        "ASCENDING"
+      ]
+    },
+    "OrderedBy": {
+      "type": "string",
+      "enum": [
+        "LAST_MODIFIED_DATE"
+      ]
+    },
+    "Output": {
+      "type": "structure",
+      "required": [
+        "Location"
+      ],
+      "members": {
+        "CompressionFormat": "CompressionFormat",
+        "Format": "OutputFormat",
+        "PartitionColumns": "ColumnNameList",
+        "Location": "S3Location",
+        "Overwrite": "OverwriteOutput",
+        "FormatOptions": "OutputFormatOptions",
+        "MaxOutputFiles": "MaxOutputFiles"
+      }
+    },
+    "OutputFormat": {
+      "type": "string",
+      "enum": [
+        "CSV",
+        "JSON",
+        "PARQUET",
+        "GLUEPARQUET",
+        "AVRO",
+        "ORC",
+        "XML",
+        "TABLEAUHYPER"
+      ]
+    },
+    "OutputFormatOptions": {
+      "type": "structure",
+      "members": {
+        "Csv": "CsvOutputOptions"
+      }
+    },
+    "OutputList": {
+      "type": "list",
+      "min": 1,
+      "member": "Output"
+    },
+    "OverwriteOutput": {
+      "type": "boolean"
+    },
+    "ParameterMap": {
+      "type": "map",
+      "key": "ParameterName",
+      "value": "ParameterValue"
+    },
+    "ParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Za-z0-9]+$"
+    },
+    "ParameterType": {
+      "type": "string",
+      "enum": [
+        "Datetime",
+        "Number",
+        "String"
+      ]
+    },
+    "ParameterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 32768
+    },
+    "PathOptions": {
+      "type": "structure",
+      "members": {
+        "LastModifiedDateCondition": "FilterExpression",
+        "FilesLimit": "FilesLimit",
+        "Parameters": "PathParametersMap"
+      }
+    },
+    "PathParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "PathParametersMap": {
+      "type": "map",
+      "min": 1,
+      "max": 10,
+      "key": "PathParameterName",
+      "value": "DatasetParameter"
+    },
+    "Preview": {
+      "type": "boolean"
+    },
+    "ProfileConfiguration": {
+      "type": "structure",
+      "members": {
+        "DatasetStatisticsConfiguration": "StatisticsConfiguration",
+        "ProfileColumns": "ColumnSelectorList",
+        "ColumnStatisticsConfigurations": "ColumnStatisticsConfigurationList",
+        "EntityDetectorConfiguration": "EntityDetectorConfiguration"
+      }
+    },
+    "ProjectName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "PublishRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Description": "RecipeDescription",
+        "Name": "RecipeName"
+      }
+    },
+    "QueryString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "RecipeAction": {
+      "type": "structure",
+      "required": [
+        "Operation"
+      ],
+      "members": {
+        "Operation": "Operation",
+        "Parameters": "ParameterMap"
+      }
+    },
+    "RecipeDescription": {
+      "type": "string",
+      "max": 1024
+    },
+    "RecipeName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "RecipeReference": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "RecipeName",
+        "RecipeVersion": "RecipeVersion"
+      }
+    },
+    "RecipeStep": {
+      "type": "structure",
+      "required": [
+        "Action"
+      ],
+      "members": {
+        "Action": "RecipeAction",
+        "ConditionExpressions": "ConditionExpressionList"
+      }
+    },
+    "RecipeStepList": {
+      "type": "list",
+      "member": "RecipeStep"
+    },
+    "RecipeVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 16
+    },
+    "RecipeVersionList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "RecipeVersion"
+    },
+    "RowRange": {
+      "type": "integer"
+    },
+    "Rule": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "CheckExpression"
+      ],
+      "members": {
+        "Name": "RuleName",
+        "Disabled": "Disabled",
+        "CheckExpression": "Expression",
+        "SubstitutionMap": "ValuesMap",
+        "Threshold": "Threshold",
+        "ColumnSelectors": "ColumnSelectorList"
+      }
+    },
+    "RuleList": {
+      "type": "list",
+      "min": 1,
+      "member": "Rule"
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "RulesetDescription": {
+      "type": "string",
+      "max": 1024
+    },
+    "RulesetName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "S3Location": {
+      "type": "structure",
+      "required": [
+        "Bucket"
+      ],
+      "members": {
+        "Bucket": "Bucket",
+        "Key": "Key",
+        "BucketOwner": "BucketOwner"
+      }
+    },
+    "S3TableOutputOptions": {
+      "type": "structure",
+      "required": [
+        "Location"
+      ],
+      "members": {
+        "Location": "S3Location"
+      }
+    },
+    "Sample": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Size": "SampleSize",
+        "Type": "SampleType"
+      }
+    },
+    "SampleMode": {
+      "type": "string",
+      "enum": [
+        "FULL_DATASET",
+        "CUSTOM_ROWS"
+      ]
+    },
+    "SampleSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 5000
+    },
+    "SampleType": {
+      "type": "string",
+      "enum": [
+        "FIRST_N",
+        "LAST_N",
+        "RANDOM"
+      ]
+    },
+    "ScheduleName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "SendProjectSessionActionRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Preview": "Preview",
+        "Name": "ProjectName",
+        "RecipeStep": "RecipeStep",
+        "StepIndex": "StepIndex",
+        "ClientSessionId": "ClientSessionId",
+        "ViewFrame": "ViewFrame"
+      }
+    },
+    "SheetIndex": {
+      "type": "integer",
+      "min": 0,
+      "max": 200
+    },
+    "SheetIndexList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SheetIndex"
+    },
+    "SheetName": {
+      "type": "string",
+      "min": 1,
+      "max": 31
+    },
+    "SheetNameList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SheetName"
+    },
+    "StartColumnIndex": {
+      "type": "integer",
+      "min": 0
+    },
+    "StartJobRunRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "JobName"
+      }
+    },
+    "StartProjectSessionRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ProjectName",
+        "AssumeControl": "AssumeControl"
+      }
+    },
+    "StartRowIndex": {
+      "type": "integer",
+      "min": 0
+    },
+    "Statistic": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Z\\_]+$"
+    },
+    "StatisticList": {
+      "type": "list",
+      "min": 1,
+      "member": "Statistic"
+    },
+    "StatisticOverride": {
+      "type": "structure",
+      "required": [
+        "Statistic",
+        "Parameters"
+      ],
+      "members": {
+        "Statistic": "Statistic",
+        "Parameters": "ParameterMap"
+      }
+    },
+    "StatisticOverrideList": {
+      "type": "list",
+      "min": 1,
+      "member": "StatisticOverride"
+    },
+    "StatisticsConfiguration": {
+      "type": "structure",
+      "members": {
+        "IncludedStatistics": "StatisticList",
+        "Overrides": "StatisticOverrideList"
+      }
+    },
+    "StepIndex": {
+      "type": "integer",
+      "min": 0
+    },
+    "StopJobRunRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RunId"
+      ],
+      "members": {
+        "Name": "JobName",
+        "RunId": "JobRunId"
+      }
+    },
+    "TableName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "Tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256
+    },
+    "TargetColumn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "Threshold": {
+      "type": "structure",
+      "required": [
+        "Value"
+      ],
+      "members": {
+        "Value": "ThresholdValue",
+        "Type": "ThresholdType",
+        "Unit": "ThresholdUnit"
+      }
+    },
+    "ThresholdType": {
+      "type": "string",
+      "enum": [
+        "GREATER_THAN_OR_EQUAL",
+        "LESS_THAN_OR_EQUAL",
+        "GREATER_THAN",
+        "LESS_THAN"
+      ]
+    },
+    "ThresholdUnit": {
+      "type": "string",
+      "enum": [
+        "COUNT",
+        "PERCENTAGE"
+      ]
+    },
+    "ThresholdValue": {
+      "type": "double",
+      "min": 0
+    },
+    "Timeout": {
+      "type": "integer",
+      "min": 0
+    },
+    "TimezoneOffset": {
+      "type": "string",
+      "min": 1,
+      "max": 6,
+      "pattern": "^(Z|[-+](\\d|\\d{2}|\\d{2}:?\\d{2}))$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Input"
+      ],
+      "members": {
+        "Name": "DatasetName",
+        "Format": "InputFormat",
+        "FormatOptions": "FormatOptions",
+        "Input": "Input",
+        "PathOptions": "PathOptions"
+      }
+    },
+    "UpdateProfileJobRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "OutputLocation",
+        "RoleArn"
+      ],
+      "members": {
+        "Configuration": "ProfileConfiguration",
+        "EncryptionKeyArn": "EncryptionKeyArn",
+        "EncryptionMode": "EncryptionMode",
+        "Name": "JobName",
+        "LogSubscription": "LogSubscription",
+        "MaxCapacity": "MaxCapacity",
+        "MaxRetries": "MaxRetries",
+        "OutputLocation": "S3Location",
+        "ValidationConfigurations": "ValidationConfigurationList",
+        "RoleArn": "Arn",
+        "Timeout": "Timeout",
+        "JobSample": "JobSample"
+      }
+    },
+    "UpdateProjectRequest": {
+      "type": "structure",
+      "required": [
+        "RoleArn",
+        "Name"
+      ],
+      "members": {
+        "Sample": "Sample",
+        "RoleArn": "Arn",
+        "Name": "ProjectName"
+      }
+    },
+    "UpdateRecipeJobRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RoleArn"
+      ],
+      "members": {
+        "EncryptionKeyArn": "EncryptionKeyArn",
+        "EncryptionMode": "EncryptionMode",
+        "Name": "JobName",
+        "LogSubscription": "LogSubscription",
+        "MaxCapacity": "MaxCapacity",
+        "MaxRetries": "MaxRetries",
+        "Outputs": "OutputList",
+        "DataCatalogOutputs": "DataCatalogOutputList",
+        "DatabaseOutputs": "DatabaseOutputList",
+        "RoleArn": "Arn",
+        "Timeout": "Timeout"
+      }
+    },
+    "UpdateRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Description": "RecipeDescription",
+        "Name": "RecipeName",
+        "Steps": "RecipeStepList"
+      }
+    },
+    "UpdateRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Rules"
+      ],
+      "members": {
+        "Name": "RulesetName",
+        "Description": "RulesetDescription",
+        "Rules": "RuleList"
+      }
+    },
+    "UpdateScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "CronExpression",
+        "Name"
+      ],
+      "members": {
+        "JobNames": "JobNameList",
+        "CronExpression": "CronExpression",
+        "Name": "ScheduleName"
+      }
+    },
+    "ValidationConfiguration": {
+      "type": "structure",
+      "required": [
+        "RulesetArn"
+      ],
+      "members": {
+        "RulesetArn": "Arn",
+        "ValidationMode": "ValidationMode"
+      }
+    },
+    "ValidationConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "ValidationConfiguration"
+    },
+    "ValidationMode": {
+      "type": "string",
+      "enum": [
+        "CHECK_ALL"
+      ]
+    },
+    "ValueReference": {
+      "type": "string",
+      "min": 2,
+      "max": 128,
+      "pattern": "^:[A-Za-z0-9_]+$"
+    },
+    "ValuesMap": {
+      "type": "map",
+      "key": "ValueReference",
+      "value": "ConditionValue"
+    },
+    "ViewFrame": {
+      "type": "structure",
+      "required": [
+        "StartColumnIndex"
+      ],
+      "members": {
+        "StartColumnIndex": "StartColumnIndex",
+        "ColumnRange": "ColumnRange",
+        "HiddenColumns": "HiddenColumnList",
+        "StartRowIndex": "StartRowIndex",
+        "RowRange": "RowRange",
+        "Analytics": "AnalyticsMode"
+      }
+    }
+  }
+}

@@ -321,6 +321,17 @@ public final class TestFixtures {
         return REGION.id() + "a";
     }
 
+    /** The default security group of {@link #region()}'s default VPC, read as a client would find it. */
+    public static String defaultSecurityGroup() {
+        try (Ec2Client ec2 = ec2Client()) {
+            String vpcId = ec2.describeVpcs(r -> r.filters(f -> f.name("is-default").values("true"))).vpcs()
+                    .get(0).vpcId();
+            return ec2.describeSecurityGroups(r -> r.filters(
+                            f -> f.name("vpc-id").values(vpcId), f -> f.name("group-name").values("default")))
+                    .securityGroups().get(0).groupId();
+        }
+    }
+
     /**
      * A default subnet in each of the first two availability zones of {@link #region()}'s default VPC,
      * for tests that create a load balancer: CreateLoadBalancer needs subnets for every type, and an

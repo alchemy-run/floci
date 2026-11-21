@@ -1,0 +1,1531 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_frauddetector_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchCreateVariable": "BatchCreateVariableRequest",
+    "BatchGetVariable": "BatchGetVariableRequest",
+    "CancelBatchImportJob": "CancelBatchImportJobRequest",
+    "CancelBatchPredictionJob": "CancelBatchPredictionJobRequest",
+    "CreateBatchImportJob": "CreateBatchImportJobRequest",
+    "CreateBatchPredictionJob": "CreateBatchPredictionJobRequest",
+    "CreateDetectorVersion": "CreateDetectorVersionRequest",
+    "CreateList": "CreateListRequest",
+    "CreateModel": "CreateModelRequest",
+    "CreateModelVersion": "CreateModelVersionRequest",
+    "CreateRule": "CreateRuleRequest",
+    "CreateVariable": "CreateVariableRequest",
+    "DeleteBatchImportJob": "DeleteBatchImportJobRequest",
+    "DeleteBatchPredictionJob": "DeleteBatchPredictionJobRequest",
+    "DeleteDetector": "DeleteDetectorRequest",
+    "DeleteDetectorVersion": "DeleteDetectorVersionRequest",
+    "DeleteEntityType": "DeleteEntityTypeRequest",
+    "DeleteEvent": "DeleteEventRequest",
+    "DeleteEventType": "DeleteEventTypeRequest",
+    "DeleteEventsByEventType": "DeleteEventsByEventTypeRequest",
+    "DeleteExternalModel": "DeleteExternalModelRequest",
+    "DeleteLabel": "DeleteLabelRequest",
+    "DeleteList": "DeleteListRequest",
+    "DeleteModel": "DeleteModelRequest",
+    "DeleteModelVersion": "DeleteModelVersionRequest",
+    "DeleteOutcome": "DeleteOutcomeRequest",
+    "DeleteRule": "DeleteRuleRequest",
+    "DeleteVariable": "DeleteVariableRequest",
+    "DescribeDetector": "DescribeDetectorRequest",
+    "DescribeModelVersions": "DescribeModelVersionsRequest",
+    "GetBatchImportJobs": "GetBatchImportJobsRequest",
+    "GetBatchPredictionJobs": "GetBatchPredictionJobsRequest",
+    "GetDeleteEventsByEventTypeStatus": "GetDeleteEventsByEventTypeStatusRequest",
+    "GetDetectorVersion": "GetDetectorVersionRequest",
+    "GetDetectors": "GetDetectorsRequest",
+    "GetEntityTypes": "GetEntityTypesRequest",
+    "GetEvent": "GetEventRequest",
+    "GetEventPrediction": "GetEventPredictionRequest",
+    "GetEventPredictionMetadata": "GetEventPredictionMetadataRequest",
+    "GetEventTypes": "GetEventTypesRequest",
+    "GetExternalModels": "GetExternalModelsRequest",
+    "GetLabels": "GetLabelsRequest",
+    "GetListElements": "GetListElementsRequest",
+    "GetListsMetadata": "GetListsMetadataRequest",
+    "GetModelVersion": "GetModelVersionRequest",
+    "GetModels": "GetModelsRequest",
+    "GetOutcomes": "GetOutcomesRequest",
+    "GetRules": "GetRulesRequest",
+    "GetVariables": "GetVariablesRequest",
+    "ListEventPredictions": "ListEventPredictionsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutDetector": "PutDetectorRequest",
+    "PutEntityType": "PutEntityTypeRequest",
+    "PutEventType": "PutEventTypeRequest",
+    "PutExternalModel": "PutExternalModelRequest",
+    "PutKMSEncryptionKey": "PutKMSEncryptionKeyRequest",
+    "PutLabel": "PutLabelRequest",
+    "PutOutcome": "PutOutcomeRequest",
+    "SendEvent": "SendEventRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDetectorVersion": "UpdateDetectorVersionRequest",
+    "UpdateDetectorVersionMetadata": "UpdateDetectorVersionMetadataRequest",
+    "UpdateDetectorVersionStatus": "UpdateDetectorVersionStatusRequest",
+    "UpdateEventLabel": "UpdateEventLabelRequest",
+    "UpdateList": "UpdateListRequest",
+    "UpdateModel": "UpdateModelRequest",
+    "UpdateModelVersion": "UpdateModelVersionRequest",
+    "UpdateModelVersionStatus": "UpdateModelVersionStatusRequest",
+    "UpdateRuleMetadata": "UpdateRuleMetadataRequest",
+    "UpdateRuleVersion": "UpdateRuleVersionRequest",
+    "UpdateVariable": "UpdateVariableRequest"
+  },
+  "shapes": {
+    "BatchCreateVariableRequest": {
+      "type": "structure",
+      "required": [
+        "variableEntries"
+      ],
+      "members": {
+        "variableEntries": "VariableEntryList",
+        "tags": "tagList"
+      }
+    },
+    "BatchGetVariableRequest": {
+      "type": "structure",
+      "required": [
+        "names"
+      ],
+      "members": {
+        "names": "NameList"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CancelBatchImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "identifier"
+      }
+    },
+    "CancelBatchPredictionJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "identifier"
+      }
+    },
+    "CreateBatchImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId",
+        "inputPath",
+        "outputPath",
+        "eventTypeName",
+        "iamRoleArn"
+      ],
+      "members": {
+        "jobId": "identifier",
+        "inputPath": "s3BucketLocation",
+        "outputPath": "s3BucketLocation",
+        "eventTypeName": "identifier",
+        "iamRoleArn": "iamRoleArn",
+        "tags": "tagList"
+      }
+    },
+    "CreateBatchPredictionJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId",
+        "inputPath",
+        "outputPath",
+        "eventTypeName",
+        "detectorName",
+        "iamRoleArn"
+      ],
+      "members": {
+        "jobId": "identifier",
+        "inputPath": "s3BucketLocation",
+        "outputPath": "s3BucketLocation",
+        "eventTypeName": "identifier",
+        "detectorName": "identifier",
+        "detectorVersion": "wholeNumberVersionString",
+        "iamRoleArn": "iamRoleArn",
+        "tags": "tagList"
+      }
+    },
+    "CreateDetectorVersionRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "rules"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "description": "description",
+        "externalModelEndpoints": "ListOfStrings",
+        "rules": "RuleList",
+        "modelVersions": "ListOfModelVersions",
+        "ruleExecutionMode": "RuleExecutionMode",
+        "tags": "tagList"
+      }
+    },
+    "CreateListRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "noDashIdentifier",
+        "elements": "ElementsList",
+        "variableType": "variableType",
+        "description": "description",
+        "tags": "tagList"
+      }
+    },
+    "CreateModelRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "eventTypeName"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "description": "description",
+        "eventTypeName": "string",
+        "tags": "tagList"
+      }
+    },
+    "CreateModelVersionRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "trainingDataSource",
+        "trainingDataSchema"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "trainingDataSource": "TrainingDataSourceEnum",
+        "trainingDataSchema": "TrainingDataSchema",
+        "externalEventsDetail": "ExternalEventsDetail",
+        "ingestedEventsDetail": "IngestedEventsDetail",
+        "tags": "tagList"
+      }
+    },
+    "CreateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "ruleId",
+        "detectorId",
+        "expression",
+        "language",
+        "outcomes"
+      ],
+      "members": {
+        "ruleId": "identifier",
+        "detectorId": "identifier",
+        "description": "description",
+        "expression": "ruleExpression",
+        "language": "Language",
+        "outcomes": "NonEmptyListOfStrings",
+        "tags": "tagList"
+      }
+    },
+    "CreateVariableRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "dataType",
+        "dataSource",
+        "defaultValue"
+      ],
+      "members": {
+        "name": "string",
+        "dataType": "DataType",
+        "dataSource": "DataSource",
+        "defaultValue": "string",
+        "description": "string",
+        "variableType": "string",
+        "tags": "tagList"
+      }
+    },
+    "CsvIndexToVariableMap": {
+      "type": "map",
+      "key": "string",
+      "value": "string"
+    },
+    "DataSource": {
+      "type": "string",
+      "enum": [
+        "EVENT",
+        "MODEL_SCORE",
+        "EXTERNAL_MODEL_SCORE"
+      ]
+    },
+    "DataType": {
+      "type": "string",
+      "enum": [
+        "STRING",
+        "INTEGER",
+        "FLOAT",
+        "BOOLEAN",
+        "DATETIME"
+      ]
+    },
+    "DeleteAuditHistory": {
+      "type": "boolean"
+    },
+    "DeleteBatchImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "identifier"
+      }
+    },
+    "DeleteBatchPredictionJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "identifier"
+      }
+    },
+    "DeleteDetectorRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId"
+      ],
+      "members": {
+        "detectorId": "identifier"
+      }
+    },
+    "DeleteDetectorVersionRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "detectorVersionId"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString"
+      }
+    },
+    "DeleteEntityTypeRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier"
+      }
+    },
+    "DeleteEventRequest": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "eventTypeName"
+      ],
+      "members": {
+        "eventId": "identifier",
+        "eventTypeName": "identifier",
+        "deleteAuditHistory": "DeleteAuditHistory"
+      }
+    },
+    "DeleteEventTypeRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier"
+      }
+    },
+    "DeleteEventsByEventTypeRequest": {
+      "type": "structure",
+      "required": [
+        "eventTypeName"
+      ],
+      "members": {
+        "eventTypeName": "identifier"
+      }
+    },
+    "DeleteExternalModelRequest": {
+      "type": "structure",
+      "required": [
+        "modelEndpoint"
+      ],
+      "members": {
+        "modelEndpoint": "sageMakerEndpointIdentifier"
+      }
+    },
+    "DeleteLabelRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier"
+      }
+    },
+    "DeleteListRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "noDashIdentifier"
+      }
+    },
+    "DeleteModelRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum"
+      }
+    },
+    "DeleteModelVersionRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "modelVersionNumber"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "modelVersionNumber": "floatVersionString"
+      }
+    },
+    "DeleteOutcomeRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier"
+      }
+    },
+    "DeleteRuleRequest": {
+      "type": "structure",
+      "required": [
+        "rule"
+      ],
+      "members": {
+        "rule": "Rule"
+      }
+    },
+    "DeleteVariableRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "string"
+      }
+    },
+    "DescribeDetectorRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "nextToken": "string",
+        "maxResults": "DetectorVersionMaxResults"
+      }
+    },
+    "DescribeModelVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelVersionNumber": "floatVersionString",
+        "modelType": "ModelTypeEnum",
+        "nextToken": "string",
+        "maxResults": "modelsMaxPageSize"
+      }
+    },
+    "DetectorVersionMaxResults": {
+      "type": "integer",
+      "min": 1000,
+      "max": 2500
+    },
+    "DetectorVersionStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "DetectorsMaxResults": {
+      "type": "integer",
+      "min": 5,
+      "max": 10
+    },
+    "Elements": {
+      "type": "string",
+      "min": 1,
+      "max": 320,
+      "pattern": "^\\S+( +\\S+)*$"
+    },
+    "ElementsList": {
+      "type": "list",
+      "min": 0,
+      "max": 100000,
+      "member": "Elements"
+    },
+    "Entity": {
+      "type": "structure",
+      "required": [
+        "entityType",
+        "entityId"
+      ],
+      "members": {
+        "entityType": "string",
+        "entityId": "entityRestrictedString"
+      }
+    },
+    "EventIngestion": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "EventOrchestration": {
+      "type": "structure",
+      "required": [
+        "eventBridgeEnabled"
+      ],
+      "members": {
+        "eventBridgeEnabled": "Boolean"
+      }
+    },
+    "EventPredictionsMaxResults": {
+      "type": "integer",
+      "min": 50,
+      "max": 100
+    },
+    "EventVariableMap": {
+      "type": "map",
+      "min": 1,
+      "key": "variableName",
+      "value": "variableValue"
+    },
+    "ExternalEventsDetail": {
+      "type": "structure",
+      "required": [
+        "dataLocation",
+        "dataAccessRoleArn"
+      ],
+      "members": {
+        "dataLocation": "s3BucketLocation",
+        "dataAccessRoleArn": "iamRoleArn"
+      }
+    },
+    "ExternalModelEndpointDataBlobMap": {
+      "type": "map",
+      "key": "sageMakerEndpointIdentifier",
+      "value": "ModelEndpointDataBlob"
+    },
+    "ExternalModelsMaxResults": {
+      "type": "integer",
+      "min": 5,
+      "max": 10
+    },
+    "FilterCondition": {
+      "type": "structure",
+      "members": {
+        "value": "filterString"
+      }
+    },
+    "GetBatchImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "jobId": "identifier",
+        "maxResults": "batchImportsMaxPageSize",
+        "nextToken": "string"
+      }
+    },
+    "GetBatchPredictionJobsRequest": {
+      "type": "structure",
+      "members": {
+        "jobId": "identifier",
+        "maxResults": "batchPredictionsMaxPageSize",
+        "nextToken": "string"
+      }
+    },
+    "GetDeleteEventsByEventTypeStatusRequest": {
+      "type": "structure",
+      "required": [
+        "eventTypeName"
+      ],
+      "members": {
+        "eventTypeName": "identifier"
+      }
+    },
+    "GetDetectorVersionRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "detectorVersionId"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString"
+      }
+    },
+    "GetDetectorsRequest": {
+      "type": "structure",
+      "members": {
+        "detectorId": "identifier",
+        "nextToken": "string",
+        "maxResults": "DetectorsMaxResults"
+      }
+    },
+    "GetEntityTypesRequest": {
+      "type": "structure",
+      "members": {
+        "name": "identifier",
+        "nextToken": "string",
+        "maxResults": "entityTypesMaxResults"
+      }
+    },
+    "GetEventPredictionMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "eventTypeName",
+        "detectorId",
+        "detectorVersionId",
+        "predictionTimestamp"
+      ],
+      "members": {
+        "eventId": "identifier",
+        "eventTypeName": "identifier",
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString",
+        "predictionTimestamp": "time"
+      }
+    },
+    "GetEventPredictionRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "eventId",
+        "eventTypeName",
+        "entities",
+        "eventTimestamp",
+        "eventVariables"
+      ],
+      "members": {
+        "detectorId": "string",
+        "detectorVersionId": "wholeNumberVersionString",
+        "eventId": "string",
+        "eventTypeName": "string",
+        "entities": "listOfEntities",
+        "eventTimestamp": "utcTimestampISO8601",
+        "eventVariables": "EventVariableMap",
+        "externalModelEndpointDataBlobs": "ExternalModelEndpointDataBlobMap"
+      }
+    },
+    "GetEventRequest": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "eventTypeName"
+      ],
+      "members": {
+        "eventId": "string",
+        "eventTypeName": "string"
+      }
+    },
+    "GetEventTypesRequest": {
+      "type": "structure",
+      "members": {
+        "name": "identifier",
+        "nextToken": "string",
+        "maxResults": "eventTypesMaxResults"
+      }
+    },
+    "GetExternalModelsRequest": {
+      "type": "structure",
+      "members": {
+        "modelEndpoint": "string",
+        "nextToken": "string",
+        "maxResults": "ExternalModelsMaxResults"
+      }
+    },
+    "GetLabelsRequest": {
+      "type": "structure",
+      "members": {
+        "name": "identifier",
+        "nextToken": "string",
+        "maxResults": "labelsMaxResults"
+      }
+    },
+    "GetListElementsRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "noDashIdentifier",
+        "nextToken": "nextToken",
+        "maxResults": "ListsElementsMaxResults"
+      }
+    },
+    "GetListsMetadataRequest": {
+      "type": "structure",
+      "members": {
+        "name": "noDashIdentifier",
+        "nextToken": "nextToken",
+        "maxResults": "ListsMetadataMaxResults"
+      }
+    },
+    "GetModelVersionRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "modelVersionNumber"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "modelVersionNumber": "floatVersionString"
+      }
+    },
+    "GetModelsRequest": {
+      "type": "structure",
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "nextToken": "string",
+        "maxResults": "modelsMaxPageSize"
+      }
+    },
+    "GetOutcomesRequest": {
+      "type": "structure",
+      "members": {
+        "name": "identifier",
+        "nextToken": "string",
+        "maxResults": "OutcomesMaxResults"
+      }
+    },
+    "GetRulesRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId"
+      ],
+      "members": {
+        "ruleId": "identifier",
+        "detectorId": "identifier",
+        "ruleVersion": "wholeNumberVersionString",
+        "nextToken": "string",
+        "maxResults": "RulesMaxResults"
+      }
+    },
+    "GetVariablesRequest": {
+      "type": "structure",
+      "members": {
+        "name": "string",
+        "nextToken": "string",
+        "maxResults": "VariablesMaxResults"
+      }
+    },
+    "IngestedEventsDetail": {
+      "type": "structure",
+      "required": [
+        "ingestedEventsTimeWindow"
+      ],
+      "members": {
+        "ingestedEventsTimeWindow": "IngestedEventsTimeWindow"
+      }
+    },
+    "IngestedEventsTimeWindow": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "time",
+        "endTime": "time"
+      }
+    },
+    "JsonKeyToVariableMap": {
+      "type": "map",
+      "key": "string",
+      "value": "string"
+    },
+    "KmsEncryptionKeyArn": {
+      "type": "string",
+      "min": 7,
+      "max": 90,
+      "pattern": "^DEFAULT|arn:[a-zA-Z0-9-]+:kms:[a-zA-Z0-9-]+:\\d{12}:key\\/\\w{8}-\\w{4}-\\w{4}-\\w{4}-\\w{12}$"
+    },
+    "LabelSchema": {
+      "type": "structure",
+      "members": {
+        "labelMapper": "labelMapper",
+        "unlabeledEventsTreatment": "UnlabeledEventsTreatment"
+      }
+    },
+    "Language": {
+      "type": "string",
+      "enum": [
+        "DETECTORPL"
+      ]
+    },
+    "ListEventPredictionsRequest": {
+      "type": "structure",
+      "members": {
+        "eventId": "FilterCondition",
+        "eventType": "FilterCondition",
+        "detectorId": "FilterCondition",
+        "detectorVersionId": "FilterCondition",
+        "predictionTimeRange": "PredictionTimeRange",
+        "nextToken": "string",
+        "maxResults": "EventPredictionsMaxResults"
+      }
+    },
+    "ListOfModelVersions": {
+      "type": "list",
+      "member": "ModelVersion"
+    },
+    "ListOfStrings": {
+      "type": "list",
+      "member": "string"
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "fraudDetectorArn",
+        "nextToken": "string",
+        "maxResults": "TagsMaxResults"
+      }
+    },
+    "ListUpdateMode": {
+      "type": "string",
+      "enum": [
+        "REPLACE",
+        "APPEND",
+        "REMOVE"
+      ]
+    },
+    "ListsElementsMaxResults": {
+      "type": "integer",
+      "min": 500,
+      "max": 5000
+    },
+    "ListsMetadataMaxResults": {
+      "type": "integer",
+      "min": 5,
+      "max": 50
+    },
+    "ModelEndpointDataBlob": {
+      "type": "structure",
+      "members": {
+        "byteBuffer": "blob",
+        "contentType": "contentType"
+      }
+    },
+    "ModelEndpointStatus": {
+      "type": "string",
+      "enum": [
+        "ASSOCIATED",
+        "DISSOCIATED"
+      ]
+    },
+    "ModelInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "useEventVariables"
+      ],
+      "members": {
+        "eventTypeName": "identifier",
+        "format": "ModelInputDataFormat",
+        "useEventVariables": "UseEventVariables",
+        "jsonInputTemplate": "modelInputTemplate",
+        "csvInputTemplate": "modelInputTemplate"
+      }
+    },
+    "ModelInputDataFormat": {
+      "type": "string",
+      "enum": [
+        "TEXT_CSV",
+        "APPLICATION_JSON"
+      ]
+    },
+    "ModelOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "format"
+      ],
+      "members": {
+        "format": "ModelOutputDataFormat",
+        "jsonKeyToVariableMap": "JsonKeyToVariableMap",
+        "csvIndexToVariableMap": "CsvIndexToVariableMap"
+      }
+    },
+    "ModelOutputDataFormat": {
+      "type": "string",
+      "enum": [
+        "TEXT_CSV",
+        "APPLICATION_JSONLINES"
+      ]
+    },
+    "ModelSource": {
+      "type": "string",
+      "enum": [
+        "SAGEMAKER"
+      ]
+    },
+    "ModelTypeEnum": {
+      "type": "string",
+      "enum": [
+        "ONLINE_FRAUD_INSIGHTS",
+        "TRANSACTION_FRAUD_INSIGHTS",
+        "ACCOUNT_TAKEOVER_INSIGHTS"
+      ]
+    },
+    "ModelVersion": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "modelVersionNumber"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "modelVersionNumber": "floatVersionString",
+        "arn": "fraudDetectorArn"
+      }
+    },
+    "ModelVersionStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE",
+        "TRAINING_CANCELLED"
+      ]
+    },
+    "NameList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "string"
+    },
+    "NonEmptyListOfStrings": {
+      "type": "list",
+      "min": 1,
+      "member": "string"
+    },
+    "OutcomesMaxResults": {
+      "type": "integer",
+      "min": 50,
+      "max": 100
+    },
+    "PredictionTimeRange": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "time",
+        "endTime": "time"
+      }
+    },
+    "PutDetectorRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "eventTypeName"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "description": "description",
+        "eventTypeName": "identifier",
+        "tags": "tagList"
+      }
+    },
+    "PutEntityTypeRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier",
+        "description": "description",
+        "tags": "tagList"
+      }
+    },
+    "PutEventTypeRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "eventVariables",
+        "entityTypes"
+      ],
+      "members": {
+        "name": "identifier",
+        "description": "description",
+        "eventVariables": "NonEmptyListOfStrings",
+        "labels": "ListOfStrings",
+        "entityTypes": "NonEmptyListOfStrings",
+        "eventIngestion": "EventIngestion",
+        "tags": "tagList",
+        "eventOrchestration": "EventOrchestration"
+      }
+    },
+    "PutExternalModelRequest": {
+      "type": "structure",
+      "required": [
+        "modelEndpoint",
+        "modelSource",
+        "invokeModelEndpointRoleArn",
+        "inputConfiguration",
+        "outputConfiguration",
+        "modelEndpointStatus"
+      ],
+      "members": {
+        "modelEndpoint": "sageMakerEndpointIdentifier",
+        "modelSource": "ModelSource",
+        "invokeModelEndpointRoleArn": "string",
+        "inputConfiguration": "ModelInputConfiguration",
+        "outputConfiguration": "ModelOutputConfiguration",
+        "modelEndpointStatus": "ModelEndpointStatus",
+        "tags": "tagList"
+      }
+    },
+    "PutKMSEncryptionKeyRequest": {
+      "type": "structure",
+      "required": [
+        "kmsEncryptionKeyArn"
+      ],
+      "members": {
+        "kmsEncryptionKeyArn": "KmsEncryptionKeyArn"
+      }
+    },
+    "PutLabelRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier",
+        "description": "description",
+        "tags": "tagList"
+      }
+    },
+    "PutOutcomeRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "identifier",
+        "description": "description",
+        "tags": "tagList"
+      }
+    },
+    "Rule": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "ruleId",
+        "ruleVersion"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "ruleId": "identifier",
+        "ruleVersion": "wholeNumberVersionString"
+      }
+    },
+    "RuleExecutionMode": {
+      "type": "string",
+      "enum": [
+        "ALL_MATCHED",
+        "FIRST_MATCHED"
+      ]
+    },
+    "RuleList": {
+      "type": "list",
+      "member": "Rule"
+    },
+    "RulesMaxResults": {
+      "type": "integer",
+      "min": 50,
+      "max": 100
+    },
+    "SendEventRequest": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "eventTypeName",
+        "eventTimestamp",
+        "eventVariables",
+        "entities"
+      ],
+      "members": {
+        "eventId": "identifier",
+        "eventTypeName": "identifier",
+        "eventTimestamp": "utcTimestampISO8601",
+        "eventVariables": "EventVariableMap",
+        "assignedLabel": "identifier",
+        "labelTimestamp": "utcTimestampISO8601",
+        "entities": "listOfEntities"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "tagKey",
+        "value": "tagValue"
+      }
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "fraudDetectorArn",
+        "tags": "tagList"
+      }
+    },
+    "TagsMaxResults": {
+      "type": "integer",
+      "min": 50,
+      "max": 50
+    },
+    "TrainingDataSchema": {
+      "type": "structure",
+      "required": [
+        "modelVariables"
+      ],
+      "members": {
+        "modelVariables": "ListOfStrings",
+        "labelSchema": "LabelSchema"
+      }
+    },
+    "TrainingDataSourceEnum": {
+      "type": "string",
+      "enum": [
+        "EXTERNAL_EVENTS",
+        "INGESTED_EVENTS"
+      ]
+    },
+    "UnlabeledEventsTreatment": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "FRAUD",
+        "LEGIT",
+        "AUTO"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "fraudDetectorArn",
+        "tagKeys": "tagKeyList"
+      }
+    },
+    "UpdateDetectorVersionMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "detectorVersionId",
+        "description"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString",
+        "description": "description"
+      }
+    },
+    "UpdateDetectorVersionRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "detectorVersionId",
+        "externalModelEndpoints",
+        "rules"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString",
+        "externalModelEndpoints": "ListOfStrings",
+        "rules": "RuleList",
+        "description": "description",
+        "modelVersions": "ListOfModelVersions",
+        "ruleExecutionMode": "RuleExecutionMode"
+      }
+    },
+    "UpdateDetectorVersionStatusRequest": {
+      "type": "structure",
+      "required": [
+        "detectorId",
+        "detectorVersionId",
+        "status"
+      ],
+      "members": {
+        "detectorId": "identifier",
+        "detectorVersionId": "wholeNumberVersionString",
+        "status": "DetectorVersionStatus"
+      }
+    },
+    "UpdateEventLabelRequest": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "eventTypeName",
+        "assignedLabel",
+        "labelTimestamp"
+      ],
+      "members": {
+        "eventId": "identifier",
+        "eventTypeName": "identifier",
+        "assignedLabel": "identifier",
+        "labelTimestamp": "utcTimestampISO8601"
+      }
+    },
+    "UpdateListRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "noDashIdentifier",
+        "elements": "ElementsList",
+        "description": "description",
+        "updateMode": "ListUpdateMode",
+        "variableType": "variableType"
+      }
+    },
+    "UpdateModelRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "description": "description"
+      }
+    },
+    "UpdateModelVersionRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "majorVersionNumber"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "majorVersionNumber": "wholeNumberVersionString",
+        "externalEventsDetail": "ExternalEventsDetail",
+        "ingestedEventsDetail": "IngestedEventsDetail",
+        "tags": "tagList"
+      }
+    },
+    "UpdateModelVersionStatusRequest": {
+      "type": "structure",
+      "required": [
+        "modelId",
+        "modelType",
+        "modelVersionNumber",
+        "status"
+      ],
+      "members": {
+        "modelId": "modelIdentifier",
+        "modelType": "ModelTypeEnum",
+        "modelVersionNumber": "floatVersionString",
+        "status": "ModelVersionStatus"
+      }
+    },
+    "UpdateRuleMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "rule",
+        "description"
+      ],
+      "members": {
+        "rule": "Rule",
+        "description": "description"
+      }
+    },
+    "UpdateRuleVersionRequest": {
+      "type": "structure",
+      "required": [
+        "rule",
+        "expression",
+        "language",
+        "outcomes"
+      ],
+      "members": {
+        "rule": "Rule",
+        "description": "description",
+        "expression": "ruleExpression",
+        "language": "Language",
+        "outcomes": "NonEmptyListOfStrings",
+        "tags": "tagList"
+      }
+    },
+    "UpdateVariableRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "string",
+        "defaultValue": "string",
+        "description": "string",
+        "variableType": "string"
+      }
+    },
+    "UseEventVariables": {
+      "type": "boolean"
+    },
+    "VariableEntry": {
+      "type": "structure",
+      "members": {
+        "name": "string",
+        "dataType": "string",
+        "dataSource": "string",
+        "defaultValue": "string",
+        "description": "string",
+        "variableType": "string"
+      }
+    },
+    "VariableEntryList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "VariableEntry"
+    },
+    "VariablesMaxResults": {
+      "type": "integer",
+      "min": 50,
+      "max": 100
+    },
+    "batchImportsMaxPageSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "batchPredictionsMaxPageSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "blob": {
+      "type": "blob"
+    },
+    "contentType": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "description": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "entityRestrictedString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[0-9A-Za-z_.@+-]+$"
+    },
+    "entityTypesMaxResults": {
+      "type": "integer",
+      "min": 5,
+      "max": 10
+    },
+    "eventTypesMaxResults": {
+      "type": "integer",
+      "min": 5,
+      "max": 10
+    },
+    "filterString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[0-9A-Za-z_-]+$"
+    },
+    "floatVersionString": {
+      "type": "string",
+      "min": 3,
+      "max": 7,
+      "pattern": "^[1-9][0-9]{0,3}\\.[0-9]{1,2}$"
+    },
+    "fraudDetectorArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^arn\\:aws[a-z-]{0,15}\\:frauddetector\\:[a-z0-9-]{3,20}\\:[0-9]{12}\\:[^\\s]{2,128}$"
+    },
+    "iamRoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^arn\\:aws[a-z-]{0,15}\\:iam\\:\\:[0-9]{12}\\:role\\/[^\\s]{2,64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[0-9a-z_-]+$"
+    },
+    "labelMapper": {
+      "type": "map",
+      "key": "string",
+      "value": "ListOfStrings"
+    },
+    "labelsMaxResults": {
+      "type": "integer",
+      "min": 10,
+      "max": 50
+    },
+    "listOfEntities": {
+      "type": "list",
+      "member": "Entity"
+    },
+    "modelIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[0-9a-z_]+$"
+    },
+    "modelInputTemplate": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "modelsMaxPageSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "nextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 8192,
+      "pattern": ".*"
+    },
+    "noDashIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[0-9a-z_]+$"
+    },
+    "ruleExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "s3BucketLocation": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "^s3:\\/\\/(.+)$"
+    },
+    "sageMakerEndpointIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "^[0-9A-Za-z_-]+$"
+    },
+    "string": {
+      "type": "string"
+    },
+    "tagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "tagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "tagKey"
+    },
+    "tagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "tagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "time": {
+      "type": "string",
+      "min": 11,
+      "max": 30
+    },
+    "utcTimestampISO8601": {
+      "type": "string",
+      "min": 10,
+      "max": 30
+    },
+    "variableName": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "variableType": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[A-Z_]{1,64}$"
+    },
+    "variableValue": {
+      "type": "string",
+      "min": 1,
+      "max": 8192
+    },
+    "wholeNumberVersionString": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "^([1-9][0-9]*)$"
+    }
+  }
+}

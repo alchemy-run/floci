@@ -61,10 +61,14 @@ NON_AWS_CONFIG_KEYS = {"duck", "ui"}
 # entry appearing in the UNREGISTERED list instead is the signal that a package was
 # added without being registered in the catalog.
 PACKAGE_NOTES = {
+    "bedrockagent": "served by its own routes, with no descriptor or enable toggle of its own",
     "cloudwatch": "one package, two descriptors: cloudwatchlogs and cloudwatchmetrics",
+    "directoryservice": "registered under the AWS signing name, ds",
+    "finspace": "a request filter answering FinSpace's data API as it answers after end of support",
     "floci": "Floci's own control surface, not an AWS service",
     "lambdamicrovms": "controllers attached to the lambda descriptor",
     "lambdaweb": "controller attached to the lambda descriptor",
+    "opensearchserverless": "registered under the AWS signing name, aoss",
     "resourcegroupstagging": "registered under the AWS signing name, tagging",
     "securityadmin": "shared admin-accounts endpoint over GuardDuty and Macie",
     "signin": "controller attached to the signin descriptor, which is keyed iam",

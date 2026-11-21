@@ -139,6 +139,17 @@ public interface TagHandler {
         return 204;
     }
 
+    /**
+     * Whether {@code arn} is the kind of resource this handler serves, judged by the ARN's form,
+     * not by whether the resource exists. Defaults to {@code true}: one handler per
+     * {@link #serviceKey()}. A service whose ARN space is split across handlers (Bedrock's
+     * guardrails and its agents both use {@code arn:aws:bedrock:...}) overrides it, so the
+     * shared tag paths and the Resource Groups Tagging API reach the right one.
+     */
+    default boolean handles(String arn) {
+        return true;
+    }
+
     Map<String, String> listTags(String region, String arn);
 
     void tagResource(String region, String arn, Map<String, String> tags);

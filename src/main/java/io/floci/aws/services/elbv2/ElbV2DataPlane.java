@@ -10,6 +10,7 @@ import io.floci.aws.core.common.CertificateReferenceResolver.CertificateMaterial
 import io.floci.aws.core.common.Pem;
 import io.floci.aws.core.common.RequestHost;
 import io.floci.aws.core.common.RequestScopes;
+import io.floci.aws.core.common.ViewerTraffic;
 import io.floci.aws.core.common.WebSocketUpgrades;
 import io.floci.aws.core.common.tls.ReloadingKeyManager;
 import io.floci.aws.services.ec2.Ec2Service;
@@ -62,6 +63,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -82,6 +84,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -141,6 +144,9 @@ public class ElbV2DataPlane {
 
     @Inject
     ObjectMapper objectMapper;
+
+    @Inject
+    ViewerTraffic viewerTraffic;
 
     private final Map<Integer, HttpServer> servers = new ConcurrentHashMap<>();
     private final Map<Integer, NetServer> tcpServers = new ConcurrentHashMap<>();
@@ -731,6 +737,8 @@ public class ElbV2DataPlane {
         TargetDescription target = pickRoundRobin(tgArn, candidates);
         int port = ElbV2HealthChecker.effectivePort(target, tg);
         String host = ElbV2TargetResolver.resolveHost(ec2Service, tg, target);
+        long started = System.nanoTime();
+        String clientIp = socket.remoteAddress() == null ? null : socket.remoteAddress().hostAddress();
         AtomicBoolean disconnected = new AtomicBoolean();
         socket.closeHandler(ignored -> disconnected.set(true));
         vertx.executeBlocking(() -> ElbV2TargetResolver.resolveCheckedAddress(host))
@@ -744,10 +752,12 @@ public class ElbV2DataPlane {
                     long idleTimeoutMillis = tcpIdleTimeoutMillis(listener.arn(), listener.region());
                     tunnel(socket, upstream, idleTimeoutMillis);
                     socket.resume();
+                    recordConnection(listener, clientIp, started, false);
                 })
                 .onFailure(err -> {
                     LOG.debugv("ELBv2 TCP connection to {0}:{1} failed: {2}", host, port, err.getMessage());
                     socket.close();
+                    recordConnection(listener, clientIp, started, true);
                 });
     }
 
@@ -1097,6 +1107,8 @@ public class ElbV2DataPlane {
             req.response().setStatusCode(502).end("No listener for host");
             return;
         }
+        observe(listener, observation -> viewerTraffic.observe(req, observation.accountId(), observation.region(),
+                observation.region(), observation.resources()));
         for (CompiledRule compiled : listener.chain()) {
             if (compiled.matches(req)) {
                 executeAction(req, compiled.action, listener.region(), listener.arn());
@@ -1238,6 +1250,36 @@ public class ElbV2DataPlane {
             return null;
         }
         return loadBalancer.getAttributes().get(key);
+    }
+
+    /** Who a listener's traffic belongs to: its load balancer and that load balancer's VPC. */
+    private record TrafficOwner(String accountId, String region, List<String> resources) {}
+
+    private void observe(RoutedListener listener, Consumer<TrafficOwner> record) {
+        try {
+            ListenerBinding binding = listenerBindings.get(listener.arn());
+            if (binding == null) {
+                return;
+            }
+            String account = AwsArnUtils.parse(listener.arn()).accountId();
+            LoadBalancer loadBalancer = asOwner(listener.arn(),
+                    () -> elbV2Service.getLoadBalancer(listener.region(), binding.loadBalancerArn()));
+            List<String> resources = new ArrayList<>();
+            resources.add(binding.loadBalancerArn());
+            if (loadBalancer != null && loadBalancer.getVpcId() != null) {
+                resources.add(AwsArnUtils.Arn.of("ec2", listener.region(), account, "vpc/" + loadBalancer.getVpcId())
+                        .toString());
+            }
+            record.accept(new TrafficOwner(account, listener.region(), List.copyOf(resources)));
+        } catch (RuntimeException e) {
+            LOG.debugv(e, "Traffic on {0} was not observed", listener.arn());
+        }
+    }
+
+    private void recordConnection(RoutedListener listener, String clientIp, long started, boolean failed) {
+        observe(listener, owner -> viewerTraffic.record(new ViewerTraffic.Observation(owner.accountId(),
+                owner.region(), owner.region(), owner.resources(), clientIp, Instant.now(),
+                (System.nanoTime() - started) / 1_000_000, failed, 0, 0)));
     }
 
     /** A request on a listener port carries no credentials, so its reads run as the listener's owner. */

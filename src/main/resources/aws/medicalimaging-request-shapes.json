@@ -1,0 +1,635 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_medicalimaging_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CopyImageSet": "CopyImageSetRequest",
+    "CreateDatastore": "CreateDatastoreRequest",
+    "DeleteDatastore": "DeleteDatastoreRequest",
+    "DeleteImageSet": "DeleteImageSetRequest",
+    "GetDICOMImportJob": "GetDICOMImportJobRequest",
+    "GetDatastore": "GetDatastoreRequest",
+    "GetImageFrame": "GetImageFrameRequest",
+    "GetImageSet": "GetImageSetRequest",
+    "GetImageSetMetadata": "GetImageSetMetadataRequest",
+    "ListDICOMImportJobs": "ListDICOMImportJobsRequest",
+    "ListDatastores": "ListDatastoresRequest",
+    "ListImageSetVersions": "ListImageSetVersionsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "SearchImageSets": "SearchImageSetsRequest",
+    "StartDICOMImportJob": "StartDICOMImportJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateImageSetMetadata": "UpdateImageSetMetadataRequest"
+  },
+  "shapes": {
+    "Arn": {
+      "type": "string",
+      "pattern": "arn:aws((-us-gov)|(-iso)|(-iso-b)|(-cn))?:medical-imaging:[a-z0-9-]+:[0-9]{12}:datastore/[0-9a-z]{32}(/imageset/[0-9a-z]{32})?"
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "\\d+"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9._-]+"
+    },
+    "CopiableAttributes": {
+      "type": "string",
+      "min": 1,
+      "max": 260000
+    },
+    "CopyDestinationImageSet": {
+      "type": "structure",
+      "required": [
+        "imageSetId",
+        "latestVersionId"
+      ],
+      "members": {
+        "imageSetId": "ImageSetId",
+        "latestVersionId": "ImageSetExternalVersionId"
+      }
+    },
+    "CopyImageSetInformation": {
+      "type": "structure",
+      "required": [
+        "sourceImageSet"
+      ],
+      "members": {
+        "sourceImageSet": "CopySourceImageSetInformation",
+        "destinationImageSet": "CopyDestinationImageSet"
+      }
+    },
+    "CopyImageSetRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "sourceImageSetId",
+        "copyImageSetInformation"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "sourceImageSetId": "ImageSetId",
+        "copyImageSetInformation": "CopyImageSetInformation",
+        "force": "Boolean",
+        "promoteToPrimary": "Boolean"
+      }
+    },
+    "CopySourceImageSetInformation": {
+      "type": "structure",
+      "required": [
+        "latestVersionId"
+      ],
+      "members": {
+        "latestVersionId": "ImageSetExternalVersionId",
+        "DICOMCopies": "MetadataCopies"
+      }
+    },
+    "CreateDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "clientToken"
+      ],
+      "members": {
+        "datastoreName": "DatastoreName",
+        "clientToken": "ClientToken",
+        "tags": "TagMap",
+        "kmsKeyArn": "KmsKeyArn",
+        "lambdaAuthorizerArn": "LambdaArn",
+        "losslessStorageFormat": "LosslessStorageFormat"
+      }
+    },
+    "DICOMAccessionNumber": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "DICOMAttribute": {
+      "type": "blob",
+      "min": 1,
+      "max": 30000
+    },
+    "DICOMPatientId": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "DICOMSeriesInstanceUID": {
+      "type": "string",
+      "min": 0,
+      "max": 512,
+      "pattern": "[0-9.]+"
+    },
+    "DICOMStudyDate": {
+      "type": "string",
+      "min": 0,
+      "max": 36
+    },
+    "DICOMStudyDateAndTime": {
+      "type": "structure",
+      "required": [
+        "DICOMStudyDate"
+      ],
+      "members": {
+        "DICOMStudyDate": "DICOMStudyDate",
+        "DICOMStudyTime": "DICOMStudyTime"
+      }
+    },
+    "DICOMStudyId": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "DICOMStudyInstanceUID": {
+      "type": "string",
+      "min": 0,
+      "max": 512,
+      "pattern": "[0-9.]+"
+    },
+    "DICOMStudyTime": {
+      "type": "string",
+      "min": 0,
+      "max": 56
+    },
+    "DICOMUpdates": {
+      "type": "structure",
+      "members": {
+        "removableAttributes": "DICOMAttribute",
+        "updatableAttributes": "DICOMAttribute"
+      }
+    },
+    "DatastoreId": {
+      "type": "string",
+      "pattern": "[0-9a-z]{32}"
+    },
+    "DatastoreName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9._/#-]+"
+    },
+    "DatastoreStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "CREATE_FAILED",
+        "ACTIVE",
+        "DELETING",
+        "DELETED"
+      ]
+    },
+    "Date": {
+      "type": "timestamp"
+    },
+    "DeleteDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId"
+      }
+    },
+    "DeleteImageSetRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId"
+      }
+    },
+    "DicomJsonMetadataImportConfiguration": {
+      "type": "structure",
+      "required": [
+        "dicomMetadataMappings"
+      ],
+      "members": {
+        "dicomMetadataMappings": "DicomMetadataMappings"
+      }
+    },
+    "DicomMetadataMapping": {
+      "type": "structure",
+      "required": [
+        "studyInstanceUID",
+        "metadataFilePath"
+      ],
+      "members": {
+        "studyInstanceUID": "DICOMStudyInstanceUID",
+        "seriesInstanceUID": "DICOMSeriesInstanceUID",
+        "metadataFilePath": "MetadataFilePath"
+      }
+    },
+    "DicomMetadataMappings": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "DicomMetadataMapping"
+    },
+    "GetDICOMImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "jobId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "jobId": "JobId"
+      }
+    },
+    "GetDatastoreRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId"
+      }
+    },
+    "GetImageFrameRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId",
+        "imageFrameInformation"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId",
+        "imageFrameInformation": "ImageFrameInformation"
+      }
+    },
+    "GetImageSetMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId",
+        "versionId": "ImageSetExternalVersionId"
+      }
+    },
+    "GetImageSetRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId",
+        "versionId": "ImageSetExternalVersionId"
+      }
+    },
+    "ImageFrameId": {
+      "type": "string",
+      "pattern": "[0-9a-z]{32}"
+    },
+    "ImageFrameInformation": {
+      "type": "structure",
+      "required": [
+        "imageFrameId"
+      ],
+      "members": {
+        "imageFrameId": "ImageFrameId"
+      }
+    },
+    "ImageSetExternalVersionId": {
+      "type": "string",
+      "pattern": "\\d+"
+    },
+    "ImageSetId": {
+      "type": "string",
+      "pattern": "[0-9a-z]{32}"
+    },
+    "ImportConfiguration": {
+      "type": "structure",
+      "members": {
+        "dicomJsonMetadataImportConfiguration": "DicomJsonMetadataImportConfiguration"
+      }
+    },
+    "JobId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[0-9a-z]+"
+    },
+    "JobName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9._/#-]+"
+    },
+    "JobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "FAILED"
+      ]
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "arn:aws[a-zA-Z-]{0,16}:kms:[a-z]{2}(-[a-z]{1,16}){1,3}-\\d{1}:\\d{12}:((key/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})|(alias/[a-zA-Z0-9:/_-]{1,256}))"
+    },
+    "LambdaArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*)?:lambda:[a-z]{2}((-gov)|(-iso(b?)))?-[a-z]+-\\d{1}:\\d{12}:function:[a-zA-Z0-9-_]+(:(\\$LATEST|[a-zA-Z0-9-_]+))?"
+    },
+    "ListDICOMImportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "jobStatus": "JobStatus",
+        "nextToken": "NextToken",
+        "maxResults": "ListDICOMImportJobsRequestMaxResultsInteger"
+      }
+    },
+    "ListDICOMImportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListDatastoresRequest": {
+      "type": "structure",
+      "members": {
+        "datastoreStatus": "DatastoreStatus",
+        "nextToken": "NextToken",
+        "maxResults": "ListDatastoresRequestMaxResultsInteger"
+      }
+    },
+    "ListDatastoresRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListImageSetVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId",
+        "nextToken": "NextToken",
+        "maxResults": "ListImageSetVersionsRequestMaxResultsInteger"
+      }
+    },
+    "ListImageSetVersionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "LosslessStorageFormat": {
+      "type": "string",
+      "enum": [
+        "HTJ2K",
+        "JPEG_2000_LOSSLESS"
+      ]
+    },
+    "MetadataCopies": {
+      "type": "structure",
+      "required": [
+        "copiableAttributes"
+      ],
+      "members": {
+        "copiableAttributes": "CopiableAttributes"
+      }
+    },
+    "MetadataFilePath": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[a-zA-Z0-9!-~]+([a-zA-Z0-9!-~ ]*[a-zA-Z0-9!-~]+)*"
+    },
+    "MetadataUpdates": {
+      "type": "structure",
+      "members": {
+        "DICOMUpdates": "DICOMUpdates",
+        "revertToVersionId": "ImageSetExternalVersionId"
+      }
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 8192,
+      "pattern": "\\p{ASCII}{0,8192}"
+    },
+    "Operator": {
+      "type": "string",
+      "enum": [
+        "EQUAL",
+        "BETWEEN"
+      ]
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws(-[^:]+)?:iam::[0-9]{12}:role/.+"
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9](/.*)?"
+    },
+    "SearchByAttributeValue": {
+      "type": "structure",
+      "members": {
+        "DICOMPatientId": "DICOMPatientId",
+        "DICOMAccessionNumber": "DICOMAccessionNumber",
+        "DICOMStudyId": "DICOMStudyId",
+        "DICOMStudyInstanceUID": "DICOMStudyInstanceUID",
+        "DICOMSeriesInstanceUID": "DICOMSeriesInstanceUID",
+        "createdAt": "Date",
+        "updatedAt": "Date",
+        "DICOMStudyDateAndTime": "DICOMStudyDateAndTime",
+        "isPrimary": "Boolean"
+      }
+    },
+    "SearchCriteria": {
+      "type": "structure",
+      "members": {
+        "filters": "SearchCriteriaFiltersList",
+        "sort": "Sort"
+      }
+    },
+    "SearchCriteriaFiltersList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SearchFilter"
+    },
+    "SearchFilter": {
+      "type": "structure",
+      "required": [
+        "values",
+        "operator"
+      ],
+      "members": {
+        "values": "SearchFilterValuesList",
+        "operator": "Operator"
+      }
+    },
+    "SearchFilterValuesList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SearchByAttributeValue"
+    },
+    "SearchImageSetsRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "searchCriteria": "SearchCriteria",
+        "maxResults": "SearchImageSetsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "SearchImageSetsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "Sort": {
+      "type": "structure",
+      "required": [
+        "sortOrder",
+        "sortField"
+      ],
+      "members": {
+        "sortOrder": "SortOrder",
+        "sortField": "SortField"
+      }
+    },
+    "SortField": {
+      "type": "string",
+      "enum": [
+        "updatedAt",
+        "createdAt",
+        "DICOMStudyDateAndTime"
+      ]
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "ASC",
+        "DESC"
+      ]
+    },
+    "StartDICOMImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "dataAccessRoleArn",
+        "clientToken",
+        "datastoreId",
+        "inputS3Uri",
+        "outputS3Uri"
+      ],
+      "members": {
+        "jobName": "JobName",
+        "dataAccessRoleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "datastoreId": "DatastoreId",
+        "inputS3Uri": "S3Uri",
+        "outputS3Uri": "S3Uri",
+        "inputOwnerAccountId": "AwsAccountId",
+        "importConfiguration": "ImportConfiguration"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "(?!aws:)[a-zA-Z+-=._:/]+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateImageSetMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "datastoreId",
+        "imageSetId",
+        "latestVersionId",
+        "updateImageSetMetadataUpdates"
+      ],
+      "members": {
+        "datastoreId": "DatastoreId",
+        "imageSetId": "ImageSetId",
+        "latestVersionId": "ImageSetExternalVersionId",
+        "force": "Boolean",
+        "includeStudyImageSets": "Boolean",
+        "updateImageSetMetadataUpdates": "MetadataUpdates"
+      }
+    }
+  }
+}

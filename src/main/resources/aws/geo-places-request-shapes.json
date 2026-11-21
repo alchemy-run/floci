@@ -1,0 +1,693 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_location_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "Autocomplete": "AutocompleteRequest",
+    "Geocode": "GeocodeRequest",
+    "GetPlace": "GetPlaceRequest",
+    "ReverseGeocode": "ReverseGeocodeRequest",
+    "SearchNearby": "SearchNearbyRequest",
+    "SearchText": "SearchTextRequest",
+    "Suggest": "SuggestRequest"
+  },
+  "shapes": {
+    "AddressTranslationComponent": {
+      "type": "string",
+      "enum": [
+        "District",
+        "Locality",
+        "Region",
+        "SubRegion"
+      ]
+    },
+    "AddressTranslationComponentList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "AddressTranslationComponent"
+    },
+    "ApiKey": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "AutocompleteAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "Core"
+      ]
+    },
+    "AutocompleteAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AutocompleteAdditionalFeature"
+    },
+    "AutocompleteFilter": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "Circle": "FilterCircle",
+        "IncludeCountries": "CountryCodeList",
+        "IncludePlaceTypes": "AutocompleteFilterPlaceTypeList"
+      }
+    },
+    "AutocompleteFilterPlaceType": {
+      "type": "string",
+      "enum": [
+        "Locality",
+        "PostalCode",
+        "Street",
+        "Intersection",
+        "PointAddress",
+        "InterpolatedAddress",
+        "Country",
+        "Region"
+      ]
+    },
+    "AutocompleteFilterPlaceTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 8,
+      "member": "AutocompleteFilterPlaceType"
+    },
+    "AutocompleteIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse"
+      ]
+    },
+    "AutocompleteRequest": {
+      "type": "structure",
+      "required": [
+        "QueryText"
+      ],
+      "members": {
+        "QueryText": "AutocompleteRequestQueryTextString",
+        "MaxResults": "AutocompleteRequestMaxResultsInteger",
+        "BiasPosition": "Position",
+        "Filter": "AutocompleteFilter",
+        "PostalCodeMode": "PostalCodeMode",
+        "AdditionalFeatures": "AutocompleteAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "AutocompleteIntendedUse",
+        "Key": "ApiKey"
+      }
+    },
+    "AutocompleteRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "AutocompleteRequestQueryTextString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "BoundingBox": {
+      "type": "list",
+      "min": 4,
+      "max": 4,
+      "member": "Double"
+    },
+    "CountryCode": {
+      "type": "string",
+      "min": 2,
+      "max": 3,
+      "pattern": "([A-Z]{2}|[A-Z]{3})"
+    },
+    "CountryCodeList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CountryCode"
+    },
+    "Double": {
+      "type": "double"
+    },
+    "FilterBusinessChainList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FilterBusinessChainListMemberString"
+    },
+    "FilterBusinessChainListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "FilterCategoryList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FilterCategoryListMemberString"
+    },
+    "FilterCategoryListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "FilterCircle": {
+      "type": "structure",
+      "required": [
+        "Center",
+        "Radius"
+      ],
+      "members": {
+        "Center": "Position",
+        "Radius": "FilterCircleRadiusLong"
+      }
+    },
+    "FilterCircleRadiusLong": {
+      "type": "long",
+      "min": 1,
+      "max": 21000000
+    },
+    "FilterFoodTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FilterFoodTypeListMemberString"
+    },
+    "FilterFoodTypeListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "GeocodeAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "TimeZone",
+        "Access",
+        "SecondaryAddresses",
+        "Intersections"
+      ]
+    },
+    "GeocodeAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "GeocodeAdditionalFeature"
+    },
+    "GeocodeAddressNamesMode": {
+      "type": "string",
+      "enum": [
+        "Matched",
+        "Administrative"
+      ]
+    },
+    "GeocodeFilter": {
+      "type": "structure",
+      "members": {
+        "IncludeCountries": "CountryCodeList",
+        "IncludePlaceTypes": "GeocodeFilterPlaceTypeList"
+      }
+    },
+    "GeocodeFilterPlaceType": {
+      "type": "string",
+      "enum": [
+        "Locality",
+        "PostalCode",
+        "Intersection",
+        "Street",
+        "PointAddress",
+        "InterpolatedAddress",
+        "SecondaryAddress",
+        "PointOfInterest",
+        "Country",
+        "Region"
+      ]
+    },
+    "GeocodeFilterPlaceTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "GeocodeFilterPlaceType"
+    },
+    "GeocodeIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse",
+        "Storage"
+      ]
+    },
+    "GeocodeQueryComponents": {
+      "type": "structure",
+      "members": {
+        "Country": "GeocodeQueryComponentsCountryString",
+        "Region": "GeocodeQueryComponentsRegionString",
+        "SubRegion": "GeocodeQueryComponentsSubRegionString",
+        "Locality": "GeocodeQueryComponentsLocalityString",
+        "District": "GeocodeQueryComponentsDistrictString",
+        "Street": "GeocodeQueryComponentsStreetString",
+        "AddressNumber": "GeocodeQueryComponentsAddressNumberString",
+        "PostalCode": "GeocodeQueryComponentsPostalCodeString"
+      }
+    },
+    "GeocodeQueryComponentsAddressNumberString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsCountryString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsDistrictString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsLocalityString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsPostalCodeString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsRegionString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsStreetString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeQueryComponentsSubRegionString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^;]+"
+    },
+    "GeocodeRequest": {
+      "type": "structure",
+      "members": {
+        "QueryText": "GeocodeRequestQueryTextString",
+        "QueryComponents": "GeocodeQueryComponents",
+        "MaxResults": "GeocodeRequestMaxResultsInteger",
+        "BiasPosition": "Position",
+        "Filter": "GeocodeFilter",
+        "AdditionalFeatures": "GeocodeAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "GeocodeIntendedUse",
+        "Key": "ApiKey",
+        "PostalCodeMode": "PostalCodeMode",
+        "AddressTranslations": "AddressTranslationComponentList",
+        "AddressNamesMode": "GeocodeAddressNamesMode"
+      }
+    },
+    "GeocodeRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "GeocodeRequestQueryTextString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "GetPlaceAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "TimeZone",
+        "Phonemes",
+        "Access",
+        "Contact",
+        "SecondaryAddresses",
+        "CrossReferences"
+      ]
+    },
+    "GetPlaceAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 6,
+      "member": "GetPlaceAdditionalFeature"
+    },
+    "GetPlaceAddressNamesMode": {
+      "type": "string",
+      "enum": [
+        "Administrative"
+      ]
+    },
+    "GetPlaceIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse",
+        "Storage"
+      ]
+    },
+    "GetPlaceRequest": {
+      "type": "structure",
+      "required": [
+        "PlaceId"
+      ],
+      "members": {
+        "PlaceId": "GetPlaceRequestPlaceIdString",
+        "AdditionalFeatures": "GetPlaceAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "GetPlaceIntendedUse",
+        "Key": "ApiKey",
+        "AddressNamesMode": "GetPlaceAddressNamesMode"
+      }
+    },
+    "GetPlaceRequestPlaceIdString": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "Heading": {
+      "type": "double",
+      "min": 0.0,
+      "max": 360.0
+    },
+    "LanguageTag": {
+      "type": "string",
+      "min": 2,
+      "max": 35
+    },
+    "Position": {
+      "type": "list",
+      "min": 2,
+      "max": 2,
+      "member": "Double"
+    },
+    "PostalCodeMode": {
+      "type": "string",
+      "enum": [
+        "MergeAllSpannedLocalities",
+        "EnumerateSpannedLocalities",
+        "EnumerateSpannedDistricts"
+      ]
+    },
+    "ReverseGeocodeAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "TimeZone",
+        "Access",
+        "Intersections"
+      ]
+    },
+    "ReverseGeocodeAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "ReverseGeocodeAdditionalFeature"
+    },
+    "ReverseGeocodeAddressNamesMode": {
+      "type": "string",
+      "enum": [
+        "Administrative"
+      ]
+    },
+    "ReverseGeocodeFilter": {
+      "type": "structure",
+      "members": {
+        "IncludePlaceTypes": "ReverseGeocodeFilterPlaceTypeList"
+      }
+    },
+    "ReverseGeocodeFilterPlaceType": {
+      "type": "string",
+      "enum": [
+        "Locality",
+        "Intersection",
+        "Street",
+        "PointAddress",
+        "InterpolatedAddress",
+        "SecondaryAddress",
+        "PointOfInterest"
+      ]
+    },
+    "ReverseGeocodeFilterPlaceTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 7,
+      "member": "ReverseGeocodeFilterPlaceType"
+    },
+    "ReverseGeocodeIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse",
+        "Storage"
+      ]
+    },
+    "ReverseGeocodeRequest": {
+      "type": "structure",
+      "required": [
+        "QueryPosition"
+      ],
+      "members": {
+        "QueryPosition": "Position",
+        "QueryRadius": "ReverseGeocodeRequestQueryRadiusLong",
+        "MaxResults": "ReverseGeocodeRequestMaxResultsInteger",
+        "Filter": "ReverseGeocodeFilter",
+        "AdditionalFeatures": "ReverseGeocodeAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "ReverseGeocodeIntendedUse",
+        "Key": "ApiKey",
+        "Heading": "Heading",
+        "AddressNamesMode": "ReverseGeocodeAddressNamesMode"
+      }
+    },
+    "ReverseGeocodeRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ReverseGeocodeRequestQueryRadiusLong": {
+      "type": "long",
+      "min": 1,
+      "max": 21000000
+    },
+    "SearchNearbyAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "TimeZone",
+        "Phonemes",
+        "Access",
+        "Contact",
+        "CrossReferences"
+      ]
+    },
+    "SearchNearbyAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SearchNearbyAdditionalFeature"
+    },
+    "SearchNearbyFilter": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "IncludeCountries": "CountryCodeList",
+        "IncludeCategories": "FilterCategoryList",
+        "ExcludeCategories": "FilterCategoryList",
+        "IncludeBusinessChains": "FilterBusinessChainList",
+        "ExcludeBusinessChains": "FilterBusinessChainList",
+        "IncludeFoodTypes": "FilterFoodTypeList",
+        "ExcludeFoodTypes": "FilterFoodTypeList"
+      }
+    },
+    "SearchNearbyIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse",
+        "Storage"
+      ]
+    },
+    "SearchNearbyRequest": {
+      "type": "structure",
+      "required": [
+        "QueryPosition"
+      ],
+      "members": {
+        "QueryPosition": "Position",
+        "QueryRadius": "SearchNearbyRequestQueryRadiusLong",
+        "MaxResults": "SearchNearbyRequestMaxResultsInteger",
+        "Filter": "SearchNearbyFilter",
+        "AdditionalFeatures": "SearchNearbyAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "SearchNearbyIntendedUse",
+        "NextToken": "Token",
+        "Key": "ApiKey"
+      }
+    },
+    "SearchNearbyRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchNearbyRequestQueryRadiusLong": {
+      "type": "long",
+      "min": 1,
+      "max": 21000000
+    },
+    "SearchTextAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "TimeZone",
+        "Phonemes",
+        "Access",
+        "Contact",
+        "CrossReferences"
+      ]
+    },
+    "SearchTextAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SearchTextAdditionalFeature"
+    },
+    "SearchTextFilter": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "Circle": "FilterCircle",
+        "IncludeCountries": "CountryCodeList"
+      }
+    },
+    "SearchTextIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse",
+        "Storage"
+      ]
+    },
+    "SearchTextRequest": {
+      "type": "structure",
+      "members": {
+        "QueryText": "SearchTextRequestQueryTextString",
+        "QueryId": "SearchTextRequestQueryIdString",
+        "MaxResults": "SearchTextRequestMaxResultsInteger",
+        "BiasPosition": "Position",
+        "Filter": "SearchTextFilter",
+        "AdditionalFeatures": "SearchTextAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "SearchTextIntendedUse",
+        "NextToken": "Token",
+        "TravelMode": "SearchTextTravelMode",
+        "Key": "ApiKey"
+      }
+    },
+    "SearchTextRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchTextRequestQueryIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "SearchTextRequestQueryTextString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "SearchTextTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "SuggestAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "Core",
+        "TimeZone",
+        "Phonemes",
+        "Access",
+        "CrossReferences"
+      ]
+    },
+    "SuggestAdditionalFeatureList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SuggestAdditionalFeature"
+    },
+    "SuggestFilter": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "Circle": "FilterCircle",
+        "IncludeCountries": "CountryCodeList"
+      }
+    },
+    "SuggestIntendedUse": {
+      "type": "string",
+      "enum": [
+        "SingleUse"
+      ]
+    },
+    "SuggestRequest": {
+      "type": "structure",
+      "required": [
+        "QueryText"
+      ],
+      "members": {
+        "QueryText": "SuggestRequestQueryTextString",
+        "MaxResults": "SuggestRequestMaxResultsInteger",
+        "MaxQueryRefinements": "SuggestRequestMaxQueryRefinementsInteger",
+        "BiasPosition": "Position",
+        "Filter": "SuggestFilter",
+        "AdditionalFeatures": "SuggestAdditionalFeatureList",
+        "Language": "LanguageTag",
+        "PoliticalView": "CountryCode",
+        "IntendedUse": "SuggestIntendedUse",
+        "TravelMode": "SuggestTravelMode",
+        "Key": "ApiKey"
+      }
+    },
+    "SuggestRequestMaxQueryRefinementsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "SuggestRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SuggestRequestQueryTextString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "SuggestTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "Token": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    }
+  }
+}

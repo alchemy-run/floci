@@ -364,7 +364,7 @@ class TranslateIntegrationTest {
     void unknownAction_returnsUnknownOperationError() {
         given()
             .contentType(CONTENT_TYPE)
-            .header("X-Amz-Target", "AWSShineFrontendService_20170701.ImportTerminology")
+            .header("X-Amz-Target", "AWSShineFrontendService_20170701.NotAnOperation")
             .header("Authorization", AUTH_HEADER)
             .body("{}")
         .when()

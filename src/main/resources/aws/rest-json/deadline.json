@@ -1,0 +1,3238 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "deadline",
+ "apiVersion": "2023-10-12",
+ "operations": {
+  "AssociateMemberToFarm": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateMemberToFleet": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateMemberToJob": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateMemberToQueue": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssumeFleetRoleForRead": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/read-roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "credentials.expiration"
+    ]
+   }
+  },
+  "AssumeFleetRoleForWorker": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}/fleet-roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "credentials.expiration"
+    ]
+   }
+  },
+  "AssumeQueueRoleForRead": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/read-roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "credentials.expiration"
+    ]
+   }
+  },
+  "AssumeQueueRoleForUser": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/user-roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "credentials.expiration"
+    ]
+   }
+  },
+  "AssumeQueueRoleForWorker": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}/queue-roles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     },
+     "queueId": {
+      "location": "querystring",
+      "name": "queueId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "credentials.expiration"
+    ]
+   }
+  },
+  "BatchGetJob": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-job",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobs[].createdAt",
+     "jobs[].updatedAt",
+     "jobs[].startedAt",
+     "jobs[].endedAt"
+    ]
+   }
+  },
+  "BatchGetJobEntity": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}/batchGetJobEntity",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchGetSession": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-session",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessions[].startedAt",
+     "sessions[].endedAt",
+     "sessions[].updatedAt"
+    ]
+   }
+  },
+  "BatchGetSessionAction": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-session-action",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessionActions[].startedAt",
+     "sessionActions[].endedAt",
+     "sessionActions[].workerUpdatedAt"
+    ]
+   }
+  },
+  "BatchGetStep": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-step",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "steps[].createdAt",
+     "steps[].updatedAt",
+     "steps[].startedAt",
+     "steps[].endedAt"
+    ]
+   }
+  },
+  "BatchGetTask": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-task",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "tasks[].createdAt",
+     "tasks[].startedAt",
+     "tasks[].endedAt",
+     "tasks[].updatedAt"
+    ]
+   }
+  },
+  "BatchGetWorker": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/batch-get-worker",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "workers[].createdAt",
+     "workers[].updatedAt"
+    ]
+   }
+  },
+  "BatchUpdateJob": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/batch-update-job",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchUpdateTask": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/batch-update-task",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CopyJobTemplate": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/template",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateBudget": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/budgets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "schedule.fixed.startTime",
+     "schedule.fixed.endTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateFarm": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateFleet": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateJob": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateLicenseEndpoint": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/license-endpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateLimit": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/limits",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateMonitor": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/monitors",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateQueue": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateQueueEnvironment": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/environments",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateQueueFleetAssociation": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-fleet-associations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateQueueLimitAssociation": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-limit-associations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateStorageProfile": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/storage-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWorker": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteBudget": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/budgets/{budgetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "budgetId": {
+      "location": "uri",
+      "name": "budgetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteFarm": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteFleet": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteLicenseEndpoint": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/license-endpoints/{licenseEndpointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "licenseEndpointId": {
+      "location": "uri",
+      "name": "licenseEndpointId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteLimit": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/limits/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteMeteredProduct": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/license-endpoints/{licenseEndpointId}/metered-products/{productId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "licenseEndpointId": {
+      "location": "uri",
+      "name": "licenseEndpointId"
+     },
+     "productId": {
+      "location": "uri",
+      "name": "productId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteMonitor": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/monitors/{monitorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "monitorId": {
+      "location": "uri",
+      "name": "monitorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteQueue": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteQueueEnvironment": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/environments/{queueEnvironmentId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "queueEnvironmentId": {
+      "location": "uri",
+      "name": "queueEnvironmentId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteQueueFleetAssociation": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-fleet-associations/{queueId}/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteQueueLimitAssociation": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-limit-associations/{queueId}/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteStorageProfile": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/storage-profiles/{storageProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "storageProfileId": {
+      "location": "uri",
+      "name": "storageProfileId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteVolume": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/volumes/{volumeId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "volumeId": {
+      "location": "uri",
+      "name": "volumeId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWorker": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateMemberFromFarm": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateMemberFromFleet": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateMemberFromJob": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateMemberFromQueue": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/members/{principalId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "principalId": {
+      "location": "uri",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetBudget": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/budgets/{budgetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "budgetId": {
+      "location": "uri",
+      "name": "budgetId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "schedule.fixed.startTime",
+     "schedule.fixed.endTime",
+     "queueStoppedAt"
+    ]
+   }
+  },
+  "GetFarm": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetFleet": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetJob": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "endedAt"
+    ]
+   }
+  },
+  "GetLicenseEndpoint": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/license-endpoints/{licenseEndpointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "licenseEndpointId": {
+      "location": "uri",
+      "name": "licenseEndpointId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetLimit": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/limits/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetMonitor": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/monitors/{monitorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "monitorId": {
+      "location": "uri",
+      "name": "monitorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetMonitorSettings": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/monitors/{monitorId}/settings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "monitorId": {
+      "location": "uri",
+      "name": "monitorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetQueue": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetQueueEnvironment": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/environments/{queueEnvironmentId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "queueEnvironmentId": {
+      "location": "uri",
+      "name": "queueEnvironmentId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetQueueFleetAssociation": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-fleet-associations/{queueId}/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetQueueLimitAssociation": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-limit-associations/{queueId}/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetSession": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/sessions/{sessionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "sessionId": {
+      "location": "uri",
+      "name": "sessionId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "startedAt",
+     "endedAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetSessionAction": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/session-actions/{sessionActionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "sessionActionId": {
+      "location": "uri",
+      "name": "sessionActionId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "startedAt",
+     "endedAt",
+     "workerUpdatedAt"
+    ]
+   }
+  },
+  "GetSessionsStatisticsAggregation": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/sessions-statistics-aggregation",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "aggregationId": {
+      "location": "querystring",
+      "name": "aggregationId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "statistics[].aggregationStartTime",
+     "statistics[].aggregationEndTime"
+    ]
+   }
+  },
+  "GetStep": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "endedAt"
+    ]
+   }
+  },
+  "GetStorageProfile": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/storage-profiles/{storageProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "storageProfileId": {
+      "location": "uri",
+      "name": "storageProfileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetStorageProfileForQueue": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/storage-profiles/{storageProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "storageProfileId": {
+      "location": "uri",
+      "name": "storageProfileId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTask": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}/tasks/{taskId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "taskId": {
+      "location": "uri",
+      "name": "taskId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "startedAt",
+     "endedAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetVolume": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/volumes/{volumeId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "volumeId": {
+      "location": "uri",
+      "name": "volumeId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastAssignedAt",
+     "lastReleasedAt",
+     "expiresAt"
+    ]
+   }
+  },
+  "GetWorker": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "ListAvailableMeteredProducts": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/metered-products",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListBudgets": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/budgets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "budgets[].createdAt",
+     "budgets[].updatedAt"
+    ]
+   }
+  },
+  "ListFarmMembers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/members",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListFarms": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "principalId": {
+      "location": "querystring",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "farms[].createdAt",
+     "farms[].updatedAt"
+    ]
+   }
+  },
+  "ListFleetMembers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/members",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListFleets": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "principalId": {
+      "location": "querystring",
+      "name": "principalId"
+     },
+     "displayName": {
+      "location": "querystring",
+      "name": "displayName"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "fleets[].createdAt",
+     "fleets[].updatedAt"
+    ]
+   }
+  },
+  "ListJobMembers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/members",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListJobParameterDefinitions": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/parameter-definitions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListJobs": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "principalId": {
+      "location": "querystring",
+      "name": "principalId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobs[].createdAt",
+     "jobs[].updatedAt",
+     "jobs[].startedAt",
+     "jobs[].endedAt"
+    ]
+   }
+  },
+  "ListLicenseEndpoints": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/license-endpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLimits": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/limits",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "limits[].createdAt",
+     "limits[].updatedAt"
+    ]
+   }
+  },
+  "ListMemberships": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/memberships",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "principalId": {
+      "location": "querystring",
+      "name": "principalId"
+     },
+     "identityStoreId": {
+      "location": "querystring",
+      "name": "identityStoreId"
+     },
+     "identityCenterRegion": {
+      "location": "querystring",
+      "name": "identityCenterRegion"
+     },
+     "resourceTypes": {
+      "location": "querystring",
+      "name": "resourceTypes",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMeteredProducts": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/license-endpoints/{licenseEndpointId}/metered-products",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "licenseEndpointId": {
+      "location": "uri",
+      "name": "licenseEndpointId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMonitors": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/monitors",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "monitors[].createdAt",
+     "monitors[].updatedAt"
+    ]
+   }
+  },
+  "ListQueueEnvironments": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/environments",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListQueueFleetAssociations": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-fleet-associations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "queueId": {
+      "location": "querystring",
+      "name": "queueId"
+     },
+     "fleetId": {
+      "location": "querystring",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "queueFleetAssociations[].createdAt",
+     "queueFleetAssociations[].updatedAt"
+    ]
+   }
+  },
+  "ListQueueLimitAssociations": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-limit-associations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "queueId": {
+      "location": "querystring",
+      "name": "queueId"
+     },
+     "limitId": {
+      "location": "querystring",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "queueLimitAssociations[].createdAt",
+     "queueLimitAssociations[].updatedAt"
+    ]
+   }
+  },
+  "ListQueueMembers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/members",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListQueues": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "principalId": {
+      "location": "querystring",
+      "name": "principalId"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "queues[].createdAt",
+     "queues[].updatedAt"
+    ]
+   }
+  },
+  "ListSessionActions": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/session-actions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "sessionId": {
+      "location": "querystring",
+      "name": "sessionId"
+     },
+     "taskId": {
+      "location": "querystring",
+      "name": "taskId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessionActions[].startedAt",
+     "sessionActions[].endedAt",
+     "sessionActions[].workerUpdatedAt"
+    ]
+   }
+  },
+  "ListSessions": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/sessions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessions[].startedAt",
+     "sessions[].endedAt",
+     "sessions[].updatedAt"
+    ]
+   }
+  },
+  "ListSessionsForWorker": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}/sessions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessions[].startedAt",
+     "sessions[].endedAt"
+    ]
+   }
+  },
+  "ListStepConsumers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}/consumers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListStepDependencies": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}/dependencies",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSteps": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "steps[].createdAt",
+     "steps[].updatedAt",
+     "steps[].startedAt",
+     "steps[].endedAt"
+    ]
+   }
+  },
+  "ListStorageProfiles": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/storage-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListStorageProfilesForQueue": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/storage-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTasks": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}/tasks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "tasks[].createdAt",
+     "tasks[].startedAt",
+     "tasks[].endedAt",
+     "tasks[].updatedAt"
+    ]
+   }
+  },
+  "ListVolumes": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/volumes",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWorkers": {
+   "method": "GET",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "workers[].createdAt",
+     "workers[].updatedAt"
+    ]
+   }
+  },
+  "PutMeteredProduct": {
+   "method": "PUT",
+   "requestUri": "/2023-10-12/license-endpoints/{licenseEndpointId}/metered-products/{productId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "licenseEndpointId": {
+      "location": "uri",
+      "name": "licenseEndpointId"
+     },
+     "productId": {
+      "location": "uri",
+      "name": "productId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchJobs": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/search/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    },
+    "timestamps": [
+     "filterExpressions.filters[].dateTimeFilter.dateTime"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobs[].createdAt",
+     "jobs[].endedAt",
+     "jobs[].startedAt",
+     "jobs[].updatedAt"
+    ]
+   }
+  },
+  "SearchSteps": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/search/steps",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    },
+    "timestamps": [
+     "filterExpressions.filters[].dateTimeFilter.dateTime"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "steps[].createdAt",
+     "steps[].startedAt",
+     "steps[].endedAt",
+     "steps[].updatedAt"
+    ]
+   }
+  },
+  "SearchTasks": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/search/tasks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    },
+    "timestamps": [
+     "filterExpressions.filters[].dateTimeFilter.dateTime"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "tasks[].startedAt",
+     "tasks[].endedAt",
+     "tasks[].updatedAt"
+    ]
+   }
+  },
+  "SearchWorkers": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/search/workers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    },
+    "timestamps": [
+     "filterExpressions.filters[].dateTimeFilter.dateTime"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "workers[].createdAt",
+     "workers[].updatedAt"
+    ]
+   }
+  },
+  "StartSessionsStatisticsAggregation": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/farms/{farmId}/sessions-statistics-aggregation",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    },
+    "timestamps": [
+     "startTime",
+     "endTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/2023-10-12/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/2023-10-12/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateBudget": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/budgets/{budgetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "budgetId": {
+      "location": "uri",
+      "name": "budgetId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "schedule.fixed.startTime",
+     "schedule.fixed.endTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateFarm": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateFleet": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateJob": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateLimit": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/limits/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateMonitor": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/monitors/{monitorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "monitorId": {
+      "location": "uri",
+      "name": "monitorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateMonitorSettings": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/monitors/{monitorId}/settings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "monitorId": {
+      "location": "uri",
+      "name": "monitorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQueue": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQueueEnvironment": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/environments/{queueEnvironmentId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "queueEnvironmentId": {
+      "location": "uri",
+      "name": "queueEnvironmentId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQueueFleetAssociation": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-fleet-associations/{queueId}/{fleetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQueueLimitAssociation": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queue-limit-associations/{queueId}/{limitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "limitId": {
+      "location": "uri",
+      "name": "limitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSession": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/sessions/{sessionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "sessionId": {
+      "location": "uri",
+      "name": "sessionId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateStep": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateStorageProfile": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/storage-profiles/{storageProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "storageProfileId": {
+      "location": "uri",
+      "name": "storageProfileId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTask": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/queues/{queueId}/jobs/{jobId}/steps/{stepId}/tasks/{taskId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "queueId": {
+      "location": "uri",
+      "name": "queueId"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     },
+     "stepId": {
+      "location": "uri",
+      "name": "stepId"
+     },
+     "taskId": {
+      "location": "uri",
+      "name": "taskId"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "X-Amz-Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWorker": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWorkerSchedule": {
+   "method": "PATCH",
+   "requestUri": "/2023-10-12/farms/{farmId}/fleets/{fleetId}/workers/{workerId}/schedule",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "farmId": {
+      "location": "uri",
+      "name": "farmId"
+     },
+     "fleetId": {
+      "location": "uri",
+      "name": "fleetId"
+     },
+     "workerId": {
+      "location": "uri",
+      "name": "workerId"
+     }
+    },
+    "timestamps": [
+     "updatedSessionActions{}.startedAt",
+     "updatedSessionActions{}.endedAt",
+     "updatedSessionActions{}.updatedAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

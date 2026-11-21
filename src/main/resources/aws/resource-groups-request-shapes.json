@@ -1,16 +1,42 @@
 {
   "_source": {
     "generator": "tools/aws/regen_resource_groups_shapes.py",
-    "botocore": "botocore 1.43.118 (local/aws/botocore)"
+    "botocore": "botocore 1.43.118 (installed package)"
   },
   "operations": {
+    "CancelTagSyncTask": "CancelTagSyncTaskInput",
     "CreateGroup": "CreateGroupInput",
-    "GetGroup": "GetGroupInput",
     "DeleteGroup": "DeleteGroupInput",
+    "GetGroup": "GetGroupInput",
+    "GetGroupConfiguration": "GetGroupConfigurationInput",
+    "GetGroupQuery": "GetGroupQueryInput",
+    "GetTagSyncTask": "GetTagSyncTaskInput",
+    "GetTags": "GetTagsInput",
     "GroupResources": "GroupResourcesInput",
-    "ListGroupResources": "ListGroupResourcesInput"
+    "ListGroupResources": "ListGroupResourcesInput",
+    "ListGroupingStatuses": "ListGroupingStatusesInput",
+    "ListGroups": "ListGroupsInput",
+    "ListTagSyncTasks": "ListTagSyncTasksInput",
+    "PutGroupConfiguration": "PutGroupConfigurationInput",
+    "SearchResources": "SearchResourcesInput",
+    "StartTagSyncTask": "StartTagSyncTaskInput",
+    "Tag": "TagInput",
+    "UngroupResources": "UngroupResourcesInput",
+    "Untag": "UntagInput",
+    "UpdateAccountSettings": "UpdateAccountSettingsInput",
+    "UpdateGroup": "UpdateGroupInput",
+    "UpdateGroupQuery": "UpdateGroupQueryInput"
   },
   "shapes": {
+    "CancelTagSyncTaskInput": {
+      "type": "structure",
+      "required": [
+        "TaskArn"
+      ],
+      "members": {
+        "TaskArn": "TagSyncTaskArn"
+      }
+    },
     "CreateGroupInput": {
       "type": "structure",
       "required": [
@@ -56,12 +82,49 @@
       "max": 300,
       "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
     },
+    "GetGroupConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "Group": "GroupString"
+      }
+    },
     "GetGroupInput": {
       "type": "structure",
       "members": {
         "GroupName": "GroupName",
         "Group": "GroupStringV2"
       }
+    },
+    "GetGroupQueryInput": {
+      "type": "structure",
+      "members": {
+        "GroupName": "GroupName",
+        "Group": "GroupString"
+      }
+    },
+    "GetTagSyncTaskInput": {
+      "type": "structure",
+      "required": [
+        "TaskArn"
+      ],
+      "members": {
+        "TaskArn": "TagSyncTaskArn"
+      }
+    },
+    "GetTagsInput": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "GroupArnV2"
+      }
+    },
+    "GroupArnV2": {
+      "type": "string",
+      "min": 12,
+      "max": 1600,
+      "pattern": "arn:aws(-[a-z]+)*:resource-groups:[a-z]{2}(-[a-z]+)+-\\d{1}:[0-9]{12}:group/([a-zA-Z0-9_\\.-]{1,300}|[a-zA-Z0-9_\\.-]{1,150}/[a-z0-9]{26})"
     },
     "GroupConfigurationItem": {
       "type": "structure",
@@ -109,6 +172,50 @@
       "max": 40,
       "pattern": "AWS::[a-zA-Z0-9]+::[a-zA-Z0-9]+"
     },
+    "GroupFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "GroupFilterName",
+        "Values": "GroupFilterValues"
+      }
+    },
+    "GroupFilterList": {
+      "type": "list",
+      "member": "GroupFilter"
+    },
+    "GroupFilterName": {
+      "type": "string",
+      "enum": [
+        "resource-type",
+        "configuration-type",
+        "owner",
+        "display-name",
+        "criticality"
+      ]
+    },
+    "GroupFilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "AWS::(AllSupported|[a-zA-Z0-9]+::[a-zA-Z0-9]+)|[\\s\\p{L}0-9_\\.-]*"
+    },
+    "GroupFilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "GroupFilterValue"
+    },
+    "GroupLifecycleEventsDesiredStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
     "GroupName": {
       "type": "string",
       "min": 1,
@@ -130,6 +237,12 @@
         "ResourceArns": "ResourceArnList"
       }
     },
+    "GroupString": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "[a-zA-Z0-9_\\.-]{1,300}|[a-zA-Z0-9_\\.-]{1,150}/[a-z0-9]{26}|arn:aws(-[a-z]+)*:resource-groups:[a-z]{2}(-[a-z]+)+-\\d{1}:[0-9]{12}:group/([a-zA-Z0-9_\\.-]{1,300}|[a-zA-Z0-9_\\.-]{1,150}/[a-z0-9]{26})"
+    },
     "GroupStringV2": {
       "type": "string",
       "min": 1,
@@ -142,6 +255,77 @@
         "GroupName": "GroupName",
         "Group": "GroupStringV2",
         "Filters": "ResourceFilterList",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListGroupingStatusesFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "ListGroupingStatusesFilterName",
+        "Values": "ListGroupingStatusesFilterValues"
+      }
+    },
+    "ListGroupingStatusesFilterList": {
+      "type": "list",
+      "member": "ListGroupingStatusesFilter"
+    },
+    "ListGroupingStatusesFilterName": {
+      "type": "string",
+      "enum": [
+        "status",
+        "resource-arn"
+      ]
+    },
+    "ListGroupingStatusesFilterValue": {
+      "type": "string",
+      "pattern": "SUCCESS|FAILED|IN_PROGRESS|SKIPPED|arn:aws(-[a-z]+)*:[a-z0-9\\-]*:([a-z]{2}(-[a-z]+)+-\\d{1})?:([0-9]{12})?:.+"
+    },
+    "ListGroupingStatusesFilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ListGroupingStatusesFilterValue"
+    },
+    "ListGroupingStatusesInput": {
+      "type": "structure",
+      "required": [
+        "Group"
+      ],
+      "members": {
+        "Group": "GroupStringV2",
+        "MaxResults": "MaxResults",
+        "Filters": "ListGroupingStatusesFilterList",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListGroupsInput": {
+      "type": "structure",
+      "members": {
+        "Filters": "GroupFilterList",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTagSyncTasksFilter": {
+      "type": "structure",
+      "members": {
+        "GroupArn": "GroupArnV2",
+        "GroupName": "GroupName"
+      }
+    },
+    "ListTagSyncTasksFilterList": {
+      "type": "list",
+      "member": "ListTagSyncTasksFilter"
+    },
+    "ListTagSyncTasksInput": {
+      "type": "structure",
+      "members": {
+        "Filters": "ListTagSyncTasksFilterList",
         "MaxResults": "MaxResults",
         "NextToken": "NextToken"
       }
@@ -162,6 +346,13 @@
       "min": 0,
       "max": 300,
       "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "PutGroupConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "Group": "GroupString",
+        "Configuration": "GroupConfigurationList"
+      }
     },
     "Query": {
       "type": "string",
@@ -232,11 +423,63 @@
         "Query": "Query"
       }
     },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*)?:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+    },
+    "SearchResourcesInput": {
+      "type": "structure",
+      "required": [
+        "ResourceQuery"
+      ],
+      "members": {
+        "ResourceQuery": "ResourceQuery",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "StartTagSyncTaskInput": {
+      "type": "structure",
+      "required": [
+        "Group",
+        "RoleArn"
+      ],
+      "members": {
+        "Group": "GroupStringV2",
+        "TagKey": "TagKey",
+        "TagValue": "TagValue",
+        "ResourceQuery": "ResourceQuery",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "TagInput": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "Tags"
+      ],
+      "members": {
+        "Arn": "GroupArnV2",
+        "Tags": "Tags"
+      }
+    },
     "TagKey": {
       "type": "string",
       "min": 1,
       "max": 128,
       "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagSyncTaskArn": {
+      "type": "string",
+      "min": 12,
+      "max": 1600,
+      "pattern": "arn:aws(-[a-z]+)*:resource-groups:[a-z]{2}(-[a-z]+)+-\\d{1}:[0-9]{12}:group/[a-zA-Z0-9_\\.-]{1,150}/[a-z0-9]{26}/tag-sync-task/[a-z0-9]{26}"
     },
     "TagValue": {
       "type": "string",
@@ -248,6 +491,56 @@
       "type": "map",
       "key": "TagKey",
       "value": "TagValue"
+    },
+    "UngroupResourcesInput": {
+      "type": "structure",
+      "required": [
+        "Group",
+        "ResourceArns"
+      ],
+      "members": {
+        "Group": "GroupStringV2",
+        "ResourceArns": "ResourceArnList"
+      }
+    },
+    "UntagInput": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "Keys"
+      ],
+      "members": {
+        "Arn": "GroupArnV2",
+        "Keys": "TagKeyList"
+      }
+    },
+    "UpdateAccountSettingsInput": {
+      "type": "structure",
+      "members": {
+        "GroupLifecycleEventsDesiredStatus": "GroupLifecycleEventsDesiredStatus"
+      }
+    },
+    "UpdateGroupInput": {
+      "type": "structure",
+      "members": {
+        "GroupName": "GroupName",
+        "Group": "GroupStringV2",
+        "Description": "Description",
+        "Criticality": "Criticality",
+        "Owner": "Owner",
+        "DisplayName": "DisplayName"
+      }
+    },
+    "UpdateGroupQueryInput": {
+      "type": "structure",
+      "required": [
+        "ResourceQuery"
+      ],
+      "members": {
+        "GroupName": "GroupName",
+        "Group": "GroupString",
+        "ResourceQuery": "ResourceQuery"
+      }
     }
   }
 }

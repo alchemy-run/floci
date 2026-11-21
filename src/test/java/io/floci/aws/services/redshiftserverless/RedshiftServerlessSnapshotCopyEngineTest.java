@@ -9,6 +9,7 @@ import io.floci.aws.services.redshift.model.Endpoint;
 import io.floci.aws.services.redshiftserverless.RedshiftServerlessSnapshotCopyService.CopyRule;
 import io.floci.aws.services.redshiftserverless.model.Namespace;
 import io.floci.aws.services.redshiftserverless.model.RedshiftServerlessSnapshot;
+import io.floci.aws.services.redshiftserverless.model.Workgroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -76,7 +78,7 @@ class RedshiftServerlessSnapshotCopyEngineTest {
         RegionResolver regionResolver = mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn(ACCOUNT_ID);
         RedshiftServerlessEndpoints endpoints = mock(RedshiftServerlessEndpoints.class);
-        when(endpoints.allocate()).thenReturn(new Endpoint("localhost", 7100));
+        doAnswer(invocation -> { Workgroup w = invocation.getArgument(0); w.setProxyPort(7100); w.setEndpoint(new Endpoint("localhost", 7100)); return null; }).when(endpoints).allocate(any(), any(), any());
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.storage().persistentPath()).thenReturn(persistentPath.toString());
         service = new RedshiftServerlessService(storageFactory, regionResolver, endpoints,

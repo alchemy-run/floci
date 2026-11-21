@@ -32,6 +32,8 @@ class TimestreamInfluxDbTest {
     @Test
     void parameterGroupAndInstanceLifecycle() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String subnet = TestFixtures.defaultVpcSubnets().get(0);
+        String securityGroup = TestFixtures.defaultSecurityGroup();
         try (TimestreamInfluxDbClient client = TestFixtures.timestreamInfluxDbClient()) {
             CreateDbParameterGroupResponse group = client.createDbParameterGroup(CreateDbParameterGroupRequest.builder()
                     .name("sdk-group-" + suffix)
@@ -46,8 +48,8 @@ class TimestreamInfluxDbTest {
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(20)
                     .dbParameterGroupIdentifier(group.id())
-                    .vpcSubnetIds("subnet-default-us-east-1-a")
-                    .vpcSecurityGroupIds("sg-default-us-east-1")
+                    .vpcSubnetIds(subnet)
+                    .vpcSecurityGroupIds(securityGroup)
                     .tags(Map.of("env", "compat"))
                     .build());
             assertNotNull(created.id());
@@ -78,8 +80,8 @@ class TimestreamInfluxDbTest {
                     .password("password123")
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(19)
-                    .vpcSubnetIds("subnet-default-us-east-1-a")
-                    .vpcSecurityGroupIds("sg-default-us-east-1")
+                    .vpcSubnetIds(subnet)
+                    .vpcSecurityGroupIds(securityGroup)
                     .build()));
         }
     }

@@ -1,0 +1,354 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kinesisvideo_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetClip": "GetClipInput",
+    "GetDASHStreamingSessionURL": "GetDASHStreamingSessionURLInput",
+    "GetHLSStreamingSessionURL": "GetHLSStreamingSessionURLInput",
+    "GetImages": "GetImagesInput",
+    "GetMediaForFragmentList": "GetMediaForFragmentListInput",
+    "ListFragments": "ListFragmentsInput"
+  },
+  "shapes": {
+    "ClipFragmentSelector": {
+      "type": "structure",
+      "required": [
+        "FragmentSelectorType",
+        "TimestampRange"
+      ],
+      "members": {
+        "FragmentSelectorType": "ClipFragmentSelectorType",
+        "TimestampRange": "ClipTimestampRange"
+      }
+    },
+    "ClipFragmentSelectorType": {
+      "type": "string",
+      "enum": [
+        "PRODUCER_TIMESTAMP",
+        "SERVER_TIMESTAMP"
+      ]
+    },
+    "ClipTimestampRange": {
+      "type": "structure",
+      "required": [
+        "StartTimestamp",
+        "EndTimestamp"
+      ],
+      "members": {
+        "StartTimestamp": "Timestamp",
+        "EndTimestamp": "Timestamp"
+      }
+    },
+    "ContainerFormat": {
+      "type": "string",
+      "enum": [
+        "FRAGMENTED_MP4",
+        "MPEG_TS"
+      ]
+    },
+    "DASHDisplayFragmentNumber": {
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "NEVER"
+      ]
+    },
+    "DASHDisplayFragmentTimestamp": {
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "NEVER"
+      ]
+    },
+    "DASHFragmentSelector": {
+      "type": "structure",
+      "members": {
+        "FragmentSelectorType": "DASHFragmentSelectorType",
+        "TimestampRange": "DASHTimestampRange"
+      }
+    },
+    "DASHFragmentSelectorType": {
+      "type": "string",
+      "enum": [
+        "PRODUCER_TIMESTAMP",
+        "SERVER_TIMESTAMP"
+      ]
+    },
+    "DASHMaxResults": {
+      "type": "long",
+      "min": 1,
+      "max": 5000
+    },
+    "DASHPlaybackMode": {
+      "type": "string",
+      "enum": [
+        "LIVE",
+        "LIVE_REPLAY",
+        "ON_DEMAND"
+      ]
+    },
+    "DASHTimestampRange": {
+      "type": "structure",
+      "members": {
+        "StartTimestamp": "Timestamp",
+        "EndTimestamp": "Timestamp"
+      }
+    },
+    "Expires": {
+      "type": "integer",
+      "min": 300,
+      "max": 43200
+    },
+    "Format": {
+      "type": "string",
+      "enum": [
+        "JPEG",
+        "PNG"
+      ]
+    },
+    "FormatConfig": {
+      "type": "map",
+      "min": 1,
+      "max": 1,
+      "key": "FormatConfigKey",
+      "value": "FormatConfigValue"
+    },
+    "FormatConfigKey": {
+      "type": "string",
+      "enum": [
+        "JPEGQuality"
+      ]
+    },
+    "FormatConfigValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^[a-zA-Z_0-9]+"
+    },
+    "FragmentNumberList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "FragmentNumberString"
+    },
+    "FragmentNumberString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9]+$"
+    },
+    "FragmentSelector": {
+      "type": "structure",
+      "required": [
+        "FragmentSelectorType",
+        "TimestampRange"
+      ],
+      "members": {
+        "FragmentSelectorType": "FragmentSelectorType",
+        "TimestampRange": "TimestampRange"
+      }
+    },
+    "FragmentSelectorType": {
+      "type": "string",
+      "enum": [
+        "PRODUCER_TIMESTAMP",
+        "SERVER_TIMESTAMP"
+      ]
+    },
+    "GetClipInput": {
+      "type": "structure",
+      "required": [
+        "ClipFragmentSelector"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "ClipFragmentSelector": "ClipFragmentSelector"
+      }
+    },
+    "GetDASHStreamingSessionURLInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "PlaybackMode": "DASHPlaybackMode",
+        "DisplayFragmentTimestamp": "DASHDisplayFragmentTimestamp",
+        "DisplayFragmentNumber": "DASHDisplayFragmentNumber",
+        "DASHFragmentSelector": "DASHFragmentSelector",
+        "Expires": "Expires",
+        "MaxManifestFragmentResults": "DASHMaxResults"
+      }
+    },
+    "GetHLSStreamingSessionURLInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "PlaybackMode": "HLSPlaybackMode",
+        "HLSFragmentSelector": "HLSFragmentSelector",
+        "ContainerFormat": "ContainerFormat",
+        "DiscontinuityMode": "HLSDiscontinuityMode",
+        "DisplayFragmentTimestamp": "HLSDisplayFragmentTimestamp",
+        "Expires": "Expires",
+        "MaxMediaPlaylistFragmentResults": "HLSMaxResults"
+      }
+    },
+    "GetImagesInput": {
+      "type": "structure",
+      "required": [
+        "ImageSelectorType",
+        "StartTimestamp",
+        "EndTimestamp",
+        "Format"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "ImageSelectorType": "ImageSelectorType",
+        "StartTimestamp": "Timestamp",
+        "EndTimestamp": "Timestamp",
+        "SamplingInterval": "SamplingInterval",
+        "Format": "Format",
+        "FormatConfig": "FormatConfig",
+        "WidthPixels": "WidthPixels",
+        "HeightPixels": "HeightPixels",
+        "MaxResults": "GetImagesMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "GetImagesMaxResults": {
+      "type": "long",
+      "min": 1,
+      "max": 100
+    },
+    "GetMediaForFragmentListInput": {
+      "type": "structure",
+      "required": [
+        "Fragments"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "Fragments": "FragmentNumberList"
+      }
+    },
+    "HLSDiscontinuityMode": {
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "NEVER",
+        "ON_DISCONTINUITY"
+      ]
+    },
+    "HLSDisplayFragmentTimestamp": {
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "NEVER"
+      ]
+    },
+    "HLSFragmentSelector": {
+      "type": "structure",
+      "members": {
+        "FragmentSelectorType": "HLSFragmentSelectorType",
+        "TimestampRange": "HLSTimestampRange"
+      }
+    },
+    "HLSFragmentSelectorType": {
+      "type": "string",
+      "enum": [
+        "PRODUCER_TIMESTAMP",
+        "SERVER_TIMESTAMP"
+      ]
+    },
+    "HLSMaxResults": {
+      "type": "long",
+      "min": 1,
+      "max": 5000
+    },
+    "HLSPlaybackMode": {
+      "type": "string",
+      "enum": [
+        "LIVE",
+        "LIVE_REPLAY",
+        "ON_DEMAND"
+      ]
+    },
+    "HLSTimestampRange": {
+      "type": "structure",
+      "members": {
+        "StartTimestamp": "Timestamp",
+        "EndTimestamp": "Timestamp"
+      }
+    },
+    "HeightPixels": {
+      "type": "integer",
+      "min": 1,
+      "max": 2160
+    },
+    "ImageSelectorType": {
+      "type": "string",
+      "enum": [
+        "PRODUCER_TIMESTAMP",
+        "SERVER_TIMESTAMP"
+      ]
+    },
+    "ListFragmentsInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "MaxResults": "ListFragmentsMaxResults",
+        "NextToken": "NextToken",
+        "FragmentSelector": "FragmentSelector"
+      }
+    },
+    "ListFragmentsMaxResults": {
+      "type": "long",
+      "min": 1,
+      "max": 1000
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[a-zA-Z0-9+/]+={0,2}"
+    },
+    "ResourceARN": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:[a-z\\d-]+:kinesisvideo:[a-z0-9-]+:[0-9]+:[a-z]+/[a-zA-Z0-9_.-]+/[0-9]+"
+    },
+    "SamplingInterval": {
+      "type": "integer"
+    },
+    "StreamName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TimestampRange": {
+      "type": "structure",
+      "required": [
+        "StartTimestamp",
+        "EndTimestamp"
+      ],
+      "members": {
+        "StartTimestamp": "Timestamp",
+        "EndTimestamp": "Timestamp"
+      }
+    },
+    "WidthPixels": {
+      "type": "integer",
+      "min": 1,
+      "max": 3840
+    }
+  }
+}

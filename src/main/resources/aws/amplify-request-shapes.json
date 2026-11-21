@@ -1,0 +1,1025 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_amplify_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateApp": "CreateAppRequest",
+    "CreateBackendEnvironment": "CreateBackendEnvironmentRequest",
+    "CreateBranch": "CreateBranchRequest",
+    "CreateDeployment": "CreateDeploymentRequest",
+    "CreateDomainAssociation": "CreateDomainAssociationRequest",
+    "CreateWebhook": "CreateWebhookRequest",
+    "DeleteApp": "DeleteAppRequest",
+    "DeleteBackendEnvironment": "DeleteBackendEnvironmentRequest",
+    "DeleteBranch": "DeleteBranchRequest",
+    "DeleteDomainAssociation": "DeleteDomainAssociationRequest",
+    "DeleteJob": "DeleteJobRequest",
+    "DeleteWebhook": "DeleteWebhookRequest",
+    "GenerateAccessLogs": "GenerateAccessLogsRequest",
+    "GetApp": "GetAppRequest",
+    "GetArtifactUrl": "GetArtifactUrlRequest",
+    "GetBackendEnvironment": "GetBackendEnvironmentRequest",
+    "GetBranch": "GetBranchRequest",
+    "GetDomainAssociation": "GetDomainAssociationRequest",
+    "GetJob": "GetJobRequest",
+    "GetWebhook": "GetWebhookRequest",
+    "ListApps": "ListAppsRequest",
+    "ListArtifacts": "ListArtifactsRequest",
+    "ListBackendEnvironments": "ListBackendEnvironmentsRequest",
+    "ListBranches": "ListBranchesRequest",
+    "ListDomainAssociations": "ListDomainAssociationsRequest",
+    "ListJobs": "ListJobsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListWebhooks": "ListWebhooksRequest",
+    "StartDeployment": "StartDeploymentRequest",
+    "StartJob": "StartJobRequest",
+    "StopJob": "StopJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateApp": "UpdateAppRequest",
+    "UpdateBranch": "UpdateBranchRequest",
+    "UpdateDomainAssociation": "UpdateDomainAssociationRequest",
+    "UpdateWebhook": "UpdateWebhookRequest"
+  },
+  "shapes": {
+    "AccessToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "(?s).+"
+    },
+    "AppId": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "d[a-z0-9]+"
+    },
+    "ArtifactId": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "AutoBranchCreationConfig": {
+      "type": "structure",
+      "members": {
+        "stage": "Stage",
+        "framework": "Framework",
+        "enableAutoBuild": "EnableAutoBuild",
+        "environmentVariables": "EnvironmentVariables",
+        "basicAuthCredentials": "BasicAuthCredentials",
+        "enableBasicAuth": "EnableBasicAuth",
+        "enablePerformanceMode": "EnablePerformanceMode",
+        "buildSpec": "BuildSpec",
+        "enablePullRequestPreview": "EnablePullRequestPreview",
+        "pullRequestEnvironmentName": "PullRequestEnvironmentName"
+      }
+    },
+    "AutoBranchCreationPattern": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "(?s).+"
+    },
+    "AutoBranchCreationPatterns": {
+      "type": "list",
+      "member": "AutoBranchCreationPattern"
+    },
+    "AutoSubDomainCreationPattern": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "(?s).+"
+    },
+    "AutoSubDomainCreationPatterns": {
+      "type": "list",
+      "member": "AutoSubDomainCreationPattern"
+    },
+    "AutoSubDomainIAMRole": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:iam::\\d{12}:role.+"
+    },
+    "Backend": {
+      "type": "structure",
+      "members": {
+        "stackArn": "StackArn"
+      }
+    },
+    "BackendEnvironmentArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "(?s).*"
+    },
+    "BasicAuthCredentials": {
+      "type": "string",
+      "max": 2000,
+      "pattern": "(?s).*"
+    },
+    "BranchName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(?s).+"
+    },
+    "BuildComputeType": {
+      "type": "string",
+      "enum": [
+        "STANDARD_8GB",
+        "LARGE_16GB",
+        "XLARGE_72GB"
+      ]
+    },
+    "BuildSpec": {
+      "type": "string",
+      "min": 1,
+      "max": 25000,
+      "pattern": "(?s).+"
+    },
+    "CacheConfig": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "CacheConfigType"
+      }
+    },
+    "CacheConfigType": {
+      "type": "string",
+      "enum": [
+        "AMPLIFY_MANAGED",
+        "AMPLIFY_MANAGED_NO_COOKIES"
+      ]
+    },
+    "CertificateArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "^arn:aws[a-z0-9-]*:acm:[a-z0-9-]+:\\d{12}:certificate\\/.+$"
+    },
+    "CertificateSettings": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "CertificateType",
+        "customCertificateArn": "CertificateArn"
+      }
+    },
+    "CertificateType": {
+      "type": "string",
+      "enum": [
+        "AMPLIFY_MANAGED",
+        "CUSTOM"
+      ]
+    },
+    "CommitId": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "CommitMessage": {
+      "type": "string",
+      "max": 10000,
+      "pattern": "(?s).*"
+    },
+    "CommitTime": {
+      "type": "timestamp"
+    },
+    "ComputeRoleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "(?s).*"
+    },
+    "Condition": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "(?s).*"
+    },
+    "CreateAppRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "Name",
+        "description": "Description",
+        "repository": "Repository",
+        "platform": "Platform",
+        "computeRoleArn": "ComputeRoleArn",
+        "iamServiceRoleArn": "ServiceRoleArn",
+        "oauthToken": "OauthToken",
+        "accessToken": "AccessToken",
+        "environmentVariables": "EnvironmentVariables",
+        "enableBranchAutoBuild": "EnableBranchAutoBuild",
+        "enableBranchAutoDeletion": "EnableBranchAutoDeletion",
+        "enableBasicAuth": "EnableBasicAuth",
+        "basicAuthCredentials": "BasicAuthCredentials",
+        "customRules": "CustomRules",
+        "tags": "TagMap",
+        "buildSpec": "BuildSpec",
+        "customHeaders": "CustomHeaders",
+        "enableAutoBranchCreation": "EnableAutoBranchCreation",
+        "autoBranchCreationPatterns": "AutoBranchCreationPatterns",
+        "autoBranchCreationConfig": "AutoBranchCreationConfig",
+        "jobConfig": "JobConfig",
+        "cacheConfig": "CacheConfig"
+      }
+    },
+    "CreateBackendEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "environmentName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "environmentName": "EnvironmentName",
+        "stackName": "StackName",
+        "deploymentArtifacts": "DeploymentArtifacts"
+      }
+    },
+    "CreateBranchRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "description": "Description",
+        "stage": "Stage",
+        "framework": "Framework",
+        "enableNotification": "EnableNotification",
+        "enableAutoBuild": "EnableAutoBuild",
+        "enableSkewProtection": "EnableSkewProtection",
+        "environmentVariables": "EnvironmentVariables",
+        "basicAuthCredentials": "BasicAuthCredentials",
+        "enableBasicAuth": "EnableBasicAuth",
+        "enablePerformanceMode": "EnablePerformanceMode",
+        "tags": "TagMap",
+        "buildSpec": "BuildSpec",
+        "ttl": "TTL",
+        "displayName": "DisplayName",
+        "enablePullRequestPreview": "EnablePullRequestPreview",
+        "pullRequestEnvironmentName": "PullRequestEnvironmentName",
+        "backendEnvironmentArn": "BackendEnvironmentArn",
+        "backend": "Backend",
+        "computeRoleArn": "ComputeRoleArn"
+      }
+    },
+    "CreateDeploymentRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "fileMap": "FileMap"
+      }
+    },
+    "CreateDomainAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "domainName",
+        "subDomainSettings"
+      ],
+      "members": {
+        "appId": "AppId",
+        "domainName": "DomainName",
+        "enableAutoSubDomain": "EnableAutoSubDomain",
+        "subDomainSettings": "SubDomainSettings",
+        "autoSubDomainCreationPatterns": "AutoSubDomainCreationPatterns",
+        "autoSubDomainIAMRole": "AutoSubDomainIAMRole",
+        "certificateSettings": "CertificateSettings"
+      }
+    },
+    "CreateWebhookRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "description": "Description"
+      }
+    },
+    "CustomHeaders": {
+      "type": "string",
+      "min": 0,
+      "max": 25000,
+      "pattern": "(?s).*"
+    },
+    "CustomRule": {
+      "type": "structure",
+      "required": [
+        "source",
+        "target"
+      ],
+      "members": {
+        "source": "Source",
+        "target": "Target",
+        "status": "Status",
+        "condition": "Condition"
+      }
+    },
+    "CustomRules": {
+      "type": "list",
+      "member": "CustomRule"
+    },
+    "DeleteAppRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId"
+      }
+    },
+    "DeleteBackendEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "environmentName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "environmentName": "EnvironmentName"
+      }
+    },
+    "DeleteBranchRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName"
+      }
+    },
+    "DeleteDomainAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "domainName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "domainName": "DomainName"
+      }
+    },
+    "DeleteJobRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName",
+        "jobId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId"
+      }
+    },
+    "DeleteWebhookRequest": {
+      "type": "structure",
+      "required": [
+        "webhookId"
+      ],
+      "members": {
+        "webhookId": "WebhookId"
+      }
+    },
+    "DeploymentArtifacts": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "(?s).+"
+    },
+    "Description": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "(?s).*"
+    },
+    "DisplayName": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "DomainName": {
+      "type": "string",
+      "max": 64,
+      "pattern": "^(((?!-)[A-Za-z0-9-]{0,62}[A-Za-z0-9])\\.)+((?!-)[A-Za-z0-9-]{1,62}[A-Za-z0-9])(\\.)?$"
+    },
+    "DomainPrefix": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "EnableAutoBranchCreation": {
+      "type": "boolean"
+    },
+    "EnableAutoBuild": {
+      "type": "boolean"
+    },
+    "EnableAutoSubDomain": {
+      "type": "boolean"
+    },
+    "EnableBasicAuth": {
+      "type": "boolean"
+    },
+    "EnableBranchAutoBuild": {
+      "type": "boolean"
+    },
+    "EnableBranchAutoDeletion": {
+      "type": "boolean"
+    },
+    "EnableNotification": {
+      "type": "boolean"
+    },
+    "EnablePerformanceMode": {
+      "type": "boolean"
+    },
+    "EnablePullRequestPreview": {
+      "type": "boolean"
+    },
+    "EnableSkewProtection": {
+      "type": "boolean"
+    },
+    "EndTime": {
+      "type": "timestamp"
+    },
+    "EnvKey": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "EnvValue": {
+      "type": "string",
+      "max": 5500,
+      "pattern": "(?s).*"
+    },
+    "EnvironmentName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(?s).+"
+    },
+    "EnvironmentVariables": {
+      "type": "map",
+      "key": "EnvKey",
+      "value": "EnvValue"
+    },
+    "FileMap": {
+      "type": "map",
+      "key": "FileName",
+      "value": "MD5Hash"
+    },
+    "FileName": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "Framework": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "GenerateAccessLogsRequest": {
+      "type": "structure",
+      "required": [
+        "domainName",
+        "appId"
+      ],
+      "members": {
+        "startTime": "StartTime",
+        "endTime": "EndTime",
+        "domainName": "DomainName",
+        "appId": "AppId"
+      }
+    },
+    "GetAppRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId"
+      }
+    },
+    "GetArtifactUrlRequest": {
+      "type": "structure",
+      "required": [
+        "artifactId"
+      ],
+      "members": {
+        "artifactId": "ArtifactId"
+      }
+    },
+    "GetBackendEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "environmentName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "environmentName": "EnvironmentName"
+      }
+    },
+    "GetBranchRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName"
+      }
+    },
+    "GetDomainAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "domainName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "domainName": "DomainName"
+      }
+    },
+    "GetJobRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName",
+        "jobId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId"
+      }
+    },
+    "GetWebhookRequest": {
+      "type": "structure",
+      "required": [
+        "webhookId"
+      ],
+      "members": {
+        "webhookId": "WebhookId"
+      }
+    },
+    "JobConfig": {
+      "type": "structure",
+      "required": [
+        "buildComputeType"
+      ],
+      "members": {
+        "buildComputeType": "BuildComputeType"
+      }
+    },
+    "JobId": {
+      "type": "string",
+      "max": 255,
+      "pattern": "[0-9]+"
+    },
+    "JobReason": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    },
+    "JobType": {
+      "type": "string",
+      "max": 10,
+      "enum": [
+        "RELEASE",
+        "RETRY",
+        "MANUAL",
+        "WEB_HOOK"
+      ]
+    },
+    "ListAppsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsForListApps"
+      }
+    },
+    "ListArtifactsRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName",
+        "jobId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBackendEnvironmentsRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "environmentName": "EnvironmentName",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBranchesRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDomainAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListJobsRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "ListWebhooksRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "MD5Hash": {
+      "type": "string",
+      "max": 32,
+      "pattern": "(?s).*"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 50
+    },
+    "MaxResultsForListApps": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(?s).+"
+    },
+    "NextToken": {
+      "type": "string",
+      "max": 2000,
+      "pattern": "(?s).*"
+    },
+    "OauthToken": {
+      "type": "string",
+      "max": 4096,
+      "pattern": "(?s).*"
+    },
+    "Platform": {
+      "type": "string",
+      "enum": [
+        "WEB",
+        "WEB_DYNAMIC",
+        "WEB_COMPUTE"
+      ]
+    },
+    "PullRequestEnvironmentName": {
+      "type": "string",
+      "max": 20,
+      "pattern": "(?s).*"
+    },
+    "Repository": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "(?s).*"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:amplify:.*"
+    },
+    "ServiceRoleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "(?s).*"
+    },
+    "Source": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "(?s).+"
+    },
+    "SourceUrl": {
+      "type": "string",
+      "max": 3000,
+      "pattern": "^(s3|https|http)://.*"
+    },
+    "SourceUrlType": {
+      "type": "string",
+      "enum": [
+        "ZIP",
+        "BUCKET_PREFIX"
+      ]
+    },
+    "StackArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:cloudformation:[a-z0-9-]+:\\d{12}:stack/.+/.+$"
+    },
+    "StackName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(?s).+"
+    },
+    "Stage": {
+      "type": "string",
+      "enum": [
+        "PRODUCTION",
+        "BETA",
+        "DEVELOPMENT",
+        "EXPERIMENTAL",
+        "PULL_REQUEST"
+      ]
+    },
+    "StartDeploymentRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId",
+        "sourceUrl": "SourceUrl",
+        "sourceUrlType": "SourceUrlType"
+      }
+    },
+    "StartJobRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName",
+        "jobType"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId",
+        "jobType": "JobType",
+        "jobReason": "JobReason",
+        "commitId": "CommitId",
+        "commitMessage": "CommitMessage",
+        "commitTime": "CommitTime"
+      }
+    },
+    "StartTime": {
+      "type": "timestamp"
+    },
+    "Status": {
+      "type": "string",
+      "min": 3,
+      "max": 7,
+      "pattern": ".{3,7}"
+    },
+    "StopJobRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName",
+        "jobId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "jobId": "JobId"
+      }
+    },
+    "SubDomainSetting": {
+      "type": "structure",
+      "required": [
+        "prefix",
+        "branchName"
+      ],
+      "members": {
+        "prefix": "DomainPrefix",
+        "branchName": "BranchName"
+      }
+    },
+    "SubDomainSettings": {
+      "type": "list",
+      "max": 500,
+      "member": "SubDomainSetting"
+    },
+    "TTL": {
+      "type": "string",
+      "min": 0,
+      "max": 32,
+      "pattern": "\\d*"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z+-=._:/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "Target": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "(?s).+"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAppRequest": {
+      "type": "structure",
+      "required": [
+        "appId"
+      ],
+      "members": {
+        "appId": "AppId",
+        "name": "Name",
+        "description": "Description",
+        "platform": "Platform",
+        "computeRoleArn": "ComputeRoleArn",
+        "iamServiceRoleArn": "ServiceRoleArn",
+        "environmentVariables": "EnvironmentVariables",
+        "enableBranchAutoBuild": "EnableAutoBuild",
+        "enableBranchAutoDeletion": "EnableBranchAutoDeletion",
+        "enableBasicAuth": "EnableBasicAuth",
+        "basicAuthCredentials": "BasicAuthCredentials",
+        "customRules": "CustomRules",
+        "buildSpec": "BuildSpec",
+        "customHeaders": "CustomHeaders",
+        "enableAutoBranchCreation": "EnableAutoBranchCreation",
+        "autoBranchCreationPatterns": "AutoBranchCreationPatterns",
+        "autoBranchCreationConfig": "AutoBranchCreationConfig",
+        "repository": "Repository",
+        "oauthToken": "OauthToken",
+        "accessToken": "AccessToken",
+        "jobConfig": "JobConfig",
+        "cacheConfig": "CacheConfig"
+      }
+    },
+    "UpdateBranchRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "branchName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "branchName": "BranchName",
+        "description": "Description",
+        "framework": "Framework",
+        "stage": "Stage",
+        "enableNotification": "EnableNotification",
+        "enableAutoBuild": "EnableAutoBuild",
+        "enableSkewProtection": "EnableSkewProtection",
+        "environmentVariables": "EnvironmentVariables",
+        "basicAuthCredentials": "BasicAuthCredentials",
+        "enableBasicAuth": "EnableBasicAuth",
+        "enablePerformanceMode": "EnablePerformanceMode",
+        "buildSpec": "BuildSpec",
+        "ttl": "TTL",
+        "displayName": "DisplayName",
+        "enablePullRequestPreview": "EnablePullRequestPreview",
+        "pullRequestEnvironmentName": "PullRequestEnvironmentName",
+        "backendEnvironmentArn": "BackendEnvironmentArn",
+        "backend": "Backend",
+        "computeRoleArn": "ComputeRoleArn"
+      }
+    },
+    "UpdateDomainAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "appId",
+        "domainName"
+      ],
+      "members": {
+        "appId": "AppId",
+        "domainName": "DomainName",
+        "enableAutoSubDomain": "EnableAutoSubDomain",
+        "subDomainSettings": "SubDomainSettings",
+        "autoSubDomainCreationPatterns": "AutoSubDomainCreationPatterns",
+        "autoSubDomainIAMRole": "AutoSubDomainIAMRole",
+        "certificateSettings": "CertificateSettings"
+      }
+    },
+    "UpdateWebhookRequest": {
+      "type": "structure",
+      "required": [
+        "webhookId"
+      ],
+      "members": {
+        "webhookId": "WebhookId",
+        "branchName": "BranchName",
+        "description": "Description"
+      }
+    },
+    "WebhookId": {
+      "type": "string",
+      "max": 255,
+      "pattern": "(?s).*"
+    }
+  }
+}

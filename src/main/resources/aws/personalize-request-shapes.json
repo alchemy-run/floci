@@ -1,0 +1,1381 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_personalize_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateBatchInferenceJob": "CreateBatchInferenceJobRequest",
+    "CreateBatchSegmentJob": "CreateBatchSegmentJobRequest",
+    "CreateCampaign": "CreateCampaignRequest",
+    "CreateDataDeletionJob": "CreateDataDeletionJobRequest",
+    "CreateDataset": "CreateDatasetRequest",
+    "CreateDatasetExportJob": "CreateDatasetExportJobRequest",
+    "CreateDatasetGroup": "CreateDatasetGroupRequest",
+    "CreateDatasetImportJob": "CreateDatasetImportJobRequest",
+    "CreateEventTracker": "CreateEventTrackerRequest",
+    "CreateFilter": "CreateFilterRequest",
+    "CreateMetricAttribution": "CreateMetricAttributionRequest",
+    "CreateRecommender": "CreateRecommenderRequest",
+    "CreateSchema": "CreateSchemaRequest",
+    "CreateSolution": "CreateSolutionRequest",
+    "CreateSolutionVersion": "CreateSolutionVersionRequest",
+    "DeleteCampaign": "DeleteCampaignRequest",
+    "DeleteDataset": "DeleteDatasetRequest",
+    "DeleteDatasetGroup": "DeleteDatasetGroupRequest",
+    "DeleteEventTracker": "DeleteEventTrackerRequest",
+    "DeleteFilter": "DeleteFilterRequest",
+    "DeleteMetricAttribution": "DeleteMetricAttributionRequest",
+    "DeleteRecommender": "DeleteRecommenderRequest",
+    "DeleteSchema": "DeleteSchemaRequest",
+    "DeleteSolution": "DeleteSolutionRequest",
+    "DescribeAlgorithm": "DescribeAlgorithmRequest",
+    "DescribeBatchInferenceJob": "DescribeBatchInferenceJobRequest",
+    "DescribeBatchSegmentJob": "DescribeBatchSegmentJobRequest",
+    "DescribeCampaign": "DescribeCampaignRequest",
+    "DescribeDataDeletionJob": "DescribeDataDeletionJobRequest",
+    "DescribeDataset": "DescribeDatasetRequest",
+    "DescribeDatasetExportJob": "DescribeDatasetExportJobRequest",
+    "DescribeDatasetGroup": "DescribeDatasetGroupRequest",
+    "DescribeDatasetImportJob": "DescribeDatasetImportJobRequest",
+    "DescribeEventTracker": "DescribeEventTrackerRequest",
+    "DescribeFeatureTransformation": "DescribeFeatureTransformationRequest",
+    "DescribeFilter": "DescribeFilterRequest",
+    "DescribeMetricAttribution": "DescribeMetricAttributionRequest",
+    "DescribeRecipe": "DescribeRecipeRequest",
+    "DescribeRecommender": "DescribeRecommenderRequest",
+    "DescribeSchema": "DescribeSchemaRequest",
+    "DescribeSolution": "DescribeSolutionRequest",
+    "DescribeSolutionVersion": "DescribeSolutionVersionRequest",
+    "GetSolutionMetrics": "GetSolutionMetricsRequest",
+    "ListBatchInferenceJobs": "ListBatchInferenceJobsRequest",
+    "ListBatchSegmentJobs": "ListBatchSegmentJobsRequest",
+    "ListCampaigns": "ListCampaignsRequest",
+    "ListDataDeletionJobs": "ListDataDeletionJobsRequest",
+    "ListDatasetExportJobs": "ListDatasetExportJobsRequest",
+    "ListDatasetGroups": "ListDatasetGroupsRequest",
+    "ListDatasetImportJobs": "ListDatasetImportJobsRequest",
+    "ListDatasets": "ListDatasetsRequest",
+    "ListEventTrackers": "ListEventTrackersRequest",
+    "ListFilters": "ListFiltersRequest",
+    "ListMetricAttributionMetrics": "ListMetricAttributionMetricsRequest",
+    "ListMetricAttributions": "ListMetricAttributionsRequest",
+    "ListRecipes": "ListRecipesRequest",
+    "ListRecommenders": "ListRecommendersRequest",
+    "ListSchemas": "ListSchemasRequest",
+    "ListSolutionVersions": "ListSolutionVersionsRequest",
+    "ListSolutions": "ListSolutionsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "StartRecommender": "StartRecommenderRequest",
+    "StopRecommender": "StopRecommenderRequest",
+    "StopSolutionVersionCreation": "StopSolutionVersionCreationRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCampaign": "UpdateCampaignRequest",
+    "UpdateDataset": "UpdateDatasetRequest",
+    "UpdateMetricAttribution": "UpdateMetricAttributionRequest",
+    "UpdateRecommender": "UpdateRecommenderRequest",
+    "UpdateSolution": "UpdateSolutionRequest"
+  },
+  "shapes": {
+    "Arn": {
+      "type": "string",
+      "max": 256,
+      "pattern": "arn:([a-z\\d-]+):personalize:.*:.*:.+"
+    },
+    "ArnList": {
+      "type": "list",
+      "max": 100,
+      "member": "Arn"
+    },
+    "AutoMLConfig": {
+      "type": "structure",
+      "members": {
+        "metricName": "MetricName",
+        "recipeList": "ArnList"
+      }
+    },
+    "AutoTrainingConfig": {
+      "type": "structure",
+      "members": {
+        "schedulingExpression": "SchedulingExpression"
+      }
+    },
+    "AvroSchema": {
+      "type": "string",
+      "max": 20000
+    },
+    "BatchInferenceJobConfig": {
+      "type": "structure",
+      "members": {
+        "itemExplorationConfig": "HyperParameters",
+        "rankingInfluence": "RankingInfluence"
+      }
+    },
+    "BatchInferenceJobInput": {
+      "type": "structure",
+      "required": [
+        "s3DataSource"
+      ],
+      "members": {
+        "s3DataSource": "S3DataConfig"
+      }
+    },
+    "BatchInferenceJobMode": {
+      "type": "string",
+      "enum": [
+        "BATCH_INFERENCE",
+        "THEME_GENERATION"
+      ]
+    },
+    "BatchInferenceJobOutput": {
+      "type": "structure",
+      "required": [
+        "s3DataDestination"
+      ],
+      "members": {
+        "s3DataDestination": "S3DataConfig"
+      }
+    },
+    "BatchSegmentJobInput": {
+      "type": "structure",
+      "required": [
+        "s3DataSource"
+      ],
+      "members": {
+        "s3DataSource": "S3DataConfig"
+      }
+    },
+    "BatchSegmentJobOutput": {
+      "type": "structure",
+      "required": [
+        "s3DataDestination"
+      ],
+      "members": {
+        "s3DataDestination": "S3DataConfig"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CampaignConfig": {
+      "type": "structure",
+      "members": {
+        "itemExplorationConfig": "HyperParameters",
+        "enableMetadataWithRecommendations": "Boolean",
+        "syncWithLatestSolutionVersion": "Boolean",
+        "rankingInfluence": "RankingInfluence"
+      }
+    },
+    "CategoricalHyperParameterRange": {
+      "type": "structure",
+      "members": {
+        "name": "ParameterName",
+        "values": "CategoricalValues"
+      }
+    },
+    "CategoricalHyperParameterRanges": {
+      "type": "list",
+      "max": 100,
+      "member": "CategoricalHyperParameterRange"
+    },
+    "CategoricalValue": {
+      "type": "string",
+      "max": 1000
+    },
+    "CategoricalValues": {
+      "type": "list",
+      "max": 100,
+      "member": "CategoricalValue"
+    },
+    "ColumnName": {
+      "type": "string",
+      "max": 150,
+      "pattern": "[A-Za-z_][A-Za-z\\d_]*"
+    },
+    "ColumnNamesList": {
+      "type": "list",
+      "max": 50,
+      "member": "ColumnName"
+    },
+    "ContinuousHyperParameterRange": {
+      "type": "structure",
+      "members": {
+        "name": "ParameterName",
+        "minValue": "ContinuousMinValue",
+        "maxValue": "ContinuousMaxValue"
+      }
+    },
+    "ContinuousHyperParameterRanges": {
+      "type": "list",
+      "max": 100,
+      "member": "ContinuousHyperParameterRange"
+    },
+    "ContinuousMaxValue": {
+      "type": "double",
+      "min": -1000000
+    },
+    "ContinuousMinValue": {
+      "type": "double",
+      "min": -1000000
+    },
+    "CreateBatchInferenceJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "solutionVersionArn",
+        "jobInput",
+        "jobOutput",
+        "roleArn"
+      ],
+      "members": {
+        "jobName": "Name",
+        "solutionVersionArn": "Arn",
+        "filterArn": "Arn",
+        "numResults": "NumBatchResults",
+        "jobInput": "BatchInferenceJobInput",
+        "jobOutput": "BatchInferenceJobOutput",
+        "roleArn": "RoleArn",
+        "batchInferenceJobConfig": "BatchInferenceJobConfig",
+        "tags": "Tags",
+        "batchInferenceJobMode": "BatchInferenceJobMode",
+        "themeGenerationConfig": "ThemeGenerationConfig"
+      }
+    },
+    "CreateBatchSegmentJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "solutionVersionArn",
+        "jobInput",
+        "jobOutput",
+        "roleArn"
+      ],
+      "members": {
+        "jobName": "Name",
+        "solutionVersionArn": "Arn",
+        "filterArn": "Arn",
+        "numResults": "NumBatchResults",
+        "jobInput": "BatchSegmentJobInput",
+        "jobOutput": "BatchSegmentJobOutput",
+        "roleArn": "RoleArn",
+        "tags": "Tags"
+      }
+    },
+    "CreateCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "solutionVersionArn"
+      ],
+      "members": {
+        "name": "Name",
+        "solutionVersionArn": "Arn",
+        "minProvisionedTPS": "TransactionsPerSecond",
+        "campaignConfig": "CampaignConfig",
+        "tags": "Tags"
+      }
+    },
+    "CreateDataDeletionJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "datasetGroupArn",
+        "dataSource",
+        "roleArn"
+      ],
+      "members": {
+        "jobName": "Name",
+        "datasetGroupArn": "Arn",
+        "dataSource": "DataSource",
+        "roleArn": "RoleArn",
+        "tags": "Tags"
+      }
+    },
+    "CreateDatasetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "datasetArn",
+        "roleArn",
+        "jobOutput"
+      ],
+      "members": {
+        "jobName": "Name",
+        "datasetArn": "Arn",
+        "ingestionMode": "IngestionMode",
+        "roleArn": "RoleArn",
+        "jobOutput": "DatasetExportJobOutput",
+        "tags": "Tags"
+      }
+    },
+    "CreateDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "Name",
+        "roleArn": "RoleArn",
+        "kmsKeyArn": "KmsKeyArn",
+        "domain": "Domain",
+        "tags": "Tags"
+      }
+    },
+    "CreateDatasetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "datasetArn",
+        "dataSource"
+      ],
+      "members": {
+        "jobName": "Name",
+        "datasetArn": "Arn",
+        "dataSource": "DataSource",
+        "roleArn": "RoleArn",
+        "tags": "Tags",
+        "importMode": "ImportMode",
+        "publishAttributionMetricsToS3": "Boolean"
+      }
+    },
+    "CreateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "schemaArn",
+        "datasetGroupArn",
+        "datasetType"
+      ],
+      "members": {
+        "name": "Name",
+        "schemaArn": "Arn",
+        "datasetGroupArn": "Arn",
+        "datasetType": "DatasetType",
+        "tags": "Tags"
+      }
+    },
+    "CreateEventTrackerRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "datasetGroupArn"
+      ],
+      "members": {
+        "name": "Name",
+        "datasetGroupArn": "Arn",
+        "tags": "Tags"
+      }
+    },
+    "CreateFilterRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "datasetGroupArn",
+        "filterExpression"
+      ],
+      "members": {
+        "name": "Name",
+        "datasetGroupArn": "Arn",
+        "filterExpression": "FilterExpression",
+        "tags": "Tags"
+      }
+    },
+    "CreateMetricAttributionRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "datasetGroupArn",
+        "metrics",
+        "metricsOutputConfig"
+      ],
+      "members": {
+        "name": "Name",
+        "datasetGroupArn": "Arn",
+        "metrics": "MetricAttributes",
+        "metricsOutputConfig": "MetricAttributionOutput"
+      }
+    },
+    "CreateRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "datasetGroupArn",
+        "recipeArn"
+      ],
+      "members": {
+        "name": "Name",
+        "datasetGroupArn": "Arn",
+        "recipeArn": "Arn",
+        "recommenderConfig": "RecommenderConfig",
+        "tags": "Tags"
+      }
+    },
+    "CreateSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "schema"
+      ],
+      "members": {
+        "name": "Name",
+        "schema": "AvroSchema",
+        "domain": "Domain"
+      }
+    },
+    "CreateSolutionRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "datasetGroupArn"
+      ],
+      "members": {
+        "name": "Name",
+        "performHPO": "Boolean",
+        "performAutoML": "PerformAutoML",
+        "performAutoTraining": "PerformAutoTraining",
+        "performIncrementalUpdate": "PerformIncrementalUpdate",
+        "recipeArn": "Arn",
+        "datasetGroupArn": "Arn",
+        "eventType": "EventType",
+        "solutionConfig": "SolutionConfig",
+        "tags": "Tags"
+      }
+    },
+    "CreateSolutionVersionRequest": {
+      "type": "structure",
+      "required": [
+        "solutionArn"
+      ],
+      "members": {
+        "name": "Name",
+        "solutionArn": "Arn",
+        "trainingMode": "TrainingMode",
+        "tags": "Tags"
+      }
+    },
+    "DataSource": {
+      "type": "structure",
+      "members": {
+        "dataLocation": "S3Location"
+      }
+    },
+    "DatasetExportJobOutput": {
+      "type": "structure",
+      "required": [
+        "s3DataDestination"
+      ],
+      "members": {
+        "s3DataDestination": "S3DataConfig"
+      }
+    },
+    "DatasetType": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[A-Za-z_]+$"
+    },
+    "DeleteCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "campaignArn"
+      ],
+      "members": {
+        "campaignArn": "Arn"
+      }
+    },
+    "DeleteDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "datasetGroupArn"
+      ],
+      "members": {
+        "datasetGroupArn": "Arn"
+      }
+    },
+    "DeleteDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn"
+      ],
+      "members": {
+        "datasetArn": "Arn"
+      }
+    },
+    "DeleteEventTrackerRequest": {
+      "type": "structure",
+      "required": [
+        "eventTrackerArn"
+      ],
+      "members": {
+        "eventTrackerArn": "Arn"
+      }
+    },
+    "DeleteFilterRequest": {
+      "type": "structure",
+      "required": [
+        "filterArn"
+      ],
+      "members": {
+        "filterArn": "Arn"
+      }
+    },
+    "DeleteMetricAttributionRequest": {
+      "type": "structure",
+      "required": [
+        "metricAttributionArn"
+      ],
+      "members": {
+        "metricAttributionArn": "Arn"
+      }
+    },
+    "DeleteRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "recommenderArn"
+      ],
+      "members": {
+        "recommenderArn": "Arn"
+      }
+    },
+    "DeleteSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "schemaArn"
+      ],
+      "members": {
+        "schemaArn": "Arn"
+      }
+    },
+    "DeleteSolutionRequest": {
+      "type": "structure",
+      "required": [
+        "solutionArn"
+      ],
+      "members": {
+        "solutionArn": "Arn"
+      }
+    },
+    "DescribeAlgorithmRequest": {
+      "type": "structure",
+      "required": [
+        "algorithmArn"
+      ],
+      "members": {
+        "algorithmArn": "Arn"
+      }
+    },
+    "DescribeBatchInferenceJobRequest": {
+      "type": "structure",
+      "required": [
+        "batchInferenceJobArn"
+      ],
+      "members": {
+        "batchInferenceJobArn": "Arn"
+      }
+    },
+    "DescribeBatchSegmentJobRequest": {
+      "type": "structure",
+      "required": [
+        "batchSegmentJobArn"
+      ],
+      "members": {
+        "batchSegmentJobArn": "Arn"
+      }
+    },
+    "DescribeCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "campaignArn"
+      ],
+      "members": {
+        "campaignArn": "Arn"
+      }
+    },
+    "DescribeDataDeletionJobRequest": {
+      "type": "structure",
+      "required": [
+        "dataDeletionJobArn"
+      ],
+      "members": {
+        "dataDeletionJobArn": "Arn"
+      }
+    },
+    "DescribeDatasetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "datasetExportJobArn"
+      ],
+      "members": {
+        "datasetExportJobArn": "Arn"
+      }
+    },
+    "DescribeDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "datasetGroupArn"
+      ],
+      "members": {
+        "datasetGroupArn": "Arn"
+      }
+    },
+    "DescribeDatasetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "datasetImportJobArn"
+      ],
+      "members": {
+        "datasetImportJobArn": "Arn"
+      }
+    },
+    "DescribeDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn"
+      ],
+      "members": {
+        "datasetArn": "Arn"
+      }
+    },
+    "DescribeEventTrackerRequest": {
+      "type": "structure",
+      "required": [
+        "eventTrackerArn"
+      ],
+      "members": {
+        "eventTrackerArn": "Arn"
+      }
+    },
+    "DescribeFeatureTransformationRequest": {
+      "type": "structure",
+      "required": [
+        "featureTransformationArn"
+      ],
+      "members": {
+        "featureTransformationArn": "Arn"
+      }
+    },
+    "DescribeFilterRequest": {
+      "type": "structure",
+      "required": [
+        "filterArn"
+      ],
+      "members": {
+        "filterArn": "Arn"
+      }
+    },
+    "DescribeMetricAttributionRequest": {
+      "type": "structure",
+      "required": [
+        "metricAttributionArn"
+      ],
+      "members": {
+        "metricAttributionArn": "Arn"
+      }
+    },
+    "DescribeRecipeRequest": {
+      "type": "structure",
+      "required": [
+        "recipeArn"
+      ],
+      "members": {
+        "recipeArn": "Arn"
+      }
+    },
+    "DescribeRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "recommenderArn"
+      ],
+      "members": {
+        "recommenderArn": "Arn"
+      }
+    },
+    "DescribeSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "schemaArn"
+      ],
+      "members": {
+        "schemaArn": "Arn"
+      }
+    },
+    "DescribeSolutionRequest": {
+      "type": "structure",
+      "required": [
+        "solutionArn"
+      ],
+      "members": {
+        "solutionArn": "Arn"
+      }
+    },
+    "DescribeSolutionVersionRequest": {
+      "type": "structure",
+      "required": [
+        "solutionVersionArn"
+      ],
+      "members": {
+        "solutionVersionArn": "Arn"
+      }
+    },
+    "Domain": {
+      "type": "string",
+      "enum": [
+        "ECOMMERCE",
+        "VIDEO_ON_DEMAND"
+      ]
+    },
+    "EventParameters": {
+      "type": "structure",
+      "members": {
+        "eventType": "EventType",
+        "eventValueThreshold": "EventTypeThresholdValue",
+        "weight": "EventTypeWeight"
+      }
+    },
+    "EventParametersList": {
+      "type": "list",
+      "max": 10,
+      "member": "EventParameters"
+    },
+    "EventType": {
+      "type": "string",
+      "max": 256
+    },
+    "EventTypeThresholdValue": {
+      "type": "double"
+    },
+    "EventTypeWeight": {
+      "type": "double",
+      "min": 0,
+      "max": 1
+    },
+    "EventValueThreshold": {
+      "type": "string",
+      "max": 256
+    },
+    "EventsConfig": {
+      "type": "structure",
+      "members": {
+        "eventParametersList": "EventParametersList"
+      }
+    },
+    "ExcludedDatasetColumns": {
+      "type": "map",
+      "max": 3,
+      "key": "DatasetType",
+      "value": "ColumnNamesList"
+    },
+    "FeatureTransformationParameters": {
+      "type": "map",
+      "max": 100,
+      "key": "ParameterName",
+      "value": "ParameterValue"
+    },
+    "FieldsForThemeGeneration": {
+      "type": "structure",
+      "required": [
+        "itemName"
+      ],
+      "members": {
+        "itemName": "ColumnName"
+      }
+    },
+    "FilterExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 2500
+    },
+    "GetSolutionMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "solutionVersionArn"
+      ],
+      "members": {
+        "solutionVersionArn": "Arn"
+      }
+    },
+    "HPOConfig": {
+      "type": "structure",
+      "members": {
+        "hpoObjective": "HPOObjective",
+        "hpoResourceConfig": "HPOResourceConfig",
+        "algorithmHyperParameterRanges": "HyperParameterRanges"
+      }
+    },
+    "HPOObjective": {
+      "type": "structure",
+      "members": {
+        "type": "HPOObjectiveType",
+        "metricName": "MetricName",
+        "metricRegex": "MetricRegex"
+      }
+    },
+    "HPOObjectiveType": {
+      "type": "string",
+      "max": 256
+    },
+    "HPOResource": {
+      "type": "string",
+      "max": 256
+    },
+    "HPOResourceConfig": {
+      "type": "structure",
+      "members": {
+        "maxNumberOfTrainingJobs": "HPOResource",
+        "maxParallelTrainingJobs": "HPOResource"
+      }
+    },
+    "HyperParameterRanges": {
+      "type": "structure",
+      "members": {
+        "integerHyperParameterRanges": "IntegerHyperParameterRanges",
+        "continuousHyperParameterRanges": "ContinuousHyperParameterRanges",
+        "categoricalHyperParameterRanges": "CategoricalHyperParameterRanges"
+      }
+    },
+    "HyperParameters": {
+      "type": "map",
+      "max": 100,
+      "key": "ParameterName",
+      "value": "ParameterValue"
+    },
+    "ImportMode": {
+      "type": "string",
+      "enum": [
+        "FULL",
+        "INCREMENTAL"
+      ]
+    },
+    "IncludedDatasetColumns": {
+      "type": "map",
+      "max": 3,
+      "key": "DatasetType",
+      "value": "ColumnNamesList"
+    },
+    "IngestionMode": {
+      "type": "string",
+      "enum": [
+        "BULK",
+        "PUT",
+        "ALL"
+      ]
+    },
+    "IntegerHyperParameterRange": {
+      "type": "structure",
+      "members": {
+        "name": "ParameterName",
+        "minValue": "IntegerMinValue",
+        "maxValue": "IntegerMaxValue"
+      }
+    },
+    "IntegerHyperParameterRanges": {
+      "type": "list",
+      "max": 100,
+      "member": "IntegerHyperParameterRange"
+    },
+    "IntegerMaxValue": {
+      "type": "integer",
+      "max": 1000000
+    },
+    "IntegerMinValue": {
+      "type": "integer",
+      "min": -1000000
+    },
+    "ItemAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 150
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "arn:aws.*:kms:.*:[0-9]{12}:key/.*"
+    },
+    "ListBatchInferenceJobsRequest": {
+      "type": "structure",
+      "members": {
+        "solutionVersionArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBatchSegmentJobsRequest": {
+      "type": "structure",
+      "members": {
+        "solutionVersionArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListCampaignsRequest": {
+      "type": "structure",
+      "members": {
+        "solutionArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDataDeletionJobsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDatasetExportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDatasetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDatasetImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDatasetsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListEventTrackersRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListFiltersRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListMetricAttributionMetricsRequest": {
+      "type": "structure",
+      "members": {
+        "metricAttributionArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListMetricAttributionsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListRecipesRequest": {
+      "type": "structure",
+      "members": {
+        "recipeProvider": "RecipeProvider",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "domain": "Domain"
+      }
+    },
+    "ListRecommendersRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListSchemasRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListSolutionVersionsRequest": {
+      "type": "structure",
+      "members": {
+        "solutionArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListSolutionsRequest": {
+      "type": "structure",
+      "members": {
+        "datasetGroupArn": "Arn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MetricAttribute": {
+      "type": "structure",
+      "required": [
+        "eventType",
+        "metricName",
+        "expression"
+      ],
+      "members": {
+        "eventType": "EventType",
+        "metricName": "MetricName",
+        "expression": "MetricExpression"
+      }
+    },
+    "MetricAttributes": {
+      "type": "list",
+      "max": 10,
+      "member": "MetricAttribute"
+    },
+    "MetricAttributesNamesList": {
+      "type": "list",
+      "max": 10,
+      "member": "MetricName"
+    },
+    "MetricAttributionOutput": {
+      "type": "structure",
+      "required": [
+        "roleArn"
+      ],
+      "members": {
+        "s3DataDestination": "S3DataConfig",
+        "roleArn": "RoleArn"
+      }
+    },
+    "MetricExpression": {
+      "type": "string",
+      "max": 256
+    },
+    "MetricName": {
+      "type": "string",
+      "max": 256
+    },
+    "MetricRegex": {
+      "type": "string",
+      "max": 256
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9\\-_]*"
+    },
+    "NextToken": {
+      "type": "string",
+      "max": 1500,
+      "pattern": "\\p{ASCII}{0,1500}"
+    },
+    "NumBatchResults": {
+      "type": "integer"
+    },
+    "ObjectiveSensitivity": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "OFF"
+      ]
+    },
+    "OptimizationObjective": {
+      "type": "structure",
+      "members": {
+        "itemAttribute": "ItemAttribute",
+        "objectiveSensitivity": "ObjectiveSensitivity"
+      }
+    },
+    "ParameterName": {
+      "type": "string",
+      "max": 256
+    },
+    "ParameterValue": {
+      "type": "string",
+      "max": 1000
+    },
+    "PerformAutoML": {
+      "type": "boolean"
+    },
+    "PerformAutoTraining": {
+      "type": "boolean"
+    },
+    "PerformIncrementalUpdate": {
+      "type": "boolean"
+    },
+    "RankingInfluence": {
+      "type": "map",
+      "key": "RankingInfluenceType",
+      "value": "RankingInfluenceWeight"
+    },
+    "RankingInfluenceType": {
+      "type": "string",
+      "enum": [
+        "POPULARITY",
+        "FRESHNESS"
+      ]
+    },
+    "RankingInfluenceWeight": {
+      "type": "double",
+      "min": 0,
+      "max": 1
+    },
+    "RecipeProvider": {
+      "type": "string",
+      "enum": [
+        "SERVICE"
+      ]
+    },
+    "RecommenderConfig": {
+      "type": "structure",
+      "members": {
+        "itemExplorationConfig": "HyperParameters",
+        "minRecommendationRequestsPerSecond": "TransactionsPerSecond",
+        "trainingDataConfig": "TrainingDataConfig",
+        "enableMetadataWithRecommendations": "Boolean"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "max": 256,
+      "pattern": "arn:([a-z\\d-]+):iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+    },
+    "S3DataConfig": {
+      "type": "structure",
+      "required": [
+        "path"
+      ],
+      "members": {
+        "path": "S3Location",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "S3Location": {
+      "type": "string",
+      "max": 256,
+      "pattern": "(s3|http|https)://.+"
+    },
+    "SchedulingExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 16,
+      "pattern": "rate\\(\\d+ days?\\)"
+    },
+    "SolutionConfig": {
+      "type": "structure",
+      "members": {
+        "eventValueThreshold": "EventValueThreshold",
+        "hpoConfig": "HPOConfig",
+        "algorithmHyperParameters": "HyperParameters",
+        "featureTransformationParameters": "FeatureTransformationParameters",
+        "autoMLConfig": "AutoMLConfig",
+        "eventsConfig": "EventsConfig",
+        "optimizationObjective": "OptimizationObjective",
+        "trainingDataConfig": "TrainingDataConfig",
+        "autoTrainingConfig": "AutoTrainingConfig"
+      }
+    },
+    "SolutionUpdateConfig": {
+      "type": "structure",
+      "members": {
+        "autoTrainingConfig": "AutoTrainingConfig",
+        "eventsConfig": "EventsConfig"
+      }
+    },
+    "StartRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "recommenderArn"
+      ],
+      "members": {
+        "recommenderArn": "Arn"
+      }
+    },
+    "StopRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "recommenderArn"
+      ],
+      "members": {
+        "recommenderArn": "Arn"
+      }
+    },
+    "StopSolutionVersionCreationRequest": {
+      "type": "structure",
+      "required": [
+        "solutionVersionArn"
+      ],
+      "members": {
+        "solutionVersionArn": "Arn"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "tagKey",
+        "tagValue"
+      ],
+      "members": {
+        "tagKey": "TagKey",
+        "tagValue": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "Tags": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "ThemeGenerationConfig": {
+      "type": "structure",
+      "required": [
+        "fieldsForThemeGeneration"
+      ],
+      "members": {
+        "fieldsForThemeGeneration": "FieldsForThemeGeneration"
+      }
+    },
+    "TrainingDataConfig": {
+      "type": "structure",
+      "members": {
+        "excludedDatasetColumns": "ExcludedDatasetColumns",
+        "includedDatasetColumns": "IncludedDatasetColumns"
+      }
+    },
+    "TrainingMode": {
+      "type": "string",
+      "enum": [
+        "FULL",
+        "UPDATE",
+        "AUTOTRAIN"
+      ]
+    },
+    "TransactionsPerSecond": {
+      "type": "integer",
+      "min": 1
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "campaignArn"
+      ],
+      "members": {
+        "campaignArn": "Arn",
+        "solutionVersionArn": "Arn",
+        "minProvisionedTPS": "TransactionsPerSecond",
+        "campaignConfig": "CampaignConfig"
+      }
+    },
+    "UpdateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn",
+        "schemaArn"
+      ],
+      "members": {
+        "datasetArn": "Arn",
+        "schemaArn": "Arn"
+      }
+    },
+    "UpdateMetricAttributionRequest": {
+      "type": "structure",
+      "members": {
+        "addMetrics": "MetricAttributes",
+        "removeMetrics": "MetricAttributesNamesList",
+        "metricsOutputConfig": "MetricAttributionOutput",
+        "metricAttributionArn": "Arn"
+      }
+    },
+    "UpdateRecommenderRequest": {
+      "type": "structure",
+      "required": [
+        "recommenderArn",
+        "recommenderConfig"
+      ],
+      "members": {
+        "recommenderArn": "Arn",
+        "recommenderConfig": "RecommenderConfig"
+      }
+    },
+    "UpdateSolutionRequest": {
+      "type": "structure",
+      "required": [
+        "solutionArn"
+      ],
+      "members": {
+        "solutionArn": "Arn",
+        "performAutoTraining": "PerformAutoTraining",
+        "performIncrementalUpdate": "PerformIncrementalUpdate",
+        "solutionUpdateConfig": "SolutionUpdateConfig"
+      }
+    }
+  }
+}

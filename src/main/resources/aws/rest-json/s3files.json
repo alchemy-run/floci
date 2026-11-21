@@ -1,0 +1,391 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "s3files",
+ "apiVersion": "2025-05-05",
+ "operations": {
+  "CreateAccessPoint": {
+   "method": "PUT",
+   "requestUri": "/access-points",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateFileSystem": {
+   "method": "PUT",
+   "requestUri": "/file-systems",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateMountTarget": {
+   "method": "PUT",
+   "requestUri": "/mount-targets",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAccessPoint": {
+   "method": "DELETE",
+   "requestUri": "/access-points/{accessPointId}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "accessPointId": {
+      "location": "uri",
+      "name": "accessPointId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteFileSystem": {
+   "method": "DELETE",
+   "requestUri": "/file-systems/{fileSystemId}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     },
+     "forceDelete": {
+      "location": "querystring",
+      "name": "forceDelete",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteFileSystemPolicy": {
+   "method": "DELETE",
+   "requestUri": "/file-systems/{fileSystemId}/policy",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteMountTarget": {
+   "method": "DELETE",
+   "requestUri": "/mount-targets/{mountTargetId}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "mountTargetId": {
+      "location": "uri",
+      "name": "mountTargetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAccessPoint": {
+   "method": "GET",
+   "requestUri": "/access-points/{accessPointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "accessPointId": {
+      "location": "uri",
+      "name": "accessPointId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetFileSystem": {
+   "method": "GET",
+   "requestUri": "/file-systems/{fileSystemId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetFileSystemPolicy": {
+   "method": "GET",
+   "requestUri": "/file-systems/{fileSystemId}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMountTarget": {
+   "method": "GET",
+   "requestUri": "/mount-targets/{mountTargetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "mountTargetId": {
+      "location": "uri",
+      "name": "mountTargetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSynchronizationConfiguration": {
+   "method": "GET",
+   "requestUri": "/file-systems/{fileSystemId}/synchronization-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAccessPoints": {
+   "method": "GET",
+   "requestUri": "/access-points",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "querystring",
+      "name": "fileSystemId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListFileSystems": {
+   "method": "GET",
+   "requestUri": "/file-systems",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "bucket": {
+      "location": "querystring",
+      "name": "bucket"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMountTargets": {
+   "method": "GET",
+   "requestUri": "/mount-targets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "querystring",
+      "name": "fileSystemId"
+     },
+     "accessPointId": {
+      "location": "querystring",
+      "name": "accessPointId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/resource-tags/{resourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceId": {
+      "location": "uri",
+      "name": "resourceId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutFileSystemPolicy": {
+   "method": "PUT",
+   "requestUri": "/file-systems/{fileSystemId}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutSynchronizationConfiguration": {
+   "method": "PUT",
+   "requestUri": "/file-systems/{fileSystemId}/synchronization-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "fileSystemId": {
+      "location": "uri",
+      "name": "fileSystemId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/resource-tags/{resourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceId": {
+      "location": "uri",
+      "name": "resourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/resource-tags/{resourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceId": {
+      "location": "uri",
+      "name": "resourceId"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateMountTarget": {
+   "method": "PUT",
+   "requestUri": "/mount-targets/{mountTargetId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "mountTargetId": {
+      "location": "uri",
+      "name": "mountTargetId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

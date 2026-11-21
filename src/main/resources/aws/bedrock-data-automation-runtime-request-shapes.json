@@ -1,0 +1,336 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_bedrock_data_automation_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetDataAutomationStatus": "GetDataAutomationStatusRequest",
+    "InvokeDataAutomation": "InvokeDataAutomationRequest",
+    "InvokeDataAutomationAsync": "InvokeDataAutomationAsyncRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest"
+  },
+  "shapes": {
+    "AssetProcessingConfiguration": {
+      "type": "structure",
+      "members": {
+        "video": "VideoAssetProcessingConfiguration"
+      }
+    },
+    "Blob": {
+      "type": "blob"
+    },
+    "Blueprint": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "version": "BlueprintVersion",
+        "stage": "BlueprintStage"
+      }
+    },
+    "BlueprintArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):blueprint/(bedrock-data-insights-public-[a-zA-Z0-9-_]{1,30}|bedrock-data-automation-public-[a-zA-Z0-9-_]{1,30}|[a-zA-Z0-9-]{12,36})"
+    },
+    "BlueprintList": {
+      "type": "list",
+      "min": 1,
+      "max": 40,
+      "member": "Blueprint"
+    },
+    "BlueprintStage": {
+      "type": "string",
+      "enum": [
+        "DEVELOPMENT",
+        "LIVE"
+      ]
+    },
+    "BlueprintVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[0-9]*"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "DataAutomationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):data-automation-project/[a-zA-Z0-9-_]+"
+    },
+    "DataAutomationConfiguration": {
+      "type": "structure",
+      "required": [
+        "dataAutomationProjectArn"
+      ],
+      "members": {
+        "dataAutomationProjectArn": "DataAutomationArn",
+        "stage": "DataAutomationStage"
+      }
+    },
+    "DataAutomationProfileArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):data-automation-profile/[a-zA-Z0-9-_.]+"
+    },
+    "DataAutomationStage": {
+      "type": "string",
+      "enum": [
+        "LIVE",
+        "DEVELOPMENT"
+      ]
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "kmsKeyId"
+      ],
+      "members": {
+        "kmsKeyId": "KMSKeyId",
+        "kmsEncryptionContext": "EncryptionContextMap"
+      }
+    },
+    "EncryptionContextKey": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": ".*\\S.*"
+    },
+    "EncryptionContextMap": {
+      "type": "map",
+      "min": 1,
+      "max": 10,
+      "key": "EncryptionContextKey",
+      "value": "EncryptionContextValue"
+    },
+    "EncryptionContextValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": ".*\\S.*"
+    },
+    "EventBridgeConfiguration": {
+      "type": "structure",
+      "required": [
+        "eventBridgeEnabled"
+      ],
+      "members": {
+        "eventBridgeEnabled": "Boolean"
+      }
+    },
+    "GetDataAutomationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "invocationArn"
+      ],
+      "members": {
+        "invocationArn": "InvocationArn"
+      }
+    },
+    "IdempotencyToken": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9](-*[a-zA-Z0-9]){1,256}"
+    },
+    "InputConfiguration": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri",
+        "assetProcessingConfiguration": "AssetProcessingConfiguration"
+      }
+    },
+    "InvocationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:[0-9]{12}:data-automation-invocation/[a-zA-Z0-9-_]+"
+    },
+    "InvokeDataAutomationAsyncRequest": {
+      "type": "structure",
+      "required": [
+        "inputConfiguration",
+        "outputConfiguration",
+        "dataAutomationProfileArn"
+      ],
+      "members": {
+        "clientToken": "IdempotencyToken",
+        "inputConfiguration": "InputConfiguration",
+        "outputConfiguration": "OutputConfiguration",
+        "dataAutomationConfiguration": "DataAutomationConfiguration",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "notificationConfiguration": "NotificationConfiguration",
+        "blueprints": "BlueprintList",
+        "dataAutomationProfileArn": "DataAutomationProfileArn",
+        "tags": "TagList"
+      }
+    },
+    "InvokeDataAutomationRequest": {
+      "type": "structure",
+      "required": [
+        "inputConfiguration",
+        "dataAutomationProfileArn"
+      ],
+      "members": {
+        "inputConfiguration": "SyncInputConfiguration",
+        "dataAutomationConfiguration": "DataAutomationConfiguration",
+        "blueprints": "BlueprintList",
+        "dataAutomationProfileArn": "DataAutomationProfileArn",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "outputConfiguration": "OutputConfiguration"
+      }
+    },
+    "KMSKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]+"
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn"
+      }
+    },
+    "NotificationConfiguration": {
+      "type": "structure",
+      "required": [
+        "eventBridgeConfiguration"
+      ],
+      "members": {
+        "eventBridgeConfiguration": "EventBridgeConfiguration"
+      }
+    },
+    "OutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri"
+      }
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9](/[^\\x00-\\x1F\\x7F\\{^}%`\\]\">\\[~<#|]*)?"
+    },
+    "SyncInputConfiguration": {
+      "type": "structure",
+      "members": {
+        "bytes": "Blob",
+        "s3Uri": "S3Uri"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "(?!aws:)[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TaggableResourceArn": {
+      "type": "string",
+      "min": 20,
+      "max": 1011,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:[0-9]{12}:data-automation-invocation/[a-zA-Z0-9-_]+"
+    },
+    "TimestampSegment": {
+      "type": "structure",
+      "required": [
+        "startTimeMillis",
+        "endTimeMillis"
+      ],
+      "members": {
+        "startTimeMillis": "TimestampSegmentStartTimeMillisLong",
+        "endTimeMillis": "TimestampSegmentEndTimeMillisLong"
+      }
+    },
+    "TimestampSegmentEndTimeMillisLong": {
+      "type": "long",
+      "min": 300000
+    },
+    "TimestampSegmentStartTimeMillisLong": {
+      "type": "long",
+      "min": 0
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "VideoAssetProcessingConfiguration": {
+      "type": "structure",
+      "members": {
+        "segmentConfiguration": "VideoSegmentConfiguration"
+      }
+    },
+    "VideoSegmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "timestampSegment": "TimestampSegment"
+      }
+    }
+  }
+}

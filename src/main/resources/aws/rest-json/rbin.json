@@ -1,0 +1,165 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "rbin",
+ "apiVersion": "2021-06-15",
+ "operations": {
+  "CreateRule": {
+   "method": "POST",
+   "requestUri": "/rules",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRule": {
+   "method": "DELETE",
+   "requestUri": "/rules/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "Identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetRule": {
+   "method": "GET",
+   "requestUri": "/rules/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListRules": {
+   "method": "POST",
+   "requestUri": "/list-rules",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "LockRule": {
+   "method": "PATCH",
+   "requestUri": "/rules/{identifier}/lock",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UnlockRule": {
+   "method": "PATCH",
+   "requestUri": "/rules/{identifier}/unlock",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRule": {
+   "method": "PATCH",
+   "requestUri": "/rules/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

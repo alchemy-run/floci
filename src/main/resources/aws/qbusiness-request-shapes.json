@@ -1,0 +1,3277 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_qbusiness_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociatePermission": "AssociatePermissionRequest",
+    "BatchDeleteDocument": "BatchDeleteDocumentRequest",
+    "BatchPutDocument": "BatchPutDocumentRequest",
+    "CancelSubscription": "CancelSubscriptionRequest",
+    "Chat": "ChatInput",
+    "ChatSync": "ChatSyncInput",
+    "CheckDocumentAccess": "CheckDocumentAccessRequest",
+    "CreateAnonymousWebExperienceUrl": "CreateAnonymousWebExperienceUrlRequest",
+    "CreateApplication": "CreateApplicationRequest",
+    "CreateChatResponseConfiguration": "CreateChatResponseConfigurationRequest",
+    "CreateDataAccessor": "CreateDataAccessorRequest",
+    "CreateDataSource": "CreateDataSourceRequest",
+    "CreateIndex": "CreateIndexRequest",
+    "CreatePlugin": "CreatePluginRequest",
+    "CreateRetriever": "CreateRetrieverRequest",
+    "CreateSubscription": "CreateSubscriptionRequest",
+    "CreateUser": "CreateUserRequest",
+    "CreateWebExperience": "CreateWebExperienceRequest",
+    "DeleteApplication": "DeleteApplicationRequest",
+    "DeleteAttachment": "DeleteAttachmentRequest",
+    "DeleteChatControlsConfiguration": "DeleteChatControlsConfigurationRequest",
+    "DeleteChatResponseConfiguration": "DeleteChatResponseConfigurationRequest",
+    "DeleteConversation": "DeleteConversationRequest",
+    "DeleteDataAccessor": "DeleteDataAccessorRequest",
+    "DeleteDataSource": "DeleteDataSourceRequest",
+    "DeleteGroup": "DeleteGroupRequest",
+    "DeleteIndex": "DeleteIndexRequest",
+    "DeletePlugin": "DeletePluginRequest",
+    "DeleteRetriever": "DeleteRetrieverRequest",
+    "DeleteUser": "DeleteUserRequest",
+    "DeleteWebExperience": "DeleteWebExperienceRequest",
+    "DisassociatePermission": "DisassociatePermissionRequest",
+    "GetApplication": "GetApplicationRequest",
+    "GetChatControlsConfiguration": "GetChatControlsConfigurationRequest",
+    "GetChatResponseConfiguration": "GetChatResponseConfigurationRequest",
+    "GetDataAccessor": "GetDataAccessorRequest",
+    "GetDataSource": "GetDataSourceRequest",
+    "GetDocumentContent": "GetDocumentContentRequest",
+    "GetGroup": "GetGroupRequest",
+    "GetIndex": "GetIndexRequest",
+    "GetMedia": "GetMediaRequest",
+    "GetPlugin": "GetPluginRequest",
+    "GetPolicy": "GetPolicyRequest",
+    "GetRetriever": "GetRetrieverRequest",
+    "GetUser": "GetUserRequest",
+    "GetWebExperience": "GetWebExperienceRequest",
+    "ListApplications": "ListApplicationsRequest",
+    "ListAttachments": "ListAttachmentsRequest",
+    "ListChatResponseConfigurations": "ListChatResponseConfigurationsRequest",
+    "ListConversations": "ListConversationsRequest",
+    "ListDataAccessors": "ListDataAccessorsRequest",
+    "ListDataSourceSyncJobs": "ListDataSourceSyncJobsRequest",
+    "ListDataSources": "ListDataSourcesRequest",
+    "ListDocuments": "ListDocumentsRequest",
+    "ListGroups": "ListGroupsRequest",
+    "ListIndices": "ListIndicesRequest",
+    "ListMessages": "ListMessagesRequest",
+    "ListPluginActions": "ListPluginActionsRequest",
+    "ListPluginTypeActions": "ListPluginTypeActionsRequest",
+    "ListPluginTypeMetadata": "ListPluginTypeMetadataRequest",
+    "ListPlugins": "ListPluginsRequest",
+    "ListRetrievers": "ListRetrieversRequest",
+    "ListSubscriptions": "ListSubscriptionsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListWebExperiences": "ListWebExperiencesRequest",
+    "PutFeedback": "PutFeedbackRequest",
+    "PutGroup": "PutGroupRequest",
+    "SearchRelevantContent": "SearchRelevantContentRequest",
+    "StartDataSourceSyncJob": "StartDataSourceSyncJobRequest",
+    "StopDataSourceSyncJob": "StopDataSourceSyncJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateApplication": "UpdateApplicationRequest",
+    "UpdateChatControlsConfiguration": "UpdateChatControlsConfigurationRequest",
+    "UpdateChatResponseConfiguration": "UpdateChatResponseConfigurationRequest",
+    "UpdateDataAccessor": "UpdateDataAccessorRequest",
+    "UpdateDataSource": "UpdateDataSourceRequest",
+    "UpdateIndex": "UpdateIndexRequest",
+    "UpdatePlugin": "UpdatePluginRequest",
+    "UpdateRetriever": "UpdateRetrieverRequest",
+    "UpdateSubscription": "UpdateSubscriptionRequest",
+    "UpdateUser": "UpdateUserRequest",
+    "UpdateWebExperience": "UpdateWebExperienceRequest"
+  },
+  "shapes": {
+    "APISchema": {
+      "type": "structure",
+      "members": {
+        "payload": "Payload",
+        "s3": "S3"
+      }
+    },
+    "APISchemaType": {
+      "type": "string",
+      "enum": [
+        "OPEN_API_V3"
+      ]
+    },
+    "AccessConfiguration": {
+      "type": "structure",
+      "required": [
+        "accessControls"
+      ],
+      "members": {
+        "accessControls": "AccessControls",
+        "memberRelation": "MemberRelation"
+      }
+    },
+    "AccessControl": {
+      "type": "structure",
+      "required": [
+        "principals"
+      ],
+      "members": {
+        "principals": "Principals",
+        "memberRelation": "MemberRelation"
+      }
+    },
+    "AccessControls": {
+      "type": "list",
+      "member": "AccessControl"
+    },
+    "ActionConfiguration": {
+      "type": "structure",
+      "required": [
+        "action"
+      ],
+      "members": {
+        "action": "QIamAction",
+        "filterConfiguration": "ActionFilterConfiguration"
+      }
+    },
+    "ActionConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ActionConfiguration"
+    },
+    "ActionExecution": {
+      "type": "structure",
+      "required": [
+        "pluginId",
+        "payload",
+        "payloadFieldNameSeparator"
+      ],
+      "members": {
+        "pluginId": "PluginId",
+        "payload": "ActionExecutionPayload",
+        "payloadFieldNameSeparator": "ActionPayloadFieldNameSeparator"
+      }
+    },
+    "ActionExecutionEvent": {
+      "type": "structure",
+      "required": [
+        "pluginId",
+        "payload",
+        "payloadFieldNameSeparator"
+      ],
+      "members": {
+        "pluginId": "PluginId",
+        "payload": "ActionExecutionPayload",
+        "payloadFieldNameSeparator": "ActionPayloadFieldNameSeparator"
+      }
+    },
+    "ActionExecutionPayload": {
+      "type": "map",
+      "key": "ActionPayloadFieldKey",
+      "value": "ActionExecutionPayloadField"
+    },
+    "ActionExecutionPayloadField": {
+      "type": "structure",
+      "required": [
+        "value"
+      ],
+      "members": {
+        "value": "ActionPayloadFieldValue"
+      }
+    },
+    "ActionFilterConfiguration": {
+      "type": "structure",
+      "required": [
+        "documentAttributeFilter"
+      ],
+      "members": {
+        "documentAttributeFilter": "AttributeFilter"
+      }
+    },
+    "ActionPayloadFieldKey": {
+      "type": "string",
+      "min": 1
+    },
+    "ActionPayloadFieldNameSeparator": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "ActionPayloadFieldValue": {
+      "type": "document"
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "ApplicationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "ApplicationName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "AssociatePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "statementId",
+        "actions",
+        "principal"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "statementId": "StatementId",
+        "actions": "QIamActions",
+        "conditions": "PermissionConditions",
+        "principal": "PrincipalRoleArn"
+      }
+    },
+    "AttachmentId": {
+      "type": "string",
+      "pattern": "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    },
+    "AttachmentInput": {
+      "type": "structure",
+      "members": {
+        "data": "Blob",
+        "name": "AttachmentName",
+        "copyFrom": "CopyFromSource"
+      }
+    },
+    "AttachmentInputEvent": {
+      "type": "structure",
+      "members": {
+        "attachment": "AttachmentInput"
+      }
+    },
+    "AttachmentName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "\\P{C}*"
+    },
+    "AttachmentsConfiguration": {
+      "type": "structure",
+      "required": [
+        "attachmentsControlMode"
+      ],
+      "members": {
+        "attachmentsControlMode": "AttachmentsControlMode"
+      }
+    },
+    "AttachmentsControlMode": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "AttachmentsInput": {
+      "type": "list",
+      "min": 1,
+      "member": "AttachmentInput"
+    },
+    "AttributeFilter": {
+      "type": "structure",
+      "members": {
+        "andAllFilters": "AttributeFilters",
+        "orAllFilters": "AttributeFilters",
+        "notFilter": "AttributeFilter",
+        "equalsTo": "DocumentAttribute",
+        "containsAll": "DocumentAttribute",
+        "containsAny": "DocumentAttribute",
+        "greaterThan": "DocumentAttribute",
+        "greaterThanOrEquals": "DocumentAttribute",
+        "lessThan": "DocumentAttribute",
+        "lessThanOrEquals": "DocumentAttribute"
+      }
+    },
+    "AttributeFilters": {
+      "type": "list",
+      "member": "AttributeFilter"
+    },
+    "AttributeType": {
+      "type": "string",
+      "enum": [
+        "STRING",
+        "STRING_LIST",
+        "NUMBER",
+        "DATE"
+      ]
+    },
+    "AttributeValueOperator": {
+      "type": "string",
+      "enum": [
+        "DELETE"
+      ]
+    },
+    "AudioExtractionConfiguration": {
+      "type": "structure",
+      "required": [
+        "audioExtractionStatus"
+      ],
+      "members": {
+        "audioExtractionStatus": "AudioExtractionStatus"
+      }
+    },
+    "AudioExtractionStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "AuthChallengeResponse": {
+      "type": "structure",
+      "required": [
+        "responseMap"
+      ],
+      "members": {
+        "responseMap": "AuthorizationResponseMap"
+      }
+    },
+    "AuthChallengeResponseEvent": {
+      "type": "structure",
+      "required": [
+        "responseMap"
+      ],
+      "members": {
+        "responseMap": "AuthorizationResponseMap"
+      }
+    },
+    "AuthResponseKey": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "AuthResponseValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "AuthorizationResponseMap": {
+      "type": "map",
+      "key": "AuthResponseKey",
+      "value": "AuthResponseValue"
+    },
+    "AutoSubscriptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "autoSubscribe"
+      ],
+      "members": {
+        "autoSubscribe": "AutoSubscriptionStatus",
+        "defaultSubscriptionType": "SubscriptionType"
+      }
+    },
+    "AutoSubscriptionStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "BasicAuthConfiguration": {
+      "type": "structure",
+      "required": [
+        "secretArn",
+        "roleArn"
+      ],
+      "members": {
+        "secretArn": "SecretArn",
+        "roleArn": "RoleArn"
+      }
+    },
+    "BatchDeleteDocumentRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "documents"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "documents": "DeleteDocuments",
+        "dataSourceSyncId": "ExecutionId"
+      }
+    },
+    "BatchPutDocumentRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "documents"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "documents": "Documents",
+        "roleArn": "RoleArn",
+        "dataSourceSyncId": "ExecutionId"
+      }
+    },
+    "Blob": {
+      "type": "blob"
+    },
+    "BlockedPhrase": {
+      "type": "string",
+      "min": 0,
+      "max": 36,
+      "pattern": "\\P{C}*"
+    },
+    "BlockedPhrases": {
+      "type": "list",
+      "member": "BlockedPhrase"
+    },
+    "BlockedPhrasesConfigurationUpdate": {
+      "type": "structure",
+      "members": {
+        "blockedPhrasesToCreateOrUpdate": "BlockedPhrases",
+        "blockedPhrasesToDelete": "BlockedPhrases",
+        "systemMessageOverride": "SystemMessageOverride"
+      }
+    },
+    "BoostingDurationInSeconds": {
+      "type": "long",
+      "min": 0,
+      "max": 999999999
+    },
+    "BrowserExtension": {
+      "type": "string",
+      "enum": [
+        "FIREFOX",
+        "CHROME"
+      ]
+    },
+    "BrowserExtensionConfiguration": {
+      "type": "structure",
+      "required": [
+        "enabledBrowserExtensions"
+      ],
+      "members": {
+        "enabledBrowserExtensions": "BrowserExtensionList"
+      }
+    },
+    "BrowserExtensionList": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "BrowserExtension"
+    },
+    "CancelSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "subscriptionId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "subscriptionId": "SubscriptionId"
+      }
+    },
+    "ChatInput": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "UserId",
+        "userGroups": "UserGroups",
+        "conversationId": "ConversationId",
+        "parentMessageId": "MessageId",
+        "clientToken": "ClientToken",
+        "inputStream": "ChatInputStream"
+      }
+    },
+    "ChatInputStream": {
+      "type": "structure",
+      "members": {
+        "configurationEvent": "ConfigurationEvent",
+        "textEvent": "TextInputEvent",
+        "attachmentEvent": "AttachmentInputEvent",
+        "actionExecutionEvent": "ActionExecutionEvent",
+        "endOfInputEvent": "EndOfInputEvent",
+        "authChallengeResponseEvent": "AuthChallengeResponseEvent"
+      }
+    },
+    "ChatMode": {
+      "type": "string",
+      "enum": [
+        "RETRIEVAL_MODE",
+        "CREATOR_MODE",
+        "PLUGIN_MODE"
+      ]
+    },
+    "ChatModeConfiguration": {
+      "type": "structure",
+      "members": {
+        "pluginConfiguration": "PluginConfiguration"
+      }
+    },
+    "ChatResponseConfigurationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "ChatSyncInput": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "UserId",
+        "userGroups": "UserGroups",
+        "userMessage": "UserMessage",
+        "attachments": "AttachmentsInput",
+        "actionExecution": "ActionExecution",
+        "authChallengeResponse": "AuthChallengeResponse",
+        "conversationId": "ConversationId",
+        "parentMessageId": "MessageId",
+        "attributeFilter": "AttributeFilter",
+        "chatMode": "ChatMode",
+        "chatModeConfiguration": "ChatModeConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CheckDocumentAccessRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "userId",
+        "documentId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "userId": "String",
+        "documentId": "DocumentId",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "ClientIdForOIDC": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.:/()*?=-]*"
+    },
+    "ClientIdsForOIDC": {
+      "type": "list",
+      "member": "ClientIdForOIDC"
+    },
+    "ClientNamespace": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9._-]*"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "ConfigurationEvent": {
+      "type": "structure",
+      "members": {
+        "chatMode": "ChatMode",
+        "chatModeConfiguration": "ChatModeConfiguration",
+        "attributeFilter": "AttributeFilter"
+      }
+    },
+    "ContentBlockerRule": {
+      "type": "structure",
+      "members": {
+        "systemMessageOverride": "SystemMessageOverride"
+      }
+    },
+    "ContentRetrievalRule": {
+      "type": "structure",
+      "members": {
+        "eligibleDataSources": "EligibleDataSources"
+      }
+    },
+    "ContentSource": {
+      "type": "structure",
+      "members": {
+        "retriever": "RetrieverContentSource"
+      }
+    },
+    "ContentType": {
+      "type": "string",
+      "enum": [
+        "PDF",
+        "HTML",
+        "MS_WORD",
+        "PLAIN_TEXT",
+        "PPT",
+        "RTF",
+        "XML",
+        "XSLT",
+        "MS_EXCEL",
+        "CSV",
+        "JSON",
+        "MD"
+      ]
+    },
+    "ConversationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "ConversationSource": {
+      "type": "structure",
+      "required": [
+        "conversationId",
+        "attachmentId"
+      ],
+      "members": {
+        "conversationId": "ConversationId",
+        "attachmentId": "AttachmentId"
+      }
+    },
+    "CopyFromSource": {
+      "type": "structure",
+      "members": {
+        "conversation": "ConversationSource"
+      }
+    },
+    "CreateAnonymousWebExperienceUrlRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "webExperienceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "webExperienceId": "WebExperienceId",
+        "sessionDurationInMinutes": "SessionDurationInMinutes"
+      }
+    },
+    "CreateApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "displayName"
+      ],
+      "members": {
+        "displayName": "ApplicationName",
+        "roleArn": "RoleArn",
+        "identityType": "IdentityType",
+        "iamIdentityProviderArn": "IAMIdentityProviderArn",
+        "identityCenterInstanceArn": "InstanceArn",
+        "clientIdsForOIDC": "ClientIdsForOIDC",
+        "description": "Description",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tags": "Tags",
+        "clientToken": "ClientToken",
+        "attachmentsConfiguration": "AttachmentsConfiguration",
+        "qAppsConfiguration": "QAppsConfiguration",
+        "personalizationConfiguration": "PersonalizationConfiguration",
+        "quickSightConfiguration": "QuickSightConfiguration"
+      }
+    },
+    "CreateChatResponseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "displayName",
+        "responseConfigurations"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "displayName": "DisplayName",
+        "clientToken": "String",
+        "responseConfigurations": "ResponseConfigurations",
+        "tags": "Tags"
+      }
+    },
+    "CreateDataAccessorRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "principal",
+        "actionConfigurations",
+        "displayName"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "principal": "PrincipalRoleArn",
+        "actionConfigurations": "ActionConfigurationList",
+        "clientToken": "ClientToken",
+        "displayName": "DataAccessorName",
+        "authenticationDetail": "DataAccessorAuthenticationDetail",
+        "tags": "Tags"
+      }
+    },
+    "CreateDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "displayName",
+        "configuration"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "displayName": "DataSourceName",
+        "configuration": "DataSourceConfiguration",
+        "vpcConfiguration": "DataSourceVpcConfiguration",
+        "description": "Description",
+        "tags": "Tags",
+        "syncSchedule": "SyncSchedule",
+        "roleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "documentEnrichmentConfiguration": "DocumentEnrichmentConfiguration",
+        "mediaExtractionConfiguration": "MediaExtractionConfiguration"
+      }
+    },
+    "CreateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "displayName"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "displayName": "IndexName",
+        "description": "Description",
+        "type": "IndexType",
+        "tags": "Tags",
+        "capacityConfiguration": "IndexCapacityConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreatePluginRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "displayName",
+        "type",
+        "authConfiguration"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "displayName": "PluginName",
+        "type": "PluginType",
+        "authConfiguration": "PluginAuthConfiguration",
+        "serverUrl": "Url",
+        "customPluginConfiguration": "CustomPluginConfiguration",
+        "tags": "Tags",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateRetrieverRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "type",
+        "displayName",
+        "configuration"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "type": "RetrieverType",
+        "displayName": "RetrieverName",
+        "configuration": "RetrieverConfiguration",
+        "roleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "tags": "Tags"
+      }
+    },
+    "CreateSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "principal",
+        "type"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "principal": "SubscriptionPrincipal",
+        "type": "SubscriptionType",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateUserRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "userId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "String",
+        "userAliases": "CreateUserRequestUserAliasesList",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateUserRequestUserAliasesList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "UserAlias"
+    },
+    "CreateWebExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "title": "WebExperienceTitle",
+        "subtitle": "WebExperienceSubtitle",
+        "welcomeMessage": "WebExperienceWelcomeMessage",
+        "samplePromptsControlMode": "WebExperienceSamplePromptsControlMode",
+        "origins": "WebExperienceOrigins",
+        "roleArn": "RoleArn",
+        "tags": "Tags",
+        "clientToken": "ClientToken",
+        "identityProviderConfiguration": "IdentityProviderConfiguration",
+        "browserExtensionConfiguration": "BrowserExtensionConfiguration",
+        "customizationConfiguration": "CustomizationConfiguration"
+      }
+    },
+    "CreatorModeConfiguration": {
+      "type": "structure",
+      "required": [
+        "creatorModeControl"
+      ],
+      "members": {
+        "creatorModeControl": "CreatorModeControl"
+      }
+    },
+    "CreatorModeControl": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "CustomCSSUrl": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "(https?://[a-zA-Z0-9-_.+%/]+\\.css)?"
+    },
+    "CustomPluginConfiguration": {
+      "type": "structure",
+      "required": [
+        "description",
+        "apiSchemaType"
+      ],
+      "members": {
+        "description": "PluginDescription",
+        "apiSchemaType": "APISchemaType",
+        "apiSchema": "APISchema"
+      }
+    },
+    "CustomizationConfiguration": {
+      "type": "structure",
+      "members": {
+        "customCSSUrl": "CustomCSSUrl",
+        "logoUrl": "LogoUrl",
+        "fontUrl": "FontUrl",
+        "faviconUrl": "FaviconUrl"
+      }
+    },
+    "DataAccessorAuthenticationConfiguration": {
+      "type": "structure",
+      "members": {
+        "idcTrustedTokenIssuerConfiguration": "DataAccessorIdcTrustedTokenIssuerConfiguration"
+      }
+    },
+    "DataAccessorAuthenticationDetail": {
+      "type": "structure",
+      "required": [
+        "authenticationType"
+      ],
+      "members": {
+        "authenticationType": "DataAccessorAuthenticationType",
+        "authenticationConfiguration": "DataAccessorAuthenticationConfiguration",
+        "externalIds": "DataAccessorExternalIds"
+      }
+    },
+    "DataAccessorAuthenticationType": {
+      "type": "string",
+      "enum": [
+        "AWS_IAM_IDC_TTI",
+        "AWS_IAM_IDC_AUTH_CODE"
+      ]
+    },
+    "DataAccessorExternalId": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataAccessorExternalIds": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "DataAccessorExternalId"
+    },
+    "DataAccessorId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "DataAccessorIdcTrustedTokenIssuerConfiguration": {
+      "type": "structure",
+      "required": [
+        "idcTrustedTokenIssuerArn"
+      ],
+      "members": {
+        "idcTrustedTokenIssuerArn": "IdcTrustedTokenIssuerArn"
+      }
+    },
+    "DataAccessorName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataSourceConfiguration": {
+      "type": "document"
+    },
+    "DataSourceId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "DataSourceIds": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "DataSourceId"
+    },
+    "DataSourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataSourceSyncJobStatus": {
+      "type": "string",
+      "enum": [
+        "FAILED",
+        "SUCCEEDED",
+        "SYNCING",
+        "INCOMPLETE",
+        "STOPPING",
+        "ABORTED",
+        "SYNCING_INDEXING"
+      ]
+    },
+    "DataSourceUserId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "\\P{C}*"
+    },
+    "DataSourceVpcConfiguration": {
+      "type": "structure",
+      "required": [
+        "subnetIds",
+        "securityGroupIds"
+      ],
+      "members": {
+        "subnetIds": "SubnetIds",
+        "securityGroupIds": "SecurityGroupIds"
+      }
+    },
+    "DateAttributeBoostingConfiguration": {
+      "type": "structure",
+      "required": [
+        "boostingLevel"
+      ],
+      "members": {
+        "boostingLevel": "DocumentAttributeBoostingLevel",
+        "boostingDurationInSeconds": "BoostingDurationInSeconds"
+      }
+    },
+    "DeleteApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId"
+      }
+    },
+    "DeleteAttachmentRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "conversationId",
+        "attachmentId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "conversationId": "ConversationId",
+        "attachmentId": "AttachmentId",
+        "userId": "UserId"
+      }
+    },
+    "DeleteChatControlsConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId"
+      }
+    },
+    "DeleteChatResponseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "chatResponseConfigurationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "chatResponseConfigurationId": "ChatResponseConfigurationId"
+      }
+    },
+    "DeleteConversationRequest": {
+      "type": "structure",
+      "required": [
+        "conversationId",
+        "applicationId"
+      ],
+      "members": {
+        "conversationId": "ConversationId",
+        "applicationId": "ApplicationId",
+        "userId": "UserId"
+      }
+    },
+    "DeleteDataAccessorRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "dataAccessorId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "dataAccessorId": "DataAccessorId"
+      }
+    },
+    "DeleteDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "dataSourceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "DeleteDocument": {
+      "type": "structure",
+      "required": [
+        "documentId"
+      ],
+      "members": {
+        "documentId": "DocumentId"
+      }
+    },
+    "DeleteDocuments": {
+      "type": "list",
+      "member": "DeleteDocument"
+    },
+    "DeleteGroupRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "groupName"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "groupName": "GroupName",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "DeleteIndexRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId"
+      }
+    },
+    "DeletePluginRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "pluginId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "pluginId": "PluginId"
+      }
+    },
+    "DeleteRetrieverRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "retrieverId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "retrieverId": "RetrieverId"
+      }
+    },
+    "DeleteUserRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "userId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "String"
+      }
+    },
+    "DeleteWebExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "webExperienceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "webExperienceId": "WebExperienceId"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "[\\s\\S]*"
+    },
+    "DisassociatePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "statementId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "statementId": "String"
+      }
+    },
+    "DisplayName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "Document": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "DocumentId",
+        "attributes": "DocumentAttributes",
+        "content": "DocumentContent",
+        "contentType": "ContentType",
+        "title": "Title",
+        "accessConfiguration": "AccessConfiguration",
+        "documentEnrichmentConfiguration": "DocumentEnrichmentConfiguration",
+        "mediaExtractionConfiguration": "MediaExtractionConfiguration"
+      }
+    },
+    "DocumentAttribute": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "DocumentAttributeKey",
+        "value": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeBoostingConfiguration": {
+      "type": "structure",
+      "members": {
+        "numberConfiguration": "NumberAttributeBoostingConfiguration",
+        "stringConfiguration": "StringAttributeBoostingConfiguration",
+        "dateConfiguration": "DateAttributeBoostingConfiguration",
+        "stringListConfiguration": "StringListAttributeBoostingConfiguration"
+      }
+    },
+    "DocumentAttributeBoostingLevel": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "VERY_HIGH",
+        "ONE",
+        "TWO"
+      ]
+    },
+    "DocumentAttributeBoostingOverrideMap": {
+      "type": "map",
+      "min": 1,
+      "key": "DocumentAttributeKey",
+      "value": "DocumentAttributeBoostingConfiguration"
+    },
+    "DocumentAttributeCondition": {
+      "type": "structure",
+      "required": [
+        "key",
+        "operator"
+      ],
+      "members": {
+        "key": "DocumentAttributeKey",
+        "operator": "DocumentEnrichmentConditionOperator",
+        "value": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeConfiguration": {
+      "type": "structure",
+      "members": {
+        "name": "DocumentMetadataConfigurationName",
+        "type": "AttributeType",
+        "search": "Status"
+      }
+    },
+    "DocumentAttributeConfigurations": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "DocumentAttributeConfiguration"
+    },
+    "DocumentAttributeKey": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[a-zA-Z0-9_][a-zA-Z0-9_-]*"
+    },
+    "DocumentAttributeStringListValue": {
+      "type": "list",
+      "member": "String"
+    },
+    "DocumentAttributeTarget": {
+      "type": "structure",
+      "required": [
+        "key"
+      ],
+      "members": {
+        "key": "DocumentAttributeKey",
+        "value": "DocumentAttributeValue",
+        "attributeValueOperator": "AttributeValueOperator"
+      }
+    },
+    "DocumentAttributeValue": {
+      "type": "structure",
+      "members": {
+        "stringValue": "DocumentAttributeValueStringValueString",
+        "stringListValue": "DocumentAttributeStringListValue",
+        "longValue": "Long",
+        "dateValue": "Timestamp"
+      }
+    },
+    "DocumentAttributeValueStringValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "DocumentAttributes": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "DocumentAttribute"
+    },
+    "DocumentContent": {
+      "type": "structure",
+      "members": {
+        "blob": "Blob",
+        "s3": "S3"
+      }
+    },
+    "DocumentContentOperator": {
+      "type": "string",
+      "enum": [
+        "DELETE"
+      ]
+    },
+    "DocumentEnrichmentConditionOperator": {
+      "type": "string",
+      "enum": [
+        "GREATER_THAN",
+        "GREATER_THAN_OR_EQUALS",
+        "LESS_THAN",
+        "LESS_THAN_OR_EQUALS",
+        "EQUALS",
+        "NOT_EQUALS",
+        "CONTAINS",
+        "NOT_CONTAINS",
+        "EXISTS",
+        "NOT_EXISTS",
+        "BEGINS_WITH"
+      ]
+    },
+    "DocumentEnrichmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "inlineConfigurations": "InlineDocumentEnrichmentConfigurations",
+        "preExtractionHookConfiguration": "HookConfiguration",
+        "postExtractionHookConfiguration": "HookConfiguration"
+      }
+    },
+    "DocumentId": {
+      "type": "string",
+      "min": 1,
+      "max": 1825,
+      "pattern": "\\P{C}*"
+    },
+    "DocumentMetadataConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "[a-zA-Z0-9_][a-zA-Z0-9_-]*"
+    },
+    "Documents": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Document"
+    },
+    "EligibleDataSource": {
+      "type": "structure",
+      "members": {
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "EligibleDataSources": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "EligibleDataSource"
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "kmsKeyId": "KmsKeyId"
+      }
+    },
+    "EndOfInputEvent": {
+      "type": "structure",
+      "members": {}
+    },
+    "ExampleChatMessage": {
+      "type": "string",
+      "min": 0,
+      "max": 350,
+      "pattern": "\\P{C}*"
+    },
+    "ExampleChatMessages": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "ExampleChatMessage"
+    },
+    "ExecutionId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "FaviconUrl": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "(https?://[a-zA-Z0-9-_.+%/]+\\.(svg|ico))?"
+    },
+    "FontUrl": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "(https?://[a-zA-Z0-9-_.+%/]+\\.(ttf|woff|woff2|otf))?"
+    },
+    "GetApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId"
+      }
+    },
+    "GetChatControlsConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "maxResults": "MaxResultsIntegerForGetTopicConfigurations",
+        "nextToken": "NextToken"
+      }
+    },
+    "GetChatResponseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "chatResponseConfigurationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "chatResponseConfigurationId": "ChatResponseConfigurationId"
+      }
+    },
+    "GetDataAccessorRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "dataAccessorId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "dataAccessorId": "DataAccessorId"
+      }
+    },
+    "GetDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "dataSourceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "GetDocumentContentRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "documentId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId",
+        "documentId": "DocumentId",
+        "outputFormat": "OutputFormat"
+      }
+    },
+    "GetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "groupName"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "groupName": "GroupName",
+        "dataSourceId": "DataSourceId"
+      }
+    },
+    "GetIndexRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId"
+      }
+    },
+    "GetMediaRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "conversationId",
+        "messageId",
+        "mediaId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "conversationId": "ConversationId",
+        "messageId": "MessageId",
+        "mediaId": "MediaId"
+      }
+    },
+    "GetPluginRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "pluginId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "pluginId": "PluginId"
+      }
+    },
+    "GetPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId"
+      }
+    },
+    "GetRetrieverRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "retrieverId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "retrieverId": "RetrieverId"
+      }
+    },
+    "GetUserRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "userId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "String"
+      }
+    },
+    "GetWebExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "webExperienceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "webExperienceId": "WebExperienceId"
+      }
+    },
+    "GroupIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 47,
+      "pattern": "([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+    },
+    "GroupMembers": {
+      "type": "structure",
+      "members": {
+        "memberGroups": "MemberGroups",
+        "memberUsers": "MemberUsers",
+        "s3PathForGroupMembers": "S3"
+      }
+    },
+    "GroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "\\P{C}*"
+    },
+    "HallucinationReductionConfiguration": {
+      "type": "structure",
+      "members": {
+        "hallucinationReductionControl": "HallucinationReductionControl"
+      }
+    },
+    "HallucinationReductionControl": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "HookConfiguration": {
+      "type": "structure",
+      "members": {
+        "invocationCondition": "DocumentAttributeCondition",
+        "lambdaArn": "LambdaArn",
+        "s3BucketName": "S3BucketName",
+        "roleArn": "RoleArn"
+      }
+    },
+    "IAMIdentityProviderArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:iam::\\d{12}:(oidc-provider|saml-provider)/[a-zA-Z0-9_\\.\\/@\\-]+"
+    },
+    "IdcApplicationArn": {
+      "type": "string",
+      "min": 10,
+      "max": 1224,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:sso::\\d{12}:application/(sso)?ins-[a-zA-Z0-9-.]{16}/apl-[a-zA-Z0-9]{16}"
+    },
+    "IdcAuthConfiguration": {
+      "type": "structure",
+      "required": [
+        "idcApplicationArn",
+        "roleArn"
+      ],
+      "members": {
+        "idcApplicationArn": "IdcApplicationArn",
+        "roleArn": "RoleArn"
+      }
+    },
+    "IdcTrustedTokenIssuerArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:sso::[0-9]{12}:trustedTokenIssuer/(sso)?ins-[a-zA-Z0-9-.]{16}/tti-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "IdentityProviderConfiguration": {
+      "type": "structure",
+      "members": {
+        "samlConfiguration": "SamlProviderConfiguration",
+        "openIDConnectConfiguration": "OpenIDConnectProviderConfiguration"
+      }
+    },
+    "IdentityType": {
+      "type": "string",
+      "enum": [
+        "AWS_IAM_IDP_SAML",
+        "AWS_IAM_IDP_OIDC",
+        "AWS_IAM_IDC",
+        "AWS_QUICKSIGHT_IDP",
+        "ANONYMOUS"
+      ]
+    },
+    "ImageExtractionConfiguration": {
+      "type": "structure",
+      "required": [
+        "imageExtractionStatus"
+      ],
+      "members": {
+        "imageExtractionStatus": "ImageExtractionStatus"
+      }
+    },
+    "ImageExtractionStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "IndexCapacityConfiguration": {
+      "type": "structure",
+      "members": {
+        "units": "IndexCapacityInteger"
+      }
+    },
+    "IndexCapacityInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "IndexId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "IndexName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "IndexType": {
+      "type": "string",
+      "enum": [
+        "ENTERPRISE",
+        "STARTER"
+      ]
+    },
+    "InlineDocumentEnrichmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "condition": "DocumentAttributeCondition",
+        "target": "DocumentAttributeTarget",
+        "documentContentOperator": "DocumentContentOperator"
+      }
+    },
+    "InlineDocumentEnrichmentConfigurations": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "InlineDocumentEnrichmentConfiguration"
+    },
+    "InstanceArn": {
+      "type": "string",
+      "min": 10,
+      "max": 1224,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}"
+    },
+    "Instruction": {
+      "type": "string",
+      "min": 5,
+      "max": 1000,
+      "pattern": "[\\s\\S]*"
+    },
+    "InstructionCollection": {
+      "type": "structure",
+      "members": {
+        "responseLength": "Instruction",
+        "targetAudience": "Instruction",
+        "perspective": "Instruction",
+        "outputStyle": "Instruction",
+        "identity": "Instruction",
+        "tone": "Instruction",
+        "customInstructions": "Instruction",
+        "examples": "Instruction"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "KendraIndexConfiguration": {
+      "type": "structure",
+      "required": [
+        "indexId"
+      ],
+      "members": {
+        "indexId": "KendraIndexId"
+      }
+    },
+    "KendraIndexId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "LambdaArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:lambda:[a-z-]*-[0-9]:[0-9]{12}:function:[a-zA-Z0-9-_]+(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?(:[a-zA-Z0-9-_]+)?"
+    },
+    "ListApplicationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListApplications"
+      }
+    },
+    "ListAttachmentsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "conversationId": "ConversationId",
+        "userId": "UserId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListAttachments"
+      }
+    },
+    "ListChatResponseConfigurationsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "maxResults": "Integer",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListConversationsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "UserId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListConversations"
+      }
+    },
+    "ListDataAccessorsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken1500",
+        "maxResults": "MaxResultsIntegerForListDataAccessors"
+      }
+    },
+    "ListDataSourceSyncJobsRequest": {
+      "type": "structure",
+      "required": [
+        "dataSourceId",
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "dataSourceId": "DataSourceId",
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListDataSourcesSyncJobs",
+        "startTime": "Timestamp",
+        "endTime": "Timestamp",
+        "statusFilter": "DataSourceSyncJobStatus"
+      }
+    },
+    "ListDataSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListDataSources"
+      }
+    },
+    "ListDocumentsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "dataSourceIds": "DataSourceIds",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListDocuments"
+      }
+    },
+    "ListGroupsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "updatedEarlierThan"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "updatedEarlierThan": "Timestamp",
+        "dataSourceId": "DataSourceId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListGroupsRequest"
+      }
+    },
+    "ListIndicesRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListIndices"
+      }
+    },
+    "ListMessagesRequest": {
+      "type": "structure",
+      "required": [
+        "conversationId",
+        "applicationId"
+      ],
+      "members": {
+        "conversationId": "ConversationId",
+        "applicationId": "ApplicationId",
+        "userId": "UserId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListMessages"
+      }
+    },
+    "ListPluginActionsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "pluginId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "pluginId": "PluginId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListPluginActions"
+      }
+    },
+    "ListPluginTypeActionsRequest": {
+      "type": "structure",
+      "required": [
+        "pluginType"
+      ],
+      "members": {
+        "pluginType": "PluginType",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListPluginTypeActions"
+      }
+    },
+    "ListPluginTypeMetadataRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListPluginTypeMetadata"
+      }
+    },
+    "ListPluginsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListPlugins"
+      }
+    },
+    "ListRetrieversRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListRetrieversRequest"
+      }
+    },
+    "ListSubscriptionsRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListSubscriptions"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName"
+      }
+    },
+    "ListWebExperiencesRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResultsIntegerForListWebExperiencesRequest"
+      }
+    },
+    "LogoUrl": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "(https?://[a-zA-Z0-9-_.+%/]+\\.(svg|png))?"
+    },
+    "Long": {
+      "type": "long"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForGetTopicConfigurations": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListApplications": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListAttachments": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListConversations": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListDataAccessors": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListDataSources": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListDataSourcesSyncJobs": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListDocuments": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListGroupsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListIndices": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListMessages": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListPluginActions": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListPluginTypeActions": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListPluginTypeMetadata": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListPlugins": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListRetrieversRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsIntegerForListSubscriptions": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListWebExperiencesRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MediaExtractionConfiguration": {
+      "type": "structure",
+      "members": {
+        "imageExtractionConfiguration": "ImageExtractionConfiguration",
+        "audioExtractionConfiguration": "AudioExtractionConfiguration",
+        "videoExtractionConfiguration": "VideoExtractionConfiguration"
+      }
+    },
+    "MediaId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "MemberGroup": {
+      "type": "structure",
+      "required": [
+        "groupName"
+      ],
+      "members": {
+        "groupName": "GroupName",
+        "type": "MembershipType"
+      }
+    },
+    "MemberGroups": {
+      "type": "list",
+      "member": "MemberGroup"
+    },
+    "MemberRelation": {
+      "type": "string",
+      "enum": [
+        "AND",
+        "OR"
+      ]
+    },
+    "MemberUser": {
+      "type": "structure",
+      "required": [
+        "userId"
+      ],
+      "members": {
+        "userId": "DataSourceUserId",
+        "type": "MembershipType"
+      }
+    },
+    "MemberUsers": {
+      "type": "list",
+      "member": "MemberUser"
+    },
+    "MembershipType": {
+      "type": "string",
+      "enum": [
+        "INDEX",
+        "DATASOURCE"
+      ]
+    },
+    "MessageId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "MessageUsefulness": {
+      "type": "string",
+      "enum": [
+        "USEFUL",
+        "NOT_USEFUL"
+      ]
+    },
+    "MessageUsefulnessComment": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "\\P{C}*"
+    },
+    "MessageUsefulnessFeedback": {
+      "type": "structure",
+      "required": [
+        "usefulness",
+        "submittedAt"
+      ],
+      "members": {
+        "usefulness": "MessageUsefulness",
+        "reason": "MessageUsefulnessReason",
+        "comment": "MessageUsefulnessComment",
+        "submittedAt": "Timestamp"
+      }
+    },
+    "MessageUsefulnessReason": {
+      "type": "string",
+      "enum": [
+        "NOT_FACTUALLY_CORRECT",
+        "HARMFUL_OR_UNSAFE",
+        "INCORRECT_OR_MISSING_SOURCES",
+        "NOT_HELPFUL",
+        "FACTUALLY_CORRECT",
+        "COMPLETE",
+        "RELEVANT_SOURCES",
+        "HELPFUL",
+        "NOT_BASED_ON_DOCUMENTS",
+        "NOT_COMPLETE",
+        "NOT_CONCISE",
+        "OTHER"
+      ]
+    },
+    "NativeIndexConfiguration": {
+      "type": "structure",
+      "required": [
+        "indexId"
+      ],
+      "members": {
+        "indexId": "IndexId",
+        "version": "Long",
+        "boostingOverride": "DocumentAttributeBoostingOverrideMap"
+      }
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 800
+    },
+    "NextToken1500": {
+      "type": "string",
+      "min": 1,
+      "max": 1500
+    },
+    "NoAuthConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "NumberAttributeBoostingConfiguration": {
+      "type": "structure",
+      "required": [
+        "boostingLevel"
+      ],
+      "members": {
+        "boostingLevel": "DocumentAttributeBoostingLevel",
+        "boostingType": "NumberAttributeBoostingType"
+      }
+    },
+    "NumberAttributeBoostingType": {
+      "type": "string",
+      "enum": [
+        "PRIORITIZE_LARGER_VALUES",
+        "PRIORITIZE_SMALLER_VALUES"
+      ]
+    },
+    "OAuth2ClientCredentialConfiguration": {
+      "type": "structure",
+      "required": [
+        "secretArn",
+        "roleArn"
+      ],
+      "members": {
+        "secretArn": "SecretArn",
+        "roleArn": "RoleArn",
+        "authorizationUrl": "Url",
+        "tokenUrl": "Url"
+      }
+    },
+    "OpenIDConnectProviderConfiguration": {
+      "type": "structure",
+      "required": [
+        "secretsArn",
+        "secretsRole"
+      ],
+      "members": {
+        "secretsArn": "SecretArn",
+        "secretsRole": "RoleArn"
+      }
+    },
+    "OrchestrationConfiguration": {
+      "type": "structure",
+      "required": [
+        "control"
+      ],
+      "members": {
+        "control": "OrchestrationControl"
+      }
+    },
+    "OrchestrationControl": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "Origin": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "(http://|https://)[a-zA-Z0-9-_.]+(?::[0-9]{1,5})?"
+    },
+    "OutputFormat": {
+      "type": "string",
+      "enum": [
+        "RAW",
+        "EXTRACTED"
+      ]
+    },
+    "Payload": {
+      "type": "string"
+    },
+    "PermissionCondition": {
+      "type": "structure",
+      "required": [
+        "conditionOperator",
+        "conditionKey",
+        "conditionValues"
+      ],
+      "members": {
+        "conditionOperator": "PermissionConditionOperator",
+        "conditionKey": "PermissionConditionKey",
+        "conditionValues": "PermissionConditionValues"
+      }
+    },
+    "PermissionConditionKey": {
+      "type": "string",
+      "pattern": "aws:[a-zA-Z][a-zA-Z0-9-/:]*"
+    },
+    "PermissionConditionOperator": {
+      "type": "string",
+      "enum": [
+        "StringEquals"
+      ]
+    },
+    "PermissionConditionValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9._-]*"
+    },
+    "PermissionConditionValues": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "PermissionConditionValue"
+    },
+    "PermissionConditions": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "PermissionCondition"
+    },
+    "PersonalizationConfiguration": {
+      "type": "structure",
+      "required": [
+        "personalizationControlMode"
+      ],
+      "members": {
+        "personalizationControlMode": "PersonalizationControlMode"
+      }
+    },
+    "PersonalizationControlMode": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "PluginAuthConfiguration": {
+      "type": "structure",
+      "members": {
+        "basicAuthConfiguration": "BasicAuthConfiguration",
+        "oAuth2ClientCredentialConfiguration": "OAuth2ClientCredentialConfiguration",
+        "noAuthConfiguration": "NoAuthConfiguration",
+        "idcAuthConfiguration": "IdcAuthConfiguration"
+      }
+    },
+    "PluginConfiguration": {
+      "type": "structure",
+      "required": [
+        "pluginId"
+      ],
+      "members": {
+        "pluginId": "PluginId"
+      }
+    },
+    "PluginDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "PluginId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
+    },
+    "PluginName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "PluginState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "PluginType": {
+      "type": "string",
+      "enum": [
+        "SERVICE_NOW",
+        "SALESFORCE",
+        "JIRA",
+        "ZENDESK",
+        "CUSTOM",
+        "QUICKSIGHT",
+        "SERVICENOW_NOW_PLATFORM",
+        "JIRA_CLOUD",
+        "SALESFORCE_CRM",
+        "ZENDESK_SUITE",
+        "ATLASSIAN_CONFLUENCE",
+        "GOOGLE_CALENDAR",
+        "MICROSOFT_TEAMS",
+        "MICROSOFT_EXCHANGE",
+        "PAGERDUTY_ADVANCE",
+        "SMARTSHEET",
+        "ASANA"
+      ]
+    },
+    "Principal": {
+      "type": "structure",
+      "members": {
+        "user": "PrincipalUser",
+        "group": "PrincipalGroup"
+      }
+    },
+    "PrincipalGroup": {
+      "type": "structure",
+      "required": [
+        "access"
+      ],
+      "members": {
+        "name": "GroupName",
+        "access": "ReadAccessType",
+        "membershipType": "MembershipType"
+      }
+    },
+    "PrincipalRoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:iam::[0-9]{12}:role/[a-zA-Z0-9_/+=,.@-]+"
+    },
+    "PrincipalUser": {
+      "type": "structure",
+      "required": [
+        "access"
+      ],
+      "members": {
+        "id": "UserId",
+        "access": "ReadAccessType",
+        "membershipType": "MembershipType"
+      }
+    },
+    "Principals": {
+      "type": "list",
+      "member": "Principal"
+    },
+    "PutFeedbackRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "conversationId",
+        "messageId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "UserId",
+        "conversationId": "ConversationId",
+        "messageId": "SystemMessageId",
+        "messageCopiedAt": "Timestamp",
+        "messageUsefulness": "MessageUsefulnessFeedback"
+      }
+    },
+    "PutGroupRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "groupName",
+        "type",
+        "groupMembers"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "groupName": "GroupName",
+        "dataSourceId": "DataSourceId",
+        "type": "MembershipType",
+        "groupMembers": "GroupMembers",
+        "roleArn": "RoleArn"
+      }
+    },
+    "QAppsConfiguration": {
+      "type": "structure",
+      "required": [
+        "qAppsControlMode"
+      ],
+      "members": {
+        "qAppsControlMode": "QAppsControlMode"
+      }
+    },
+    "QAppsControlMode": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "QIamAction": {
+      "type": "string",
+      "pattern": "qbusiness:[a-zA-Z]+"
+    },
+    "QIamActions": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "QIamAction"
+    },
+    "QueryText": {
+      "type": "string"
+    },
+    "QuickSightConfiguration": {
+      "type": "structure",
+      "required": [
+        "clientNamespace"
+      ],
+      "members": {
+        "clientNamespace": "ClientNamespace"
+      }
+    },
+    "ReadAccessType": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "DENY"
+      ]
+    },
+    "ResponseConfiguration": {
+      "type": "structure",
+      "members": {
+        "instructionCollection": "InstructionCollection"
+      }
+    },
+    "ResponseConfigurationType": {
+      "type": "string",
+      "enum": [
+        "ALL"
+      ]
+    },
+    "ResponseConfigurations": {
+      "type": "map",
+      "min": 1,
+      "max": 1,
+      "key": "ResponseConfigurationType",
+      "value": "ResponseConfiguration"
+    },
+    "ResponseScope": {
+      "type": "string",
+      "enum": [
+        "ENTERPRISE_CONTENT_ONLY",
+        "EXTENDED_KNOWLEDGE_ENABLED"
+      ]
+    },
+    "RetrieverConfiguration": {
+      "type": "structure",
+      "members": {
+        "nativeIndexConfiguration": "NativeIndexConfiguration",
+        "kendraIndexConfiguration": "KendraIndexConfiguration"
+      }
+    },
+    "RetrieverContentSource": {
+      "type": "structure",
+      "required": [
+        "retrieverId"
+      ],
+      "members": {
+        "retrieverId": "RetrieverId"
+      }
+    },
+    "RetrieverId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "RetrieverName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "RetrieverType": {
+      "type": "string",
+      "enum": [
+        "NATIVE_INDEX",
+        "KENDRA_INDEX"
+      ]
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[^/].{0,1023}"
+    },
+    "Rule": {
+      "type": "structure",
+      "required": [
+        "ruleType"
+      ],
+      "members": {
+        "includedUsersAndGroups": "UsersAndGroups",
+        "excludedUsersAndGroups": "UsersAndGroups",
+        "ruleType": "RuleType",
+        "ruleConfiguration": "RuleConfiguration"
+      }
+    },
+    "RuleConfiguration": {
+      "type": "structure",
+      "members": {
+        "contentBlockerRule": "ContentBlockerRule",
+        "contentRetrievalRule": "ContentRetrievalRule"
+      }
+    },
+    "RuleType": {
+      "type": "string",
+      "enum": [
+        "CONTENT_BLOCKER_RULE",
+        "CONTENT_RETRIEVAL_RULE"
+      ]
+    },
+    "Rules": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "Rule"
+    },
+    "S3": {
+      "type": "structure",
+      "required": [
+        "bucket",
+        "key"
+      ],
+      "members": {
+        "bucket": "S3BucketName",
+        "key": "S3ObjectKey"
+      }
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9]"
+    },
+    "S3ObjectKey": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "SamlAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "SamlAuthenticationUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 1284,
+      "pattern": "https://.*"
+    },
+    "SamlConfiguration": {
+      "type": "structure",
+      "required": [
+        "metadataXML",
+        "roleArn",
+        "userIdAttribute"
+      ],
+      "members": {
+        "metadataXML": "SamlMetadataXML",
+        "roleArn": "RoleArn",
+        "userIdAttribute": "SamlAttribute",
+        "userGroupAttribute": "SamlAttribute"
+      }
+    },
+    "SamlMetadataXML": {
+      "type": "string",
+      "min": 1000,
+      "max": 10000000,
+      "pattern": ".*"
+    },
+    "SamlProviderConfiguration": {
+      "type": "structure",
+      "required": [
+        "authenticationUrl"
+      ],
+      "members": {
+        "authenticationUrl": "SamlAuthenticationUrl"
+      }
+    },
+    "SearchRelevantContentRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "queryText",
+        "contentSource"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "queryText": "QueryText",
+        "contentSource": "ContentSource",
+        "attributeFilter": "AttributeFilter",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "SecretArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[^/].{0,1023}"
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[-0-9a-zA-Z]+"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SecurityGroupId"
+    },
+    "SessionDurationInMinutes": {
+      "type": "integer",
+      "min": 15,
+      "max": 60
+    },
+    "StartDataSourceSyncJobRequest": {
+      "type": "structure",
+      "required": [
+        "dataSourceId",
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "dataSourceId": "DataSourceId",
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId"
+      }
+    },
+    "StatementId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "Status": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "StopDataSourceSyncJobRequest": {
+      "type": "structure",
+      "required": [
+        "dataSourceId",
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "dataSourceId": "DataSourceId",
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId"
+      }
+    },
+    "String": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "StringAttributeBoostingConfiguration": {
+      "type": "structure",
+      "required": [
+        "boostingLevel"
+      ],
+      "members": {
+        "boostingLevel": "DocumentAttributeBoostingLevel",
+        "attributeValueBoosting": "StringAttributeValueBoosting"
+      }
+    },
+    "StringAttributeValueBoosting": {
+      "type": "map",
+      "min": 1,
+      "max": 10,
+      "key": "String",
+      "value": "StringAttributeValueBoostingLevel"
+    },
+    "StringAttributeValueBoostingLevel": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "VERY_HIGH",
+        "ONE",
+        "TWO",
+        "THREE",
+        "FOUR",
+        "FIVE"
+      ]
+    },
+    "StringListAttributeBoostingConfiguration": {
+      "type": "structure",
+      "required": [
+        "boostingLevel"
+      ],
+      "members": {
+        "boostingLevel": "DocumentAttributeBoostingLevel"
+      }
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[-0-9a-zA-Z]+"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "member": "SubnetId"
+    },
+    "SubscriptionId": {
+      "type": "string",
+      "min": 0,
+      "max": 1224
+    },
+    "SubscriptionPrincipal": {
+      "type": "structure",
+      "members": {
+        "user": "UserIdentifier",
+        "group": "GroupIdentifier"
+      }
+    },
+    "SubscriptionType": {
+      "type": "string",
+      "enum": [
+        "Q_LITE",
+        "Q_BUSINESS"
+      ]
+    },
+    "SyncSchedule": {
+      "type": "string",
+      "min": 0,
+      "max": 998,
+      "pattern": "[\\s\\S]*"
+    },
+    "SystemMessageId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{35}"
+    },
+    "SystemMessageOverride": {
+      "type": "string",
+      "min": 0,
+      "max": 350,
+      "pattern": "\\P{C}*"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TextInputEvent": {
+      "type": "structure",
+      "required": [
+        "userMessage"
+      ],
+      "members": {
+        "userMessage": "UserMessage"
+      }
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Title": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "TopicConfiguration": {
+      "type": "structure",
+      "required": [
+        "name",
+        "rules"
+      ],
+      "members": {
+        "name": "TopicConfigurationName",
+        "description": "TopicDescription",
+        "exampleChatMessages": "ExampleChatMessages",
+        "rules": "Rules"
+      }
+    },
+    "TopicConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]{0,35}"
+    },
+    "TopicConfigurations": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "TopicConfiguration"
+    },
+    "TopicDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 350,
+      "pattern": "\\P{C}*"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "identityCenterInstanceArn": "InstanceArn",
+        "displayName": "ApplicationName",
+        "description": "Description",
+        "roleArn": "RoleArn",
+        "attachmentsConfiguration": "AttachmentsConfiguration",
+        "qAppsConfiguration": "QAppsConfiguration",
+        "personalizationConfiguration": "PersonalizationConfiguration",
+        "autoSubscriptionConfiguration": "AutoSubscriptionConfiguration"
+      }
+    },
+    "UpdateChatControlsConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "clientToken": "ClientToken",
+        "responseScope": "ResponseScope",
+        "orchestrationConfiguration": "OrchestrationConfiguration",
+        "blockedPhrasesConfigurationUpdate": "BlockedPhrasesConfigurationUpdate",
+        "topicConfigurationsToCreateOrUpdate": "TopicConfigurations",
+        "topicConfigurationsToDelete": "TopicConfigurations",
+        "creatorModeConfiguration": "CreatorModeConfiguration",
+        "hallucinationReductionConfiguration": "HallucinationReductionConfiguration"
+      }
+    },
+    "UpdateChatResponseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "chatResponseConfigurationId",
+        "responseConfigurations"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "chatResponseConfigurationId": "ChatResponseConfigurationId",
+        "displayName": "DisplayName",
+        "responseConfigurations": "ResponseConfigurations",
+        "clientToken": "String"
+      }
+    },
+    "UpdateDataAccessorRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "dataAccessorId",
+        "actionConfigurations"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "dataAccessorId": "DataAccessorId",
+        "actionConfigurations": "ActionConfigurationList",
+        "authenticationDetail": "DataAccessorAuthenticationDetail",
+        "displayName": "DataAccessorName"
+      }
+    },
+    "UpdateDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId",
+        "dataSourceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId",
+        "displayName": "DataSourceName",
+        "configuration": "DataSourceConfiguration",
+        "vpcConfiguration": "DataSourceVpcConfiguration",
+        "description": "Description",
+        "syncSchedule": "SyncSchedule",
+        "roleArn": "RoleArn",
+        "documentEnrichmentConfiguration": "DocumentEnrichmentConfiguration",
+        "mediaExtractionConfiguration": "MediaExtractionConfiguration"
+      }
+    },
+    "UpdateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "indexId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "indexId": "IndexId",
+        "displayName": "ApplicationName",
+        "description": "Description",
+        "capacityConfiguration": "IndexCapacityConfiguration",
+        "documentAttributeConfigurations": "DocumentAttributeConfigurations"
+      }
+    },
+    "UpdatePluginRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "pluginId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "pluginId": "PluginId",
+        "displayName": "PluginName",
+        "state": "PluginState",
+        "serverUrl": "Url",
+        "customPluginConfiguration": "CustomPluginConfiguration",
+        "authConfiguration": "PluginAuthConfiguration"
+      }
+    },
+    "UpdateRetrieverRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "retrieverId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "retrieverId": "RetrieverId",
+        "configuration": "RetrieverConfiguration",
+        "displayName": "RetrieverName",
+        "roleArn": "RoleArn"
+      }
+    },
+    "UpdateSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "subscriptionId",
+        "type"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "subscriptionId": "SubscriptionId",
+        "type": "SubscriptionType"
+      }
+    },
+    "UpdateUserRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "userId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "userId": "String",
+        "userAliasesToUpdate": "UserAliases",
+        "userAliasesToDelete": "UserAliases"
+      }
+    },
+    "UpdateWebExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "applicationId",
+        "webExperienceId"
+      ],
+      "members": {
+        "applicationId": "ApplicationId",
+        "webExperienceId": "WebExperienceId",
+        "roleArn": "RoleArn",
+        "authenticationConfiguration": "WebExperienceAuthConfiguration",
+        "title": "WebExperienceTitle",
+        "subtitle": "WebExperienceSubtitle",
+        "welcomeMessage": "WebExperienceWelcomeMessage",
+        "samplePromptsControlMode": "WebExperienceSamplePromptsControlMode",
+        "identityProviderConfiguration": "IdentityProviderConfiguration",
+        "origins": "WebExperienceOrigins",
+        "browserExtensionConfiguration": "BrowserExtensionConfiguration",
+        "customizationConfiguration": "CustomizationConfiguration"
+      }
+    },
+    "Url": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "(https?|ftp|file)://([^\\s]*)"
+    },
+    "UserAlias": {
+      "type": "structure",
+      "required": [
+        "userId"
+      ],
+      "members": {
+        "indexId": "IndexId",
+        "dataSourceId": "DataSourceId",
+        "userId": "String"
+      }
+    },
+    "UserAliases": {
+      "type": "list",
+      "member": "UserAlias"
+    },
+    "UserGroups": {
+      "type": "list",
+      "member": "String"
+    },
+    "UserId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "\\P{C}*"
+    },
+    "UserIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 47,
+      "pattern": "([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+    },
+    "UserIds": {
+      "type": "list",
+      "member": "String"
+    },
+    "UserMessage": {
+      "type": "string"
+    },
+    "UsersAndGroups": {
+      "type": "structure",
+      "members": {
+        "userIds": "UserIds",
+        "userGroups": "UserGroups"
+      }
+    },
+    "VideoExtractionConfiguration": {
+      "type": "structure",
+      "required": [
+        "videoExtractionStatus"
+      ],
+      "members": {
+        "videoExtractionStatus": "VideoExtractionStatus"
+      }
+    },
+    "VideoExtractionStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "WebExperienceAuthConfiguration": {
+      "type": "structure",
+      "members": {
+        "samlConfiguration": "SamlConfiguration"
+      }
+    },
+    "WebExperienceId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]*"
+    },
+    "WebExperienceOrigins": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "Origin"
+    },
+    "WebExperienceSamplePromptsControlMode": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "WebExperienceSubtitle": {
+      "type": "string",
+      "min": 0,
+      "max": 500,
+      "pattern": "[\\s\\S]*"
+    },
+    "WebExperienceTitle": {
+      "type": "string",
+      "min": 0,
+      "max": 500,
+      "pattern": "[\\s\\S]*"
+    },
+    "WebExperienceWelcomeMessage": {
+      "type": "string",
+      "min": 0,
+      "max": 300
+    }
+  }
+}

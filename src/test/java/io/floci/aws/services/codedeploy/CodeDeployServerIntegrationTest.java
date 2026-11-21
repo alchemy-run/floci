@@ -224,6 +224,20 @@ class CodeDeployServerIntegrationTest {
                 .body("deploymentTargets[0].deploymentTargetType", equalTo("InstanceTarget"))
                 .body("deploymentTargets[0].instanceTarget.targetId", equalTo("on-prem-test-1"))
                 .body("deploymentTargets[0].instanceTarget.status", equalTo("Succeeded"));
+
+        given().contentType(CT).header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentTarget")
+                .body("{\"deploymentId\":\"" + deploymentId + "\",\"targetId\":\"on-prem-test-1\"}")
+                .when().post("/").then().statusCode(200)
+                .body("deploymentTarget.instanceTarget.targetId", equalTo("on-prem-test-1"))
+                .body("deploymentTarget.instanceTarget.status", equalTo("Succeeded"));
+        given().contentType(CT).header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentTarget")
+                .body("{\"deploymentId\":\"" + deploymentId + "\",\"targetId\":\"missing\"}")
+                .when().post("/").then().statusCode(400)
+                .body("__type", containsString("DeploymentTargetDoesNotExistException"));
+        given().contentType(CT).header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentTarget")
+                .body("{\"deploymentId\":\"d-AAAAAAAAA\",\"targetId\":\"on-prem-test-1\"}")
+                .when().post("/").then().statusCode(400)
+                .body("__type", containsString("DeploymentDoesNotExistException"));
     }
 
     @Test

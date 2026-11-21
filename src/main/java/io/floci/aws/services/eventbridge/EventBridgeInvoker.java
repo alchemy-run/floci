@@ -35,6 +35,8 @@ import io.floci.aws.services.redshiftdata.RedshiftTargetAuthorizer;
 import io.floci.aws.services.sns.SnsService;
 import io.floci.aws.services.sqs.SqsService;
 import io.floci.aws.services.stepfunctions.StepFunctionsService;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ArcContainer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -375,12 +377,27 @@ public class EventBridgeInvoker {
                     throw new AwsException("ServiceNotAvailableException", "AppSync delivery is not available.", 400);
                 }
                 appSyncTargetInvoker.invoke(target, payload, ruleArn, regionResolver.getAccountId());
-            } else {
+            } else if (!deliverToService(arn, payload, region)) {
                 LOG.warnv("EventBridge: unsupported target ARN type: {0}", arn);
             }
         } catch (JsonProcessingException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** Offers an event to the Floci service whose resource the target ARN names, if one receives it. */
+    private static boolean deliverToService(String arn, String payload, String region) {
+        ArcContainer container = Arc.container();
+        if (container == null) {
+            return false;
+        }
+        for (ServiceEventTarget service : container.select(ServiceEventTarget.class)) {
+            if (service.handles(arn)) {
+                service.deliver(arn, payload, region);
+                return true;
+            }
+        }
+        return false;
     }
 
     private void deliverToRedshiftData(Target target, String targetArn, String eventJson, String ruleArn) {

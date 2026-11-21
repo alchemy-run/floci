@@ -1,5 +1,6 @@
 package io.floci.aws.services.eventbridge;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
@@ -69,15 +70,15 @@ class EventBridgeEcsRunTaskIntegrationTest {
                           "Group": "eb-ecs-group-%s",
                           "NetworkConfiguration": {
                             "awsvpcConfiguration": {
-                              "Subnets": ["subnet-default-us-east-1-a", "subnet-default-us-east-1-b"],
-                              "SecurityGroups": ["sg-default-us-east-1"],
+                              "Subnets": ["%s", "%s"],
+                              "SecurityGroups": ["%s"],
                               "AssignPublicIp": "ENABLED"
                             }
                           }
                         }
                       }]
                     }
-                    """.formatted(ruleName, clusterArn, taskDefinitionArn, suffix))
+                    """.formatted(ruleName, clusterArn, taskDefinitionArn, suffix, Ec2Defaults.SUBNET_A, Ec2Defaults.SUBNET_B, Ec2Defaults.SECURITY_GROUP))
         .when()
             .post("/")
         .then()
@@ -100,9 +101,9 @@ class EventBridgeEcsRunTaskIntegrationTest {
             .body("Targets[0].EcsParameters.LaunchType", equalTo("FARGATE"))
             .body("Targets[0].EcsParameters.Group", equalTo("eb-ecs-group-" + suffix))
             .body("Targets[0].EcsParameters.NetworkConfiguration.awsvpcConfiguration.Subnets",
-                    hasItem("subnet-default-us-east-1-a"))
+                    hasItem(Ec2Defaults.SUBNET_A))
             .body("Targets[0].EcsParameters.NetworkConfiguration.awsvpcConfiguration.SecurityGroups",
-                    hasItem("sg-default-us-east-1"))
+                    hasItem(Ec2Defaults.SECURITY_GROUP))
             .body("Targets[0].EcsParameters.NetworkConfiguration.awsvpcConfiguration.AssignPublicIp",
                     equalTo("ENABLED"));
 

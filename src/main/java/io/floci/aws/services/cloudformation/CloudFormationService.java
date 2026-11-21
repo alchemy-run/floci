@@ -242,6 +242,23 @@ public class CloudFormationService implements ResourceProvider {
         return stack;
     }
 
+    /**
+     * Sets (or, with a null value, removes) one tag on a stack, as a service that tags stacks for
+     * the caller does: AppRegistry's {@code awsApplication} tag on an associated stack.
+     */
+    public Stack setStackTag(String stackName, String key, String value, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        Map<String, String> tags = new LinkedHashMap<>(stack.getTags() == null ? Map.of() : stack.getTags());
+        if (value == null) {
+            tags.remove(key);
+        } else {
+            tags.put(key, value);
+        }
+        stack.setTags(tags);
+        persistStack(stack);
+        return stack;
+    }
+
     public void clearProtectionAfterRejectedCreate(String stackName, ChangeSet initial, String region) {
         String accountId = currentAccount();
         stacks.computeIfPresent(stackKey(accountId, stackName, region), (key, stack) -> {

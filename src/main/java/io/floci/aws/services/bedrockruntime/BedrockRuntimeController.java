@@ -75,12 +75,28 @@ public class BedrockRuntimeController {
     }
 
     @POST
+    @Blocking
     @Path("/{modelId:.+}/invoke-with-response-stream")
     @Consumes(MediaType.WILDCARD)
-    public Response invokeModelWithResponseStream(@PathParam("modelId") String modelId) {
-        throw new AwsException("UnsupportedOperationException",
-                "InvokeModelWithResponseStream is not supported by Floci yet. "
-                        + "Use InvokeModel or Converse instead.", 501);
+    public Response invokeModelWithResponseStream(@PathParam("modelId") String modelId, byte[] body) {
+        if (modelId == null || modelId.isBlank()) {
+            throw new AwsException("ValidationException", "modelId is required.", 400);
+        }
+        return Response.ok(streaming(service.buildInvokeModelStreamResponse(modelId, body)))
+                .header("Content-Type", "application/vnd.amazon.eventstream")
+                .header("X-Amzn-Bedrock-Content-Type", "application/json")
+                .build();
+    }
+
+    @POST
+    @Blocking
+    @Path("/{modelId:.+}/count-tokens")
+    @Consumes(MediaType.WILDCARD)
+    public Response countTokens(@PathParam("modelId") String modelId, String body) {
+        ObjectNode request = readRequest(modelId, body);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("inputTokens", service.countTokens(request.path("input")));
+        return Response.ok(response).build();
     }
 
     @POST

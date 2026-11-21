@@ -1,0 +1,1509 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_applicationsignals_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchDeleteInstrumentationConfigurations": "BatchDeleteInstrumentationConfigurationsRequest",
+    "BatchGetServiceLevelObjectiveBudgetReport": "BatchGetServiceLevelObjectiveBudgetReportInput",
+    "BatchUpdateExclusionWindows": "BatchUpdateExclusionWindowsInput",
+    "CreateInstrumentationConfiguration": "CreateInstrumentationConfigurationRequest",
+    "CreateServiceLevelObjective": "CreateServiceLevelObjectiveInput",
+    "DeleteInstrumentationConfiguration": "DeleteInstrumentationConfigurationRequest",
+    "DeleteServiceLevelObjective": "DeleteServiceLevelObjectiveInput",
+    "GetInstrumentationConfiguration": "GetInstrumentationConfigurationRequest",
+    "GetInstrumentationConfigurationStatus": "GetInstrumentationConfigurationStatusRequest",
+    "GetService": "GetServiceInput",
+    "GetServiceLevelObjective": "GetServiceLevelObjectiveInput",
+    "ListAuditFindings": "ListAuditFindingsInput",
+    "ListEntityEvents": "ListEntityEventsInput",
+    "ListGroupingAttributeDefinitions": "ListGroupingAttributeDefinitionsInput",
+    "ListInstrumentationConfigurations": "ListInstrumentationConfigurationsRequest",
+    "ListServiceDependencies": "ListServiceDependenciesInput",
+    "ListServiceDependents": "ListServiceDependentsInput",
+    "ListServiceLevelObjectiveExclusionWindows": "ListServiceLevelObjectiveExclusionWindowsInput",
+    "ListServiceLevelObjectives": "ListServiceLevelObjectivesInput",
+    "ListServiceOperations": "ListServiceOperationsInput",
+    "ListServiceStates": "ListServiceStatesInput",
+    "ListServices": "ListServicesInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutGroupingConfiguration": "PutGroupingConfigurationInput",
+    "ReportInstrumentationConfigurationStatus": "ReportInstrumentationConfigurationStatusRequest",
+    "StartDiscovery": "StartDiscoveryInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateServiceLevelObjective": "UpdateServiceLevelObjectiveInput"
+  },
+  "shapes": {
+    "AccountId": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "AttainmentGoal": {
+      "type": "double"
+    },
+    "AttributeFilter": {
+      "type": "structure",
+      "required": [
+        "AttributeFilterName",
+        "AttributeFilterValues"
+      ],
+      "members": {
+        "AttributeFilterName": "AttributeFilterName",
+        "AttributeFilterValues": "AttributeFilterValues"
+      }
+    },
+    "AttributeFilterName": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9 :/-]+"
+    },
+    "AttributeFilterValue": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9 :/-]+"
+    },
+    "AttributeFilterValues": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "AttributeFilterValue"
+    },
+    "AttributeFilters": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "AttributeFilter"
+    },
+    "Attributes": {
+      "type": "map",
+      "min": 1,
+      "max": 4,
+      "key": "KeyAttributeName",
+      "value": "KeyAttributeValue"
+    },
+    "AuditTarget": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "Data"
+      ],
+      "members": {
+        "Type": "String",
+        "Data": "AuditTargetEntity"
+      }
+    },
+    "AuditTargetEntity": {
+      "type": "structure",
+      "members": {
+        "Service": "ServiceEntity",
+        "Slo": "ServiceLevelObjectiveEntity",
+        "ServiceOperation": "ServiceOperationEntity",
+        "Canary": "CanaryEntity"
+      }
+    },
+    "AuditTargets": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AuditTarget"
+    },
+    "Auditors": {
+      "type": "list",
+      "member": "String"
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "pattern": "[0-9]{12}"
+    },
+    "BatchDeleteByResourceArns": {
+      "type": "structure",
+      "required": [
+        "ResourceArns",
+        "InstrumentationType"
+      ],
+      "members": {
+        "ResourceArns": "BatchDeleteByResourceArnsResourceArnsList",
+        "InstrumentationType": "InstrumentationType"
+      }
+    },
+    "BatchDeleteByResourceArnsResourceArnsList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "BatchDeleteByResourceArnsResourceArnsListMemberString"
+    },
+    "BatchDeleteByResourceArnsResourceArnsListMemberString": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "BatchDeleteDeletionTarget": {
+      "type": "structure",
+      "members": {
+        "Scope": "BatchDeleteScope",
+        "ResourceArns": "BatchDeleteByResourceArns"
+      }
+    },
+    "BatchDeleteInstrumentationConfigurationsRequest": {
+      "type": "structure",
+      "required": [
+        "DeletionTarget"
+      ],
+      "members": {
+        "DeletionTarget": "BatchDeleteDeletionTarget"
+      }
+    },
+    "BatchDeleteScope": {
+      "type": "structure",
+      "required": [
+        "Service",
+        "Environment",
+        "InstrumentationType"
+      ],
+      "members": {
+        "Service": "BatchDeleteScopeServiceString",
+        "Environment": "BatchDeleteScopeEnvironmentString",
+        "InstrumentationType": "InstrumentationType"
+      }
+    },
+    "BatchDeleteScopeEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "BatchDeleteScopeServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "BatchGetServiceLevelObjectiveBudgetReportInput": {
+      "type": "structure",
+      "required": [
+        "Timestamp",
+        "SloIds"
+      ],
+      "members": {
+        "Timestamp": "Timestamp",
+        "SloIds": "ServiceLevelObjectiveIds"
+      }
+    },
+    "BatchUpdateExclusionWindowsInput": {
+      "type": "structure",
+      "required": [
+        "SloIds"
+      ],
+      "members": {
+        "SloIds": "ServiceLevelObjectiveIds",
+        "AddExclusionWindows": "ExclusionWindows",
+        "RemoveExclusionWindows": "ExclusionWindows"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BurnRateConfiguration": {
+      "type": "structure",
+      "required": [
+        "LookBackWindowMinutes"
+      ],
+      "members": {
+        "LookBackWindowMinutes": "BurnRateLookBackWindowMinutes"
+      }
+    },
+    "BurnRateConfigurations": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BurnRateConfiguration"
+    },
+    "BurnRateLookBackWindowMinutes": {
+      "type": "integer",
+      "min": 1,
+      "max": 10080
+    },
+    "CalendarInterval": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "DurationUnit",
+        "Duration"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "DurationUnit": "DurationUnit",
+        "Duration": "CalendarIntervalDuration"
+      }
+    },
+    "CalendarIntervalDuration": {
+      "type": "integer",
+      "min": 1
+    },
+    "CanaryEntity": {
+      "type": "structure",
+      "required": [
+        "CanaryName"
+      ],
+      "members": {
+        "CanaryName": "String"
+      }
+    },
+    "CaptureConfiguration": {
+      "type": "structure",
+      "members": {
+        "CodeCapture": "CodeCaptureConfiguration"
+      }
+    },
+    "CaptureLimitsConfig": {
+      "type": "structure",
+      "members": {
+        "MaxHits": "CaptureLimitsConfigMaxHitsInteger",
+        "MaxStringLength": "CaptureLimitsConfigMaxStringLengthInteger",
+        "MaxCollectionWidth": "CaptureLimitsConfigMaxCollectionWidthInteger",
+        "MaxCollectionDepth": "CaptureLimitsConfigMaxCollectionDepthInteger",
+        "MaxStackFrames": "CaptureLimitsConfigMaxStackFramesInteger",
+        "MaxStackTraceSize": "CaptureLimitsConfigMaxStackTraceSizeInteger",
+        "MaxObjectDepth": "CaptureLimitsConfigMaxObjectDepthInteger",
+        "MaxFieldsPerObject": "CaptureLimitsConfigMaxFieldsPerObjectInteger"
+      }
+    },
+    "CaptureLimitsConfigMaxCollectionDepthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 5
+    },
+    "CaptureLimitsConfigMaxCollectionWidthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "CaptureLimitsConfigMaxFieldsPerObjectInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "CaptureLimitsConfigMaxHitsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "CaptureLimitsConfigMaxObjectDepthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 5
+    },
+    "CaptureLimitsConfigMaxStackFramesInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "CaptureLimitsConfigMaxStackTraceSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "CaptureLimitsConfigMaxStringLengthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 255
+    },
+    "CodeCaptureConfiguration": {
+      "type": "structure",
+      "required": [
+        "CaptureLimits"
+      ],
+      "members": {
+        "CaptureArguments": "CodeCaptureConfigurationCaptureArgumentsList",
+        "CaptureReturn": "Boolean",
+        "CaptureStackTrace": "Boolean",
+        "CaptureLocals": "CodeCaptureConfigurationCaptureLocalsList",
+        "CaptureLimits": "CaptureLimitsConfig"
+      }
+    },
+    "CodeCaptureConfigurationCaptureArgumentsList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "CodeCaptureConfigurationCaptureArgumentsListMemberString"
+    },
+    "CodeCaptureConfigurationCaptureArgumentsListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 80
+    },
+    "CodeCaptureConfigurationCaptureLocalsList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "CodeCaptureConfigurationCaptureLocalsListMemberString"
+    },
+    "CodeCaptureConfigurationCaptureLocalsListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 80
+    },
+    "CodeLocation": {
+      "type": "structure",
+      "required": [
+        "Language",
+        "FilePath"
+      ],
+      "members": {
+        "Language": "ProgrammingLanguage",
+        "CodeUnit": "CodeLocationCodeUnitString",
+        "ClassName": "CodeLocationClassNameString",
+        "MethodName": "CodeLocationMethodNameString",
+        "FilePath": "CodeLocationFilePathString",
+        "LineNumber": "CodeLocationLineNumberInteger"
+      }
+    },
+    "CodeLocationClassNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "CodeLocationCodeUnitString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "CodeLocationFilePathString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "CodeLocationLineNumberInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "CodeLocationMethodNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 80
+    },
+    "CompositeSliComponent": {
+      "type": "structure",
+      "members": {
+        "OperationName": "OperationName"
+      }
+    },
+    "CompositeSliComponents": {
+      "type": "list",
+      "min": 2,
+      "max": 20,
+      "member": "CompositeSliComponent"
+    },
+    "CompositeSliConfig": {
+      "type": "structure",
+      "required": [
+        "SelectionConfig"
+      ],
+      "members": {
+        "SelectionConfig": "SelectionConfig",
+        "Components": "CompositeSliComponents"
+      }
+    },
+    "CreateInstrumentationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "InstrumentationType",
+        "Service",
+        "Environment",
+        "SignalType",
+        "Location",
+        "CaptureConfiguration"
+      ],
+      "members": {
+        "InstrumentationType": "InstrumentationType",
+        "Service": "CreateInstrumentationConfigurationRequestServiceString",
+        "Environment": "CreateInstrumentationConfigurationRequestEnvironmentString",
+        "SignalType": "DynamicInstrumentationSignalType",
+        "Location": "Location",
+        "Description": "CreateInstrumentationConfigurationRequestDescriptionString",
+        "ExpiresAt": "Timestamp",
+        "AttributeFilters": "DynamicInstrumentationAttributeFilters",
+        "CaptureConfiguration": "CaptureConfiguration",
+        "Tags": "TagList"
+      }
+    },
+    "CreateInstrumentationConfigurationRequestDescriptionString": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "CreateInstrumentationConfigurationRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "CreateInstrumentationConfigurationRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "CreateServiceLevelObjectiveInput": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "ServiceLevelObjectiveName",
+        "Description": "ServiceLevelObjectiveDescription",
+        "SliConfig": "ServiceLevelIndicatorConfig",
+        "RequestBasedSliConfig": "RequestBasedServiceLevelIndicatorConfig",
+        "Goal": "Goal",
+        "Tags": "TagList",
+        "BurnRateConfigurations": "BurnRateConfigurations",
+        "CreateRecommendedSlo": "Boolean",
+        "AutoInvestigationEnabled": "Boolean"
+      }
+    },
+    "DeleteInstrumentationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "InstrumentationType",
+        "Service",
+        "Environment",
+        "SignalType",
+        "LocationIdentifier"
+      ],
+      "members": {
+        "InstrumentationType": "InstrumentationType",
+        "Service": "DeleteInstrumentationConfigurationRequestServiceString",
+        "Environment": "DeleteInstrumentationConfigurationRequestEnvironmentString",
+        "SignalType": "DynamicInstrumentationSignalType",
+        "LocationIdentifier": "LocationIdentifier"
+      }
+    },
+    "DeleteInstrumentationConfigurationRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DeleteInstrumentationConfigurationRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DeleteServiceLevelObjectiveInput": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceLevelObjectiveId"
+      }
+    },
+    "DependencyConfig": {
+      "type": "structure",
+      "required": [
+        "DependencyKeyAttributes",
+        "DependencyOperationName"
+      ],
+      "members": {
+        "DependencyKeyAttributes": "Attributes",
+        "DependencyOperationName": "OperationName"
+      }
+    },
+    "DetailLevel": {
+      "type": "string",
+      "enum": [
+        "BRIEF",
+        "DETAILED"
+      ]
+    },
+    "Dimension": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Value"
+      ],
+      "members": {
+        "Name": "DimensionName",
+        "Value": "DimensionValue"
+      }
+    },
+    "DimensionName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DimensionValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "Dimensions": {
+      "type": "list",
+      "min": 0,
+      "max": 30,
+      "member": "Dimension"
+    },
+    "DurationUnit": {
+      "type": "string",
+      "enum": [
+        "MINUTE",
+        "HOUR",
+        "DAY",
+        "MONTH"
+      ]
+    },
+    "DynamicInstrumentationAttributeFilterGroup": {
+      "type": "map",
+      "key": "DynamicInstrumentationAttributeFilterGroupKeyString",
+      "value": "DynamicInstrumentationAttributeFilterGroupValueString"
+    },
+    "DynamicInstrumentationAttributeFilterGroupKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "DynamicInstrumentationAttributeFilterGroupValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "DynamicInstrumentationAttributeFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "DynamicInstrumentationAttributeFilterGroup"
+    },
+    "DynamicInstrumentationSignalType": {
+      "type": "string",
+      "enum": [
+        "SNAPSHOT"
+      ]
+    },
+    "ExclusionDuration": {
+      "type": "integer",
+      "min": 1
+    },
+    "ExclusionReason": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ExclusionWindow": {
+      "type": "structure",
+      "required": [
+        "Window"
+      ],
+      "members": {
+        "Window": "Window",
+        "StartTime": "Timestamp",
+        "RecurrenceRule": "RecurrenceRule",
+        "Reason": "ExclusionReason"
+      }
+    },
+    "ExclusionWindows": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "ExclusionWindow"
+    },
+    "Expression": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "GetInstrumentationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "InstrumentationType",
+        "Service",
+        "Environment",
+        "SignalType",
+        "LocationIdentifier"
+      ],
+      "members": {
+        "InstrumentationType": "InstrumentationType",
+        "Service": "GetInstrumentationConfigurationRequestServiceString",
+        "Environment": "GetInstrumentationConfigurationRequestEnvironmentString",
+        "SignalType": "DynamicInstrumentationSignalType",
+        "LocationIdentifier": "LocationIdentifier"
+      }
+    },
+    "GetInstrumentationConfigurationRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "GetInstrumentationConfigurationRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "GetInstrumentationConfigurationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "InstrumentationType",
+        "Service",
+        "Environment",
+        "SignalType",
+        "LocationIdentifier"
+      ],
+      "members": {
+        "InstrumentationType": "InstrumentationType",
+        "Service": "GetInstrumentationConfigurationStatusRequestServiceString",
+        "Environment": "GetInstrumentationConfigurationStatusRequestEnvironmentString",
+        "SignalType": "DynamicInstrumentationSignalType",
+        "LocationIdentifier": "LocationIdentifier",
+        "Status": "InstrumentationConfigurationStatus",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "MaxResults": "GetInstrumentationConfigurationStatusRequestMaxResultsInteger",
+        "NextToken": "NextToken"
+      }
+    },
+    "GetInstrumentationConfigurationStatusRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "GetInstrumentationConfigurationStatusRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "GetInstrumentationConfigurationStatusRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "GetServiceInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime",
+        "KeyAttributes"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "KeyAttributes": "Attributes"
+      }
+    },
+    "GetServiceLevelObjectiveInput": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceLevelObjectiveId"
+      }
+    },
+    "Goal": {
+      "type": "structure",
+      "members": {
+        "Interval": "Interval",
+        "AttainmentGoal": "AttainmentGoal",
+        "WarningThreshold": "WarningThreshold"
+      }
+    },
+    "GroupingAttributeDefinition": {
+      "type": "structure",
+      "required": [
+        "GroupingName"
+      ],
+      "members": {
+        "GroupingName": "GroupingString",
+        "GroupingSourceKeys": "GroupingSourceKeyStringList",
+        "DefaultGroupingValue": "GroupingString"
+      }
+    },
+    "GroupingAttributeDefinitions": {
+      "type": "list",
+      "member": "GroupingAttributeDefinition"
+    },
+    "GroupingSourceKeyStringList": {
+      "type": "list",
+      "member": "GroupingString"
+    },
+    "GroupingString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9\\s+\\-=\\._:/@]*"
+    },
+    "InstrumentationConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "ERROR",
+        "ACTIVE",
+        "DISABLED"
+      ]
+    },
+    "InstrumentationConfigurationStatusReport": {
+      "type": "structure",
+      "required": [
+        "InstrumentationType",
+        "SignalType",
+        "LocationHash",
+        "Status",
+        "Time"
+      ],
+      "members": {
+        "InstrumentationType": "InstrumentationType",
+        "SignalType": "DynamicInstrumentationSignalType",
+        "LocationHash": "InstrumentationConfigurationStatusReportLocationHashString",
+        "Status": "InstrumentationConfigurationStatus",
+        "Time": "Timestamp",
+        "ErrorCause": "InstrumentationErrorCause"
+      }
+    },
+    "InstrumentationConfigurationStatusReportLocationHashString": {
+      "type": "string",
+      "min": 16,
+      "max": 16
+    },
+    "InstrumentationErrorCause": {
+      "type": "string",
+      "enum": [
+        "FILE_NOT_FOUND",
+        "METHOD_NOT_FOUND",
+        "LINE_NOT_EXECUTABLE",
+        "OVERLOADED_METHODS",
+        "LANGUAGE_MISMATCH",
+        "RUNTIME_ERROR"
+      ]
+    },
+    "InstrumentationType": {
+      "type": "string",
+      "enum": [
+        "BREAKPOINT",
+        "PROBE"
+      ]
+    },
+    "Interval": {
+      "type": "structure",
+      "members": {
+        "RollingInterval": "RollingInterval",
+        "CalendarInterval": "CalendarInterval"
+      }
+    },
+    "KeyAttributeName": {
+      "type": "string",
+      "pattern": "[a-zA-Z]{1,50}"
+    },
+    "KeyAttributeValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[ -~]*[!-~]+[ -~]*"
+    },
+    "ListAuditFindingMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "ListAuditFindingsInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime",
+        "AuditTargets"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "Auditors": "Auditors",
+        "AuditTargets": "AuditTargets",
+        "DetailLevel": "DetailLevel",
+        "NextToken": "NextToken",
+        "MaxResults": "ListAuditFindingMaxResults"
+      }
+    },
+    "ListEntityEventsInput": {
+      "type": "structure",
+      "required": [
+        "Entity",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "Entity": "Attributes",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "MaxResults": "ListEntityEventsMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListEntityEventsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "ListGroupingAttributeDefinitionsInput": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "AwsAccountId": "AwsAccountId",
+        "IncludeLinkedAccounts": "Boolean"
+      }
+    },
+    "ListInstrumentationConfigurationsRequest": {
+      "type": "structure",
+      "required": [
+        "Service",
+        "Environment",
+        "InstrumentationType"
+      ],
+      "members": {
+        "Service": "ListInstrumentationConfigurationsRequestServiceString",
+        "Environment": "ListInstrumentationConfigurationsRequestEnvironmentString",
+        "InstrumentationType": "InstrumentationType",
+        "SyncedAt": "Timestamp",
+        "MaxResults": "ListInstrumentationConfigurationsRequestMaxResultsInteger",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListInstrumentationConfigurationsRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "ListInstrumentationConfigurationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListInstrumentationConfigurationsRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9:/+=,.@_-]+"
+    },
+    "ListServiceDependenciesInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime",
+        "KeyAttributes"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "KeyAttributes": "Attributes",
+        "MaxResults": "ListServiceDependenciesMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListServiceDependenciesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListServiceDependentsInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime",
+        "KeyAttributes"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "KeyAttributes": "Attributes",
+        "MaxResults": "ListServiceDependentsMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListServiceDependentsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListServiceLevelObjectiveExclusionWindowsInput": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceLevelObjectiveId",
+        "MaxResults": "ListServiceLevelObjectiveExclusionWindowsMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListServiceLevelObjectiveExclusionWindowsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "ListServiceLevelObjectivesInput": {
+      "type": "structure",
+      "members": {
+        "KeyAttributes": "Attributes",
+        "OperationName": "OperationName",
+        "DependencyConfig": "DependencyConfig",
+        "MaxResults": "ListServiceLevelObjectivesMaxResults",
+        "NextToken": "NextToken",
+        "MetricSourceTypes": "MetricSourceTypes",
+        "IncludeLinkedAccounts": "Boolean",
+        "SloOwnerAwsAccountId": "AwsAccountId",
+        "MetricSource": "MetricSource"
+      }
+    },
+    "ListServiceLevelObjectivesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListServiceOperationMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListServiceOperationsInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime",
+        "KeyAttributes"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "KeyAttributes": "Attributes",
+        "MaxResults": "ListServiceOperationMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListServiceStatesInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "MaxResults": "ListServiceStatesMaxResults",
+        "NextToken": "NextToken",
+        "IncludeLinkedAccounts": "Boolean",
+        "AwsAccountId": "AwsAccountId",
+        "AttributeFilters": "AttributeFilters"
+      }
+    },
+    "ListServiceStatesMaxResults": {
+      "type": "integer",
+      "max": 250
+    },
+    "ListServicesInput": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "MaxResults": "ListServicesMaxResults",
+        "NextToken": "NextToken",
+        "IncludeLinkedAccounts": "Boolean",
+        "AwsAccountId": "AwsAccountId"
+      }
+    },
+    "ListServicesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "Location": {
+      "type": "structure",
+      "members": {
+        "CodeLocation": "CodeLocation"
+      }
+    },
+    "LocationIdentifier": {
+      "type": "structure",
+      "members": {
+        "CodeLocation": "CodeLocation",
+        "LocationHash": "LocationIdentifierLocationHashString"
+      }
+    },
+    "LocationIdentifierLocationHashString": {
+      "type": "string",
+      "min": 16,
+      "max": 16
+    },
+    "Metric": {
+      "type": "structure",
+      "members": {
+        "Namespace": "Namespace",
+        "MetricName": "MetricName",
+        "Dimensions": "Dimensions"
+      }
+    },
+    "MetricDataQueries": {
+      "type": "list",
+      "member": "MetricDataQuery"
+    },
+    "MetricDataQuery": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MetricId",
+        "MetricStat": "MetricStat",
+        "Expression": "MetricExpression",
+        "Label": "MetricLabel",
+        "ReturnData": "ReturnData",
+        "Period": "Period",
+        "AccountId": "AccountId"
+      }
+    },
+    "MetricExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "MetricId": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "MetricLabel": {
+      "type": "string"
+    },
+    "MetricName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "MetricSource": {
+      "type": "structure",
+      "required": [
+        "MetricSourceKeyAttributes"
+      ],
+      "members": {
+        "MetricSourceKeyAttributes": "Attributes",
+        "MetricSourceAttributes": "Attributes"
+      }
+    },
+    "MetricSourceType": {
+      "type": "string",
+      "enum": [
+        "ServiceOperation",
+        "CloudWatchMetric",
+        "ServiceDependency",
+        "AppMonitor",
+        "Canary",
+        "Service"
+      ]
+    },
+    "MetricSourceTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "MetricSourceType"
+    },
+    "MetricStat": {
+      "type": "structure",
+      "required": [
+        "Metric",
+        "Period",
+        "Stat"
+      ],
+      "members": {
+        "Metric": "Metric",
+        "Period": "Period",
+        "Stat": "Stat",
+        "Unit": "StandardUnit"
+      }
+    },
+    "MonitoredRequestCountMetricDataQueries": {
+      "type": "structure",
+      "members": {
+        "GoodCountMetric": "MetricDataQueries",
+        "BadCountMetric": "MetricDataQueries"
+      }
+    },
+    "Namespace": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": ".*[^:].*"
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "OperationName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "Period": {
+      "type": "integer",
+      "min": 1
+    },
+    "ProgrammingLanguage": {
+      "type": "string",
+      "enum": [
+        "Java",
+        "Python",
+        "Javascript"
+      ]
+    },
+    "PutGroupingConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "GroupingAttributeDefinitions"
+      ],
+      "members": {
+        "GroupingAttributeDefinitions": "GroupingAttributeDefinitions"
+      }
+    },
+    "RecurrenceRule": {
+      "type": "structure",
+      "required": [
+        "Expression"
+      ],
+      "members": {
+        "Expression": "Expression"
+      }
+    },
+    "ReportInstrumentationConfigurationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "Service",
+        "Environment",
+        "Configurations"
+      ],
+      "members": {
+        "Service": "ReportInstrumentationConfigurationStatusRequestServiceString",
+        "Environment": "ReportInstrumentationConfigurationStatusRequestEnvironmentString",
+        "Configurations": "ReportInstrumentationConfigurationStatusRequestConfigurationsList"
+      }
+    },
+    "ReportInstrumentationConfigurationStatusRequestConfigurationsList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "InstrumentationConfigurationStatusReport"
+    },
+    "ReportInstrumentationConfigurationStatusRequestEnvironmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "ReportInstrumentationConfigurationStatusRequestServiceString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "RequestBasedServiceLevelIndicatorConfig": {
+      "type": "structure",
+      "required": [
+        "RequestBasedSliMetricConfig"
+      ],
+      "members": {
+        "RequestBasedSliMetricConfig": "RequestBasedServiceLevelIndicatorMetricConfig",
+        "MetricThreshold": "ServiceLevelIndicatorMetricThreshold",
+        "ComparisonOperator": "ServiceLevelIndicatorComparisonOperator"
+      }
+    },
+    "RequestBasedServiceLevelIndicatorMetricConfig": {
+      "type": "structure",
+      "members": {
+        "KeyAttributes": "Attributes",
+        "OperationName": "OperationName",
+        "MetricType": "ServiceLevelIndicatorMetricType",
+        "TotalRequestCountMetric": "MetricDataQueries",
+        "MonitoredRequestCountMetric": "MonitoredRequestCountMetricDataQueries",
+        "DependencyConfig": "DependencyConfig",
+        "MetricSource": "MetricSource",
+        "MetricName": "MetricName",
+        "CompositeSliConfig": "CompositeSliConfig"
+      }
+    },
+    "ReturnData": {
+      "type": "boolean"
+    },
+    "RollingInterval": {
+      "type": "structure",
+      "required": [
+        "DurationUnit",
+        "Duration"
+      ],
+      "members": {
+        "DurationUnit": "DurationUnit",
+        "Duration": "RollingIntervalDuration"
+      }
+    },
+    "RollingIntervalDuration": {
+      "type": "integer",
+      "min": 1
+    },
+    "SLIPeriodSeconds": {
+      "type": "integer",
+      "min": 60,
+      "max": 900
+    },
+    "SelectionConfig": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "SelectionType",
+        "Pattern": "SelectionPattern"
+      }
+    },
+    "SelectionPattern": {
+      "type": "string",
+      "pattern": ".+"
+    },
+    "SelectionType": {
+      "type": "string",
+      "enum": [
+        "EXPLICIT",
+        "PREFIX",
+        "REGEX"
+      ]
+    },
+    "ServiceEntity": {
+      "type": "structure",
+      "members": {
+        "Type": "String",
+        "Name": "String",
+        "Environment": "String",
+        "AwsAccountId": "String"
+      }
+    },
+    "ServiceLevelIndicatorComparisonOperator": {
+      "type": "string",
+      "enum": [
+        "GreaterThanOrEqualTo",
+        "GreaterThan",
+        "LessThan",
+        "LessThanOrEqualTo"
+      ]
+    },
+    "ServiceLevelIndicatorConfig": {
+      "type": "structure",
+      "required": [
+        "SliMetricConfig"
+      ],
+      "members": {
+        "SliMetricConfig": "ServiceLevelIndicatorMetricConfig",
+        "MetricThreshold": "ServiceLevelIndicatorMetricThreshold",
+        "ComparisonOperator": "ServiceLevelIndicatorComparisonOperator"
+      }
+    },
+    "ServiceLevelIndicatorMetricConfig": {
+      "type": "structure",
+      "members": {
+        "KeyAttributes": "Attributes",
+        "OperationName": "OperationName",
+        "MetricType": "ServiceLevelIndicatorMetricType",
+        "MetricName": "MetricName",
+        "Statistic": "ServiceLevelIndicatorStatistic",
+        "PeriodSeconds": "SLIPeriodSeconds",
+        "MetricSource": "MetricSource",
+        "MetricDataQueries": "MetricDataQueries",
+        "DependencyConfig": "DependencyConfig",
+        "CompositeSliConfig": "CompositeSliConfig"
+      }
+    },
+    "ServiceLevelIndicatorMetricThreshold": {
+      "type": "double"
+    },
+    "ServiceLevelIndicatorMetricType": {
+      "type": "string",
+      "enum": [
+        "LATENCY",
+        "AVAILABILITY"
+      ]
+    },
+    "ServiceLevelIndicatorStatistic": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "[a-zA-Z0-9.]+"
+    },
+    "ServiceLevelObjectiveDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ServiceLevelObjectiveEntity": {
+      "type": "structure",
+      "members": {
+        "SloName": "String",
+        "SloArn": "String"
+      }
+    },
+    "ServiceLevelObjectiveId": {
+      "type": "string",
+      "pattern": "[0-9A-Za-z][-._0-9A-Za-z ]{0,126}[0-9A-Za-z]$|^arn:(aws|aws-us-gov):application-signals:[^:]*:[^:]*:slo/[0-9A-Za-z][-._0-9A-Za-z ]{0,126}[0-9A-Za-z]"
+    },
+    "ServiceLevelObjectiveIds": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "String"
+    },
+    "ServiceLevelObjectiveName": {
+      "type": "string",
+      "pattern": "[0-9A-Za-z][-._0-9A-Za-z ]{0,126}[0-9A-Za-z]"
+    },
+    "ServiceOperationEntity": {
+      "type": "structure",
+      "members": {
+        "Service": "ServiceEntity",
+        "Operation": "String",
+        "MetricType": "String"
+      }
+    },
+    "StandardUnit": {
+      "type": "string",
+      "enum": [
+        "Microseconds",
+        "Milliseconds",
+        "Seconds",
+        "Bytes",
+        "Kilobytes",
+        "Megabytes",
+        "Gigabytes",
+        "Terabytes",
+        "Bits",
+        "Kilobits",
+        "Megabits",
+        "Gigabits",
+        "Terabits",
+        "Percent",
+        "Count",
+        "Bytes/Second",
+        "Kilobytes/Second",
+        "Megabytes/Second",
+        "Gigabytes/Second",
+        "Terabytes/Second",
+        "Bits/Second",
+        "Kilobits/Second",
+        "Megabits/Second",
+        "Gigabits/Second",
+        "Terabits/Second",
+        "Count/Second",
+        "None"
+      ]
+    },
+    "StartDiscoveryInput": {
+      "type": "structure",
+      "members": {}
+    },
+    "Stat": {
+      "type": "string"
+    },
+    "String": {
+      "type": "string"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateServiceLevelObjectiveInput": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceLevelObjectiveId",
+        "Description": "ServiceLevelObjectiveDescription",
+        "SliConfig": "ServiceLevelIndicatorConfig",
+        "RequestBasedSliConfig": "RequestBasedServiceLevelIndicatorConfig",
+        "Goal": "Goal",
+        "BurnRateConfigurations": "BurnRateConfigurations",
+        "AutoInvestigationEnabled": "Boolean"
+      }
+    },
+    "WarningThreshold": {
+      "type": "double"
+    },
+    "Window": {
+      "type": "structure",
+      "required": [
+        "DurationUnit",
+        "Duration"
+      ],
+      "members": {
+        "DurationUnit": "DurationUnit",
+        "Duration": "ExclusionDuration"
+      }
+    }
+  }
+}

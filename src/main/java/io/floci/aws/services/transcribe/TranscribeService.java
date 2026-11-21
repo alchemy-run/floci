@@ -66,6 +66,17 @@ public class TranscribeService implements Resettable {
 
     public TranscriptionJob startTranscriptionJob(String jobName, String mediaFileUri,
                                                   String languageCode, String mediaFormat) {
+        return startTranscriptionJob(jobName, mediaFileUri, languageCode, mediaFormat, null,
+                "s3://floci-transcribe-output/" + jobName + ".json");
+    }
+
+    /**
+     * Starts a job that finishes at once: {@code FAILED} with {@code failureReason}
+     * when it is given, otherwise {@code COMPLETED} with its transcript at
+     * {@code transcriptUri}.
+     */
+    public TranscriptionJob startTranscriptionJob(String jobName, String mediaFileUri, String languageCode,
+                                                  String mediaFormat, String failureReason, String transcriptUri) {
         requireNonBlank(jobName, "TranscriptionJobName");
         requireNonBlank(mediaFileUri, "Media.MediaFileUri");
         String jobKey = jobKey(jobName);
@@ -77,13 +88,13 @@ public class TranscribeService implements Resettable {
         long now = Instant.now().getEpochSecond();
         TranscriptionJob job = new TranscriptionJob(
                 jobName,
-                "COMPLETED",
+                failureReason == null ? "COMPLETED" : "FAILED",
                 languageCode != null ? languageCode : "en-US",
                 mediaFormat != null ? mediaFormat : "mp4",
                 48000,
                 new TranscriptionJob.Media(mediaFileUri),
-                new TranscriptionJob.Transcript("s3://floci-transcribe-output/" + jobName + ".json"),
-                now, now, now);
+                failureReason == null ? new TranscriptionJob.Transcript(transcriptUri) : null,
+                now, now, now, failureReason);
 
         transcriptionJobs.put(jobKey, job);
         return job;
@@ -93,7 +104,7 @@ public class TranscribeService implements Resettable {
         requireNonBlank(jobName, "TranscriptionJobName");
         TranscriptionJob job = transcriptionJobs.get(jobKey(jobName));
         if (job == null) {
-            throw new AwsException("NotFoundException",
+            throw new AwsException("BadRequestException",
                     "The requested job couldn't be found. Check the job name and try your request again.", 400);
         }
         return job;
@@ -131,6 +142,11 @@ public class TranscribeService implements Resettable {
     }
 
     public VocabularyInfo createVocabulary(String vocabularyName, String languageCode) {
+        return createVocabulary(vocabularyName, languageCode, null);
+    }
+
+    /** Creates a vocabulary: {@code FAILED} with {@code failureReason} when its file can't be read. */
+    public VocabularyInfo createVocabulary(String vocabularyName, String languageCode, String failureReason) {
         requireNonBlank(vocabularyName, "VocabularyName");
         requireNonBlank(languageCode, "LanguageCode");
         if (getStoredVocabulary(vocabularyName).isPresent()) {
@@ -138,17 +154,44 @@ public class TranscribeService implements Resettable {
                     "The requested vocabulary name already exists. Use a different vocabulary name.", 400);
         }
 
-        VocabularyInfo vocab = new VocabularyInfo(
-                vocabularyName, languageCode, "READY", Instant.now().getEpochSecond());
+        VocabularyInfo vocab = new VocabularyInfo(vocabularyName, languageCode,
+                failureReason == null ? "READY" : "FAILED", Instant.now().getEpochSecond(), failureReason);
         vocabularies.putForAccount(regionResolver.getAccountId(), vocabularyKey(vocabularyName), vocab);
         return vocab;
+    }
+
+    /** Replaces a vocabulary's terms; a missing one is {@code NotFoundException}, as Transcribe reports it. */
+    public VocabularyInfo updateVocabulary(String vocabularyName, String languageCode, String failureReason) {
+        requireNonBlank(vocabularyName, "VocabularyName");
+        requireNonBlank(languageCode, "LanguageCode");
+        if (getStoredVocabulary(vocabularyName).isEmpty()) {
+            throw new AwsException("NotFoundException",
+                    "The requested vocabulary couldn't be found. Check the vocabulary name and try your request again.",
+                    400);
+        }
+        VocabularyInfo vocab = new VocabularyInfo(vocabularyName, languageCode,
+                failureReason == null ? "READY" : "FAILED", Instant.now().getEpochSecond(), failureReason);
+        vocabularies.putForAccount(regionResolver.getAccountId(), vocabularyKey(vocabularyName), vocab);
+        return vocab;
+    }
+
+    /** Whether a transcription job or vocabulary of this {@code <type>/<name>} exists, for tagging. */
+    public boolean exists(String typeAndName) {
+        int slash = typeAndName.indexOf('/');
+        String type = typeAndName.substring(0, slash);
+        String name = typeAndName.substring(slash + 1);
+        return switch (type) {
+            case "transcription-job" -> transcriptionJobs.containsKey(jobKey(name));
+            case "vocabulary" -> getStoredVocabulary(name).isPresent();
+            default -> false;
+        };
     }
 
     public VocabularyInfo getVocabulary(String vocabularyName) {
         requireNonBlank(vocabularyName, "VocabularyName");
         VocabularyInfo vocab = getStoredVocabulary(vocabularyName).orElse(null);
         if (vocab == null) {
-            throw new AwsException("NotFoundException",
+            throw new AwsException("BadRequestException",
                     "The requested vocabulary couldn't be found. Check the vocabulary name and try your request again.",
                     400);
         }

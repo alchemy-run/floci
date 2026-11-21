@@ -1,0 +1,1481 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_licensemanager_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AcceptGrant": "AcceptGrantRequest",
+    "CheckInLicense": "CheckInLicenseRequest",
+    "CheckoutBorrowLicense": "CheckoutBorrowLicenseRequest",
+    "CheckoutLicense": "CheckoutLicenseRequest",
+    "CreateGrant": "CreateGrantRequest",
+    "CreateGrantVersion": "CreateGrantVersionRequest",
+    "CreateLicense": "CreateLicenseRequest",
+    "CreateLicenseAssetGroup": "CreateLicenseAssetGroupRequest",
+    "CreateLicenseAssetRuleset": "CreateLicenseAssetRulesetRequest",
+    "CreateLicenseConfiguration": "CreateLicenseConfigurationRequest",
+    "CreateLicenseConversionTaskForResource": "CreateLicenseConversionTaskForResourceRequest",
+    "CreateLicenseManagerReportGenerator": "CreateLicenseManagerReportGeneratorRequest",
+    "CreateLicenseVersion": "CreateLicenseVersionRequest",
+    "CreateToken": "CreateTokenRequest",
+    "DeleteGrant": "DeleteGrantRequest",
+    "DeleteLicense": "DeleteLicenseRequest",
+    "DeleteLicenseAssetGroup": "DeleteLicenseAssetGroupRequest",
+    "DeleteLicenseAssetRuleset": "DeleteLicenseAssetRulesetRequest",
+    "DeleteLicenseConfiguration": "DeleteLicenseConfigurationRequest",
+    "DeleteLicenseManagerReportGenerator": "DeleteLicenseManagerReportGeneratorRequest",
+    "DeleteToken": "DeleteTokenRequest",
+    "ExtendLicenseConsumption": "ExtendLicenseConsumptionRequest",
+    "GetAccessToken": "GetAccessTokenRequest",
+    "GetGrant": "GetGrantRequest",
+    "GetLicense": "GetLicenseRequest",
+    "GetLicenseAssetGroup": "GetLicenseAssetGroupRequest",
+    "GetLicenseAssetRuleset": "GetLicenseAssetRulesetRequest",
+    "GetLicenseConfiguration": "GetLicenseConfigurationRequest",
+    "GetLicenseConversionTask": "GetLicenseConversionTaskRequest",
+    "GetLicenseManagerReportGenerator": "GetLicenseManagerReportGeneratorRequest",
+    "GetLicenseUsage": "GetLicenseUsageRequest",
+    "GetServiceSettings": "GetServiceSettingsRequest",
+    "ListAssetsForLicenseAssetGroup": "ListAssetsForLicenseAssetGroupRequest",
+    "ListAssociationsForLicenseConfiguration": "ListAssociationsForLicenseConfigurationRequest",
+    "ListDistributedGrants": "ListDistributedGrantsRequest",
+    "ListFailuresForLicenseConfigurationOperations": "ListFailuresForLicenseConfigurationOperationsRequest",
+    "ListLicenseAssetGroups": "ListLicenseAssetGroupsRequest",
+    "ListLicenseAssetRulesets": "ListLicenseAssetRulesetsRequest",
+    "ListLicenseConfigurations": "ListLicenseConfigurationsRequest",
+    "ListLicenseConfigurationsForOrganization": "ListLicenseConfigurationsForOrganizationRequest",
+    "ListLicenseConversionTasks": "ListLicenseConversionTasksRequest",
+    "ListLicenseManagerReportGenerators": "ListLicenseManagerReportGeneratorsRequest",
+    "ListLicenseSpecificationsForResource": "ListLicenseSpecificationsForResourceRequest",
+    "ListLicenseVersions": "ListLicenseVersionsRequest",
+    "ListLicenses": "ListLicensesRequest",
+    "ListReceivedGrants": "ListReceivedGrantsRequest",
+    "ListReceivedGrantsForOrganization": "ListReceivedGrantsForOrganizationRequest",
+    "ListReceivedLicenses": "ListReceivedLicensesRequest",
+    "ListReceivedLicensesForOrganization": "ListReceivedLicensesForOrganizationRequest",
+    "ListResourceInventory": "ListResourceInventoryRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTokens": "ListTokensRequest",
+    "ListUsageForLicenseConfiguration": "ListUsageForLicenseConfigurationRequest",
+    "RejectGrant": "RejectGrantRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateLicenseAssetGroup": "UpdateLicenseAssetGroupRequest",
+    "UpdateLicenseAssetRuleset": "UpdateLicenseAssetRulesetRequest",
+    "UpdateLicenseConfiguration": "UpdateLicenseConfigurationRequest",
+    "UpdateLicenseManagerReportGenerator": "UpdateLicenseManagerReportGeneratorRequest",
+    "UpdateLicenseSpecificationsForResource": "UpdateLicenseSpecificationsForResourceRequest",
+    "UpdateServiceSettings": "UpdateServiceSettingsRequest"
+  },
+  "shapes": {
+    "AcceptGrantRequest": {
+      "type": "structure",
+      "required": [
+        "GrantArn"
+      ],
+      "members": {
+        "GrantArn": "Arn"
+      }
+    },
+    "ActivationOverrideBehavior": {
+      "type": "string",
+      "enum": [
+        "DISTRIBUTED_GRANTS_ONLY",
+        "ALL_GRANTS_PERMITTED_BY_ISSUER"
+      ]
+    },
+    "AllowedOperation": {
+      "type": "string",
+      "enum": [
+        "CreateGrant",
+        "CheckoutLicense",
+        "CheckoutBorrowLicense",
+        "CheckInLicense",
+        "ExtendConsumptionLicense",
+        "ListPurchasedLicenses",
+        "CreateToken"
+      ]
+    },
+    "AllowedOperationList": {
+      "type": "list",
+      "min": 1,
+      "max": 8,
+      "member": "AllowedOperation"
+    },
+    "AndRuleStatement": {
+      "type": "structure",
+      "members": {
+        "MatchingRuleStatements": "MatchingRuleStatementList",
+        "ScriptRuleStatements": "ScriptRuleStatementList"
+      }
+    },
+    "Arn": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "^arn:aws[a-zA-Z-]*:[A-Za-z0-9][A-Za-z0-9_/.-]{0,62}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}$"
+    },
+    "ArnList": {
+      "type": "list",
+      "member": "Arn"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BorrowConfiguration": {
+      "type": "structure",
+      "required": [
+        "AllowEarlyCheckIn",
+        "MaxTimeToLiveInMinutes"
+      ],
+      "members": {
+        "AllowEarlyCheckIn": "BoxBoolean",
+        "MaxTimeToLiveInMinutes": "BoxInteger"
+      }
+    },
+    "BoxBoolean": {
+      "type": "boolean"
+    },
+    "BoxInteger": {
+      "type": "integer"
+    },
+    "BoxLong": {
+      "type": "long"
+    },
+    "CheckInLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConsumptionToken"
+      ],
+      "members": {
+        "LicenseConsumptionToken": "String",
+        "Beneficiary": "String"
+      }
+    },
+    "CheckoutBorrowLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn",
+        "Entitlements",
+        "DigitalSignatureMethod",
+        "ClientToken"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "Entitlements": "EntitlementDataList",
+        "DigitalSignatureMethod": "DigitalSignatureMethod",
+        "NodeId": "String",
+        "CheckoutMetadata": "MetadataList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CheckoutLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "ProductSKU",
+        "CheckoutType",
+        "KeyFingerprint",
+        "Entitlements",
+        "ClientToken"
+      ],
+      "members": {
+        "ProductSKU": "String",
+        "CheckoutType": "CheckoutType",
+        "KeyFingerprint": "String",
+        "Entitlements": "EntitlementDataList",
+        "ClientToken": "ClientToken",
+        "Beneficiary": "String",
+        "NodeId": "String"
+      }
+    },
+    "CheckoutType": {
+      "type": "string",
+      "enum": [
+        "PROVISIONAL",
+        "PERPETUAL"
+      ]
+    },
+    "ClientRequestToken": {
+      "type": "string",
+      "min": 1,
+      "max": 36
+    },
+    "ClientToken": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "\\S+"
+    },
+    "ConsumptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "RenewType": "RenewType",
+        "ProvisionalConfiguration": "ProvisionalConfiguration",
+        "BorrowConfiguration": "BorrowConfiguration"
+      }
+    },
+    "CreateGrantRequest": {
+      "type": "structure",
+      "required": [
+        "ClientToken",
+        "GrantName",
+        "LicenseArn",
+        "Principals",
+        "HomeRegion",
+        "AllowedOperations"
+      ],
+      "members": {
+        "ClientToken": "ClientToken",
+        "GrantName": "String",
+        "LicenseArn": "Arn",
+        "Principals": "PrincipalArnList",
+        "HomeRegion": "String",
+        "AllowedOperations": "AllowedOperationList",
+        "Tags": "TagList"
+      }
+    },
+    "CreateGrantVersionRequest": {
+      "type": "structure",
+      "required": [
+        "ClientToken",
+        "GrantArn"
+      ],
+      "members": {
+        "ClientToken": "ClientToken",
+        "GrantArn": "Arn",
+        "GrantName": "String",
+        "AllowedOperations": "AllowedOperationList",
+        "Status": "GrantStatus",
+        "StatusReason": "StatusReasonMessage",
+        "SourceVersion": "String",
+        "Options": "Options"
+      }
+    },
+    "CreateLicenseAssetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "LicenseAssetGroupConfigurations",
+        "AssociatedLicenseAssetRulesetARNs",
+        "ClientToken"
+      ],
+      "members": {
+        "Name": "LicenseAssetResourceName",
+        "Description": "LicenseAssetResourceDescription",
+        "LicenseAssetGroupConfigurations": "LicenseAssetGroupConfigurationList",
+        "AssociatedLicenseAssetRulesetARNs": "LicenseAssetRulesetArnList",
+        "Properties": "LicenseAssetGroupPropertyList",
+        "Tags": "TagList",
+        "ClientToken": "String"
+      }
+    },
+    "CreateLicenseAssetRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Rules",
+        "ClientToken"
+      ],
+      "members": {
+        "Name": "LicenseAssetResourceName",
+        "Description": "LicenseAssetResourceDescription",
+        "Rules": "LicenseAssetRuleList",
+        "Tags": "TagList",
+        "ClientToken": "String"
+      }
+    },
+    "CreateLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "LicenseCountingType"
+      ],
+      "members": {
+        "Name": "String",
+        "Description": "String",
+        "LicenseCountingType": "LicenseCountingType",
+        "LicenseCount": "BoxLong",
+        "LicenseCountHardLimit": "BoxBoolean",
+        "LicenseRules": "StringList",
+        "Tags": "TagList",
+        "DisassociateWhenNotFound": "BoxBoolean",
+        "ProductInformationList": "ProductInformationList",
+        "LicenseExpiry": "BoxLong"
+      }
+    },
+    "CreateLicenseConversionTaskForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "SourceLicenseContext",
+        "DestinationLicenseContext"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "SourceLicenseContext": "LicenseConversionContext",
+        "DestinationLicenseContext": "LicenseConversionContext"
+      }
+    },
+    "CreateLicenseManagerReportGeneratorRequest": {
+      "type": "structure",
+      "required": [
+        "ReportGeneratorName",
+        "Type",
+        "ReportContext",
+        "ReportFrequency",
+        "ClientToken"
+      ],
+      "members": {
+        "ReportGeneratorName": "ReportGeneratorName",
+        "Type": "ReportTypeList",
+        "ReportContext": "ReportContext",
+        "ReportFrequency": "ReportFrequency",
+        "ClientToken": "ClientRequestToken",
+        "Description": "String",
+        "Tags": "TagList"
+      }
+    },
+    "CreateLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseName",
+        "ProductName",
+        "ProductSKU",
+        "Issuer",
+        "HomeRegion",
+        "Validity",
+        "Entitlements",
+        "Beneficiary",
+        "ConsumptionConfiguration",
+        "ClientToken"
+      ],
+      "members": {
+        "LicenseName": "String",
+        "ProductName": "String",
+        "ProductSKU": "String",
+        "Issuer": "Issuer",
+        "HomeRegion": "String",
+        "Validity": "DatetimeRange",
+        "Entitlements": "EntitlementList",
+        "Beneficiary": "String",
+        "ConsumptionConfiguration": "ConsumptionConfiguration",
+        "LicenseMetadata": "MetadataList",
+        "ClientToken": "ClientToken",
+        "Tags": "TagList"
+      }
+    },
+    "CreateLicenseVersionRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn",
+        "LicenseName",
+        "ProductName",
+        "Issuer",
+        "HomeRegion",
+        "Validity",
+        "Entitlements",
+        "ConsumptionConfiguration",
+        "Status",
+        "ClientToken"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "LicenseName": "String",
+        "ProductName": "String",
+        "Issuer": "Issuer",
+        "HomeRegion": "String",
+        "Validity": "DatetimeRange",
+        "LicenseMetadata": "MetadataList",
+        "Entitlements": "EntitlementList",
+        "ConsumptionConfiguration": "ConsumptionConfiguration",
+        "Status": "LicenseStatus",
+        "ClientToken": "ClientToken",
+        "SourceVersion": "String",
+        "ResetUsage": "Boolean"
+      }
+    },
+    "CreateTokenRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn",
+        "ClientToken"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "RoleArns": "ArnList",
+        "ExpirationInDays": "Integer",
+        "TokenProperties": "MaxSize3StringList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "DateTime": {
+      "type": "timestamp"
+    },
+    "DatetimeRange": {
+      "type": "structure",
+      "required": [
+        "Begin"
+      ],
+      "members": {
+        "Begin": "ISO8601DateTime",
+        "End": "ISO8601DateTime"
+      }
+    },
+    "DeleteGrantRequest": {
+      "type": "structure",
+      "required": [
+        "GrantArn",
+        "Version"
+      ],
+      "members": {
+        "GrantArn": "Arn",
+        "StatusReason": "StatusReasonMessage",
+        "Version": "String"
+      }
+    },
+    "DeleteLicenseAssetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseAssetGroupArn"
+      ],
+      "members": {
+        "LicenseAssetGroupArn": "Arn"
+      }
+    },
+    "DeleteLicenseAssetRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseAssetRulesetArn"
+      ],
+      "members": {
+        "LicenseAssetRulesetArn": "Arn"
+      }
+    },
+    "DeleteLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String"
+      }
+    },
+    "DeleteLicenseManagerReportGeneratorRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseManagerReportGeneratorArn"
+      ],
+      "members": {
+        "LicenseManagerReportGeneratorArn": "String"
+      }
+    },
+    "DeleteLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn",
+        "SourceVersion"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "SourceVersion": "String"
+      }
+    },
+    "DeleteTokenRequest": {
+      "type": "structure",
+      "required": [
+        "TokenId"
+      ],
+      "members": {
+        "TokenId": "String"
+      }
+    },
+    "DigitalSignatureMethod": {
+      "type": "string",
+      "enum": [
+        "JWT_PS384"
+      ]
+    },
+    "Entitlement": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Unit"
+      ],
+      "members": {
+        "Name": "String",
+        "Value": "String",
+        "MaxCount": "Long",
+        "Overage": "BoxBoolean",
+        "Unit": "EntitlementUnit",
+        "AllowCheckIn": "BoxBoolean"
+      }
+    },
+    "EntitlementData": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Unit"
+      ],
+      "members": {
+        "Name": "String",
+        "Value": "String",
+        "Unit": "EntitlementDataUnit"
+      }
+    },
+    "EntitlementDataList": {
+      "type": "list",
+      "member": "EntitlementData"
+    },
+    "EntitlementDataUnit": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "None",
+        "Seconds",
+        "Microseconds",
+        "Milliseconds",
+        "Bytes",
+        "Kilobytes",
+        "Megabytes",
+        "Gigabytes",
+        "Terabytes",
+        "Bits",
+        "Kilobits",
+        "Megabits",
+        "Gigabits",
+        "Terabits",
+        "Percent",
+        "Bytes/Second",
+        "Kilobytes/Second",
+        "Megabytes/Second",
+        "Gigabytes/Second",
+        "Terabytes/Second",
+        "Bits/Second",
+        "Kilobits/Second",
+        "Megabits/Second",
+        "Gigabits/Second",
+        "Terabits/Second",
+        "Count/Second"
+      ]
+    },
+    "EntitlementList": {
+      "type": "list",
+      "member": "Entitlement"
+    },
+    "EntitlementUnit": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "None",
+        "Seconds",
+        "Microseconds",
+        "Milliseconds",
+        "Bytes",
+        "Kilobytes",
+        "Megabytes",
+        "Gigabytes",
+        "Terabytes",
+        "Bits",
+        "Kilobits",
+        "Megabits",
+        "Gigabits",
+        "Terabits",
+        "Percent",
+        "Bytes/Second",
+        "Kilobytes/Second",
+        "Megabytes/Second",
+        "Gigabytes/Second",
+        "Terabytes/Second",
+        "Bits/Second",
+        "Kilobits/Second",
+        "Megabits/Second",
+        "Gigabits/Second",
+        "Terabits/Second",
+        "Count/Second"
+      ]
+    },
+    "ExtendLicenseConsumptionRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConsumptionToken"
+      ],
+      "members": {
+        "LicenseConsumptionToken": "String",
+        "DryRun": "Boolean"
+      }
+    },
+    "Filter": {
+      "type": "structure",
+      "members": {
+        "Name": "FilterName",
+        "Values": "FilterValues"
+      }
+    },
+    "FilterList": {
+      "type": "list",
+      "member": "Filter"
+    },
+    "FilterName": {
+      "type": "string"
+    },
+    "FilterValue": {
+      "type": "string"
+    },
+    "FilterValues": {
+      "type": "list",
+      "member": "FilterValue"
+    },
+    "Filters": {
+      "type": "list",
+      "member": "Filter"
+    },
+    "GetAccessTokenRequest": {
+      "type": "structure",
+      "required": [
+        "Token"
+      ],
+      "members": {
+        "Token": "TokenString",
+        "TokenProperties": "MaxSize3StringList"
+      }
+    },
+    "GetGrantRequest": {
+      "type": "structure",
+      "required": [
+        "GrantArn"
+      ],
+      "members": {
+        "GrantArn": "Arn",
+        "Version": "String"
+      }
+    },
+    "GetLicenseAssetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseAssetGroupArn"
+      ],
+      "members": {
+        "LicenseAssetGroupArn": "Arn"
+      }
+    },
+    "GetLicenseAssetRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseAssetRulesetArn"
+      ],
+      "members": {
+        "LicenseAssetRulesetArn": "Arn"
+      }
+    },
+    "GetLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String"
+      }
+    },
+    "GetLicenseConversionTaskRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConversionTaskId"
+      ],
+      "members": {
+        "LicenseConversionTaskId": "LicenseConversionTaskId"
+      }
+    },
+    "GetLicenseManagerReportGeneratorRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseManagerReportGeneratorArn"
+      ],
+      "members": {
+        "LicenseManagerReportGeneratorArn": "String"
+      }
+    },
+    "GetLicenseRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "Version": "String"
+      }
+    },
+    "GetLicenseUsageRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn"
+      ],
+      "members": {
+        "LicenseArn": "Arn"
+      }
+    },
+    "GetServiceSettingsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GrantStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING_WORKFLOW",
+        "PENDING_ACCEPT",
+        "REJECTED",
+        "ACTIVE",
+        "FAILED_WORKFLOW",
+        "DELETED",
+        "PENDING_DELETE",
+        "DISABLED",
+        "WORKFLOW_COMPLETED"
+      ]
+    },
+    "ISO8601DateTime": {
+      "type": "string",
+      "max": 50,
+      "pattern": "^(-?(?:[1-9][0-9]*)?[0-9]{4})-(1[0-2]|0[1-9])-(3[0-1]|0[1-9]|[1-2][0-9])T(2[0-3]|[0-1][0-9]):([0-5][0-9]):([0-5][0-9])(\\.[0-9]+)?(Z|[+-](?:2[ 0-3]|[0-1][0-9]):[0-5][0-9])+$"
+    },
+    "InstanceRuleStatement": {
+      "type": "structure",
+      "members": {
+        "AndRuleStatement": "AndRuleStatement",
+        "OrRuleStatement": "OrRuleStatement",
+        "MatchingRuleStatement": "MatchingRuleStatement",
+        "ScriptRuleStatement": "ScriptRuleStatement"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "InventoryFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Condition"
+      ],
+      "members": {
+        "Name": "String",
+        "Condition": "InventoryFilterCondition",
+        "Value": "String"
+      }
+    },
+    "InventoryFilterCondition": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS",
+        "BEGINS_WITH",
+        "CONTAINS"
+      ]
+    },
+    "InventoryFilterList": {
+      "type": "list",
+      "member": "InventoryFilter"
+    },
+    "Issuer": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "String",
+        "SignKey": "String"
+      }
+    },
+    "LicenseAssetGroupConfiguration": {
+      "type": "structure",
+      "members": {
+        "UsageDimension": "String"
+      }
+    },
+    "LicenseAssetGroupConfigurationList": {
+      "type": "list",
+      "member": "LicenseAssetGroupConfiguration"
+    },
+    "LicenseAssetGroupProperty": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "String",
+        "Value": "String"
+      }
+    },
+    "LicenseAssetGroupPropertyList": {
+      "type": "list",
+      "member": "LicenseAssetGroupProperty"
+    },
+    "LicenseAssetGroupStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DISABLED",
+        "DELETED"
+      ]
+    },
+    "LicenseAssetResourceDescription": {
+      "type": "string",
+      "max": 1024
+    },
+    "LicenseAssetResourceName": {
+      "type": "string",
+      "max": 128
+    },
+    "LicenseAssetRule": {
+      "type": "structure",
+      "required": [
+        "RuleStatement"
+      ],
+      "members": {
+        "RuleStatement": "RuleStatement"
+      }
+    },
+    "LicenseAssetRuleList": {
+      "type": "list",
+      "member": "LicenseAssetRule"
+    },
+    "LicenseAssetRulesetArnList": {
+      "type": "list",
+      "member": "Arn"
+    },
+    "LicenseConfigurationRuleStatement": {
+      "type": "structure",
+      "members": {
+        "AndRuleStatement": "AndRuleStatement",
+        "OrRuleStatement": "OrRuleStatement",
+        "MatchingRuleStatement": "MatchingRuleStatement"
+      }
+    },
+    "LicenseConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "DISABLED"
+      ]
+    },
+    "LicenseConversionContext": {
+      "type": "structure",
+      "members": {
+        "UsageOperation": "UsageOperation",
+        "ProductCodes": "ProductCodeList"
+      }
+    },
+    "LicenseConversionTaskId": {
+      "type": "string",
+      "max": 50,
+      "pattern": "^lct-[a-zA-Z0-9]*"
+    },
+    "LicenseCountingType": {
+      "type": "string",
+      "enum": [
+        "vCPU",
+        "Instance",
+        "Core",
+        "Socket"
+      ]
+    },
+    "LicenseRuleStatement": {
+      "type": "structure",
+      "members": {
+        "AndRuleStatement": "AndRuleStatement",
+        "OrRuleStatement": "OrRuleStatement",
+        "MatchingRuleStatement": "MatchingRuleStatement"
+      }
+    },
+    "LicenseSpecification": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String",
+        "AmiAssociationScope": "String"
+      }
+    },
+    "LicenseSpecifications": {
+      "type": "list",
+      "member": "LicenseSpecification"
+    },
+    "LicenseStatus": {
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "PENDING_AVAILABLE",
+        "DEACTIVATED",
+        "SUSPENDED",
+        "EXPIRED",
+        "PENDING_DELETE",
+        "DELETED"
+      ]
+    },
+    "ListAssetsForLicenseAssetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseAssetGroupArn",
+        "AssetType"
+      ],
+      "members": {
+        "LicenseAssetGroupArn": "String",
+        "AssetType": "String",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListAssociationsForLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListDistributedGrantsRequest": {
+      "type": "structure",
+      "members": {
+        "GrantArns": "ArnList",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListFailuresForLicenseConfigurationOperationsRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListLicenseAssetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "Filters": "Filters",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListLicenseAssetRulesetsRequest": {
+      "type": "structure",
+      "members": {
+        "Filters": "Filters",
+        "ShowAWSManagedLicenseAssetRulesets": "Boolean",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListLicenseConfigurationsForOrganizationRequest": {
+      "type": "structure",
+      "members": {
+        "LicenseConfigurationArns": "StringList",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String",
+        "Filters": "Filters"
+      }
+    },
+    "ListLicenseConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "LicenseConfigurationArns": "StringList",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String",
+        "Filters": "Filters"
+      }
+    },
+    "ListLicenseConversionTasksRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String",
+        "MaxResults": "BoxInteger",
+        "Filters": "Filters"
+      }
+    },
+    "ListLicenseManagerReportGeneratorsRequest": {
+      "type": "structure",
+      "members": {
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListLicenseSpecificationsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListLicenseVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListLicensesRequest": {
+      "type": "structure",
+      "members": {
+        "LicenseArns": "ArnList",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListReceivedGrantsForOrganizationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseArn"
+      ],
+      "members": {
+        "LicenseArn": "Arn",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListReceivedGrantsRequest": {
+      "type": "structure",
+      "members": {
+        "GrantArns": "ArnList",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListReceivedLicensesForOrganizationRequest": {
+      "type": "structure",
+      "members": {
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListReceivedLicensesRequest": {
+      "type": "structure",
+      "members": {
+        "LicenseArns": "ArnList",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListResourceInventoryRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "BoxInteger",
+        "NextToken": "String",
+        "Filters": "InventoryFilterList"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String"
+      }
+    },
+    "ListTokensRequest": {
+      "type": "structure",
+      "members": {
+        "TokenIds": "StringList",
+        "Filters": "FilterList",
+        "NextToken": "String",
+        "MaxResults": "MaxSize100"
+      }
+    },
+    "ListUsageForLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String",
+        "MaxResults": "BoxInteger",
+        "NextToken": "String",
+        "Filters": "Filters"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "MatchingRuleStatement": {
+      "type": "structure",
+      "required": [
+        "KeyToMatch",
+        "Constraint",
+        "ValueToMatch"
+      ],
+      "members": {
+        "KeyToMatch": "String",
+        "Constraint": "String",
+        "ValueToMatch": "StringList"
+      }
+    },
+    "MatchingRuleStatementList": {
+      "type": "list",
+      "member": "MatchingRuleStatement"
+    },
+    "MaxSize100": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxSize3StringList": {
+      "type": "list",
+      "max": 3,
+      "member": "String"
+    },
+    "Metadata": {
+      "type": "structure",
+      "members": {
+        "Name": "String",
+        "Value": "String"
+      }
+    },
+    "MetadataList": {
+      "type": "list",
+      "member": "Metadata"
+    },
+    "Options": {
+      "type": "structure",
+      "members": {
+        "ActivationOverrideBehavior": "ActivationOverrideBehavior"
+      }
+    },
+    "OrRuleStatement": {
+      "type": "structure",
+      "members": {
+        "MatchingRuleStatements": "MatchingRuleStatementList",
+        "ScriptRuleStatements": "ScriptRuleStatementList"
+      }
+    },
+    "OrganizationConfiguration": {
+      "type": "structure",
+      "required": [
+        "EnableIntegration"
+      ],
+      "members": {
+        "EnableIntegration": "Boolean"
+      }
+    },
+    "PrincipalArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "Arn"
+    },
+    "ProductCodeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{1,25}$"
+    },
+    "ProductCodeList": {
+      "type": "list",
+      "member": "ProductCodeListItem"
+    },
+    "ProductCodeListItem": {
+      "type": "structure",
+      "required": [
+        "ProductCodeId",
+        "ProductCodeType"
+      ],
+      "members": {
+        "ProductCodeId": "ProductCodeId",
+        "ProductCodeType": "ProductCodeType"
+      }
+    },
+    "ProductCodeType": {
+      "type": "string",
+      "enum": [
+        "marketplace"
+      ]
+    },
+    "ProductInformation": {
+      "type": "structure",
+      "required": [
+        "ResourceType",
+        "ProductInformationFilterList"
+      ],
+      "members": {
+        "ResourceType": "String",
+        "ProductInformationFilterList": "ProductInformationFilterList"
+      }
+    },
+    "ProductInformationFilter": {
+      "type": "structure",
+      "required": [
+        "ProductInformationFilterName",
+        "ProductInformationFilterComparator"
+      ],
+      "members": {
+        "ProductInformationFilterName": "String",
+        "ProductInformationFilterValue": "StringList",
+        "ProductInformationFilterComparator": "String"
+      }
+    },
+    "ProductInformationFilterList": {
+      "type": "list",
+      "member": "ProductInformationFilter"
+    },
+    "ProductInformationList": {
+      "type": "list",
+      "member": "ProductInformation"
+    },
+    "ProvisionalConfiguration": {
+      "type": "structure",
+      "required": [
+        "MaxTimeToLiveInMinutes"
+      ],
+      "members": {
+        "MaxTimeToLiveInMinutes": "BoxInteger"
+      }
+    },
+    "RejectGrantRequest": {
+      "type": "structure",
+      "required": [
+        "GrantArn"
+      ],
+      "members": {
+        "GrantArn": "Arn"
+      }
+    },
+    "RenewType": {
+      "type": "string",
+      "enum": [
+        "None",
+        "Weekly",
+        "Monthly"
+      ]
+    },
+    "ReportContext": {
+      "type": "structure",
+      "members": {
+        "licenseConfigurationArns": "ArnList",
+        "licenseAssetGroupArns": "ArnList",
+        "reportStartDate": "DateTime",
+        "reportEndDate": "DateTime"
+      }
+    },
+    "ReportFrequency": {
+      "type": "structure",
+      "members": {
+        "value": "Integer",
+        "period": "ReportFrequencyType"
+      }
+    },
+    "ReportFrequencyType": {
+      "type": "string",
+      "enum": [
+        "DAY",
+        "WEEK",
+        "MONTH",
+        "ONE_TIME"
+      ]
+    },
+    "ReportGeneratorName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "ReportType": {
+      "type": "string",
+      "enum": [
+        "LicenseConfigurationSummaryReport",
+        "LicenseConfigurationUsageReport",
+        "LicenseAssetGroupUsageReport"
+      ]
+    },
+    "ReportTypeList": {
+      "type": "list",
+      "member": "ReportType"
+    },
+    "RuleStatement": {
+      "type": "structure",
+      "members": {
+        "LicenseConfigurationRuleStatement": "LicenseConfigurationRuleStatement",
+        "LicenseRuleStatement": "LicenseRuleStatement",
+        "InstanceRuleStatement": "InstanceRuleStatement"
+      }
+    },
+    "ScriptRuleStatement": {
+      "type": "structure",
+      "required": [
+        "KeyToMatch",
+        "Script"
+      ],
+      "members": {
+        "KeyToMatch": "String",
+        "Script": "String"
+      }
+    },
+    "ScriptRuleStatementList": {
+      "type": "list",
+      "member": "ScriptRuleStatement"
+    },
+    "StatusReasonMessage": {
+      "type": "string",
+      "max": 400,
+      "pattern": "[\\s\\S]+"
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "String",
+        "Value": "String"
+      }
+    },
+    "TagKeyList": {
+      "type": "list",
+      "member": "String"
+    },
+    "TagList": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "Tags": "TagList"
+      }
+    },
+    "TokenString": {
+      "type": "string",
+      "max": 4096,
+      "pattern": "\\S+"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateLicenseAssetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "AssociatedLicenseAssetRulesetARNs",
+        "LicenseAssetGroupArn",
+        "ClientToken"
+      ],
+      "members": {
+        "Name": "LicenseAssetResourceName",
+        "Description": "LicenseAssetResourceDescription",
+        "LicenseAssetGroupConfigurations": "LicenseAssetGroupConfigurationList",
+        "AssociatedLicenseAssetRulesetARNs": "LicenseAssetRulesetArnList",
+        "Properties": "LicenseAssetGroupPropertyList",
+        "LicenseAssetGroupArn": "Arn",
+        "Status": "LicenseAssetGroupStatus",
+        "ClientToken": "String"
+      }
+    },
+    "UpdateLicenseAssetRulesetRequest": {
+      "type": "structure",
+      "required": [
+        "Rules",
+        "LicenseAssetRulesetArn",
+        "ClientToken"
+      ],
+      "members": {
+        "Name": "LicenseAssetResourceName",
+        "Description": "LicenseAssetResourceDescription",
+        "Rules": "LicenseAssetRuleList",
+        "LicenseAssetRulesetArn": "Arn",
+        "ClientToken": "String"
+      }
+    },
+    "UpdateLicenseConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseConfigurationArn"
+      ],
+      "members": {
+        "LicenseConfigurationArn": "String",
+        "LicenseConfigurationStatus": "LicenseConfigurationStatus",
+        "LicenseRules": "StringList",
+        "LicenseCount": "BoxLong",
+        "LicenseCountHardLimit": "BoxBoolean",
+        "Name": "String",
+        "Description": "String",
+        "ProductInformationList": "ProductInformationList",
+        "DisassociateWhenNotFound": "BoxBoolean",
+        "LicenseExpiry": "BoxLong"
+      }
+    },
+    "UpdateLicenseManagerReportGeneratorRequest": {
+      "type": "structure",
+      "required": [
+        "LicenseManagerReportGeneratorArn",
+        "ReportGeneratorName",
+        "Type",
+        "ReportContext",
+        "ReportFrequency",
+        "ClientToken"
+      ],
+      "members": {
+        "LicenseManagerReportGeneratorArn": "String",
+        "ReportGeneratorName": "ReportGeneratorName",
+        "Type": "ReportTypeList",
+        "ReportContext": "ReportContext",
+        "ReportFrequency": "ReportFrequency",
+        "ClientToken": "ClientRequestToken",
+        "Description": "String"
+      }
+    },
+    "UpdateLicenseSpecificationsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "AddLicenseSpecifications": "LicenseSpecifications",
+        "RemoveLicenseSpecifications": "LicenseSpecifications"
+      }
+    },
+    "UpdateServiceSettingsRequest": {
+      "type": "structure",
+      "members": {
+        "S3BucketArn": "String",
+        "SnsTopicArn": "String",
+        "OrganizationConfiguration": "OrganizationConfiguration",
+        "EnableCrossAccountsDiscovery": "BoxBoolean",
+        "EnabledDiscoverySourceRegions": "StringList"
+      }
+    },
+    "UsageOperation": {
+      "type": "string",
+      "max": 50
+    }
+  }
+}

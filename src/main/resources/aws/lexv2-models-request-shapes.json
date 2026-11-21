@@ -1,0 +1,5026 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_lexv2_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchCreateCustomVocabularyItem": "BatchCreateCustomVocabularyItemRequest",
+    "BatchDeleteCustomVocabularyItem": "BatchDeleteCustomVocabularyItemRequest",
+    "BatchUpdateCustomVocabularyItem": "BatchUpdateCustomVocabularyItemRequest",
+    "BuildBotLocale": "BuildBotLocaleRequest",
+    "CreateBot": "CreateBotRequest",
+    "CreateBotAlias": "CreateBotAliasRequest",
+    "CreateBotLocale": "CreateBotLocaleRequest",
+    "CreateBotReplica": "CreateBotReplicaRequest",
+    "CreateBotVersion": "CreateBotVersionRequest",
+    "CreateExport": "CreateExportRequest",
+    "CreateIntent": "CreateIntentRequest",
+    "CreateResourcePolicy": "CreateResourcePolicyRequest",
+    "CreateResourcePolicyStatement": "CreateResourcePolicyStatementRequest",
+    "CreateSlot": "CreateSlotRequest",
+    "CreateSlotType": "CreateSlotTypeRequest",
+    "CreateTestSetDiscrepancyReport": "CreateTestSetDiscrepancyReportRequest",
+    "CreateUploadUrl": "CreateUploadUrlRequest",
+    "DeleteBot": "DeleteBotRequest",
+    "DeleteBotAlias": "DeleteBotAliasRequest",
+    "DeleteBotAnalyzerRecommendation": "DeleteBotAnalyzerRecommendationRequest",
+    "DeleteBotLocale": "DeleteBotLocaleRequest",
+    "DeleteBotReplica": "DeleteBotReplicaRequest",
+    "DeleteBotVersion": "DeleteBotVersionRequest",
+    "DeleteCustomVocabulary": "DeleteCustomVocabularyRequest",
+    "DeleteExport": "DeleteExportRequest",
+    "DeleteImport": "DeleteImportRequest",
+    "DeleteIntent": "DeleteIntentRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "DeleteResourcePolicyStatement": "DeleteResourcePolicyStatementRequest",
+    "DeleteSlot": "DeleteSlotRequest",
+    "DeleteSlotType": "DeleteSlotTypeRequest",
+    "DeleteTestSet": "DeleteTestSetRequest",
+    "DeleteUtterances": "DeleteUtterancesRequest",
+    "DescribeBot": "DescribeBotRequest",
+    "DescribeBotAlias": "DescribeBotAliasRequest",
+    "DescribeBotAnalyzerRecommendation": "DescribeBotAnalyzerRecommendationRequest",
+    "DescribeBotLocale": "DescribeBotLocaleRequest",
+    "DescribeBotRecommendation": "DescribeBotRecommendationRequest",
+    "DescribeBotReplica": "DescribeBotReplicaRequest",
+    "DescribeBotResourceGeneration": "DescribeBotResourceGenerationRequest",
+    "DescribeBotVersion": "DescribeBotVersionRequest",
+    "DescribeCustomVocabularyMetadata": "DescribeCustomVocabularyMetadataRequest",
+    "DescribeExport": "DescribeExportRequest",
+    "DescribeImport": "DescribeImportRequest",
+    "DescribeIntent": "DescribeIntentRequest",
+    "DescribeResourcePolicy": "DescribeResourcePolicyRequest",
+    "DescribeSlot": "DescribeSlotRequest",
+    "DescribeSlotType": "DescribeSlotTypeRequest",
+    "DescribeTestExecution": "DescribeTestExecutionRequest",
+    "DescribeTestSet": "DescribeTestSetRequest",
+    "DescribeTestSetDiscrepancyReport": "DescribeTestSetDiscrepancyReportRequest",
+    "DescribeTestSetGeneration": "DescribeTestSetGenerationRequest",
+    "GenerateBotElement": "GenerateBotElementRequest",
+    "GetTestExecutionArtifactsUrl": "GetTestExecutionArtifactsUrlRequest",
+    "ListAggregatedUtterances": "ListAggregatedUtterancesRequest",
+    "ListBotAliasReplicas": "ListBotAliasReplicasRequest",
+    "ListBotAliases": "ListBotAliasesRequest",
+    "ListBotAnalyzerHistory": "ListBotAnalyzerHistoryRequest",
+    "ListBotLocales": "ListBotLocalesRequest",
+    "ListBotRecommendations": "ListBotRecommendationsRequest",
+    "ListBotReplicas": "ListBotReplicasRequest",
+    "ListBotResourceGenerations": "ListBotResourceGenerationsRequest",
+    "ListBotVersionReplicas": "ListBotVersionReplicasRequest",
+    "ListBotVersions": "ListBotVersionsRequest",
+    "ListBots": "ListBotsRequest",
+    "ListBuiltInIntents": "ListBuiltInIntentsRequest",
+    "ListBuiltInSlotTypes": "ListBuiltInSlotTypesRequest",
+    "ListCustomVocabularyItems": "ListCustomVocabularyItemsRequest",
+    "ListExports": "ListExportsRequest",
+    "ListImports": "ListImportsRequest",
+    "ListIntentMetrics": "ListIntentMetricsRequest",
+    "ListIntentPaths": "ListIntentPathsRequest",
+    "ListIntentStageMetrics": "ListIntentStageMetricsRequest",
+    "ListIntents": "ListIntentsRequest",
+    "ListRecommendedIntents": "ListRecommendedIntentsRequest",
+    "ListSessionAnalyticsData": "ListSessionAnalyticsDataRequest",
+    "ListSessionMetrics": "ListSessionMetricsRequest",
+    "ListSlotTypes": "ListSlotTypesRequest",
+    "ListSlots": "ListSlotsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTestExecutionResultItems": "ListTestExecutionResultItemsRequest",
+    "ListTestExecutions": "ListTestExecutionsRequest",
+    "ListTestSetRecords": "ListTestSetRecordsRequest",
+    "ListTestSets": "ListTestSetsRequest",
+    "ListUtteranceAnalyticsData": "ListUtteranceAnalyticsDataRequest",
+    "ListUtteranceMetrics": "ListUtteranceMetricsRequest",
+    "SearchAssociatedTranscripts": "SearchAssociatedTranscriptsRequest",
+    "StartBotAnalyzer": "StartBotAnalyzerRequest",
+    "StartBotRecommendation": "StartBotRecommendationRequest",
+    "StartBotResourceGeneration": "StartBotResourceGenerationRequest",
+    "StartImport": "StartImportRequest",
+    "StartTestExecution": "StartTestExecutionRequest",
+    "StartTestSetGeneration": "StartTestSetGenerationRequest",
+    "StopBotAnalyzer": "StopBotAnalyzerRequest",
+    "StopBotRecommendation": "StopBotRecommendationRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateBot": "UpdateBotRequest",
+    "UpdateBotAlias": "UpdateBotAliasRequest",
+    "UpdateBotLocale": "UpdateBotLocaleRequest",
+    "UpdateBotRecommendation": "UpdateBotRecommendationRequest",
+    "UpdateExport": "UpdateExportRequest",
+    "UpdateIntent": "UpdateIntentRequest",
+    "UpdateResourcePolicy": "UpdateResourcePolicyRequest",
+    "UpdateSlot": "UpdateSlotRequest",
+    "UpdateSlotType": "UpdateSlotTypeRequest",
+    "UpdateTestSet": "UpdateTestSetRequest"
+  },
+  "shapes": {
+    "AdvancedRecognitionSetting": {
+      "type": "structure",
+      "members": {
+        "audioRecognitionStrategy": "AudioRecognitionStrategy"
+      }
+    },
+    "AggregatedUtterancesFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "AggregatedUtterancesFilterName",
+        "values": "FilterValues",
+        "operator": "AggregatedUtterancesFilterOperator"
+      }
+    },
+    "AggregatedUtterancesFilterName": {
+      "type": "string",
+      "enum": [
+        "Utterance"
+      ]
+    },
+    "AggregatedUtterancesFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "AggregatedUtterancesFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AggregatedUtterancesFilter"
+    },
+    "AggregatedUtterancesSortAttribute": {
+      "type": "string",
+      "enum": [
+        "HitCount",
+        "MissedCount"
+      ]
+    },
+    "AggregatedUtterancesSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "AggregatedUtterancesSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "AllowedInputTypes": {
+      "type": "structure",
+      "required": [
+        "allowAudioInput",
+        "allowDTMFInput"
+      ],
+      "members": {
+        "allowAudioInput": "BoxedBoolean",
+        "allowDTMFInput": "BoxedBoolean"
+      }
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "AnalysisScope": {
+      "type": "string",
+      "enum": [
+        "BotLocale"
+      ]
+    },
+    "AnalyticsBinByList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AnalyticsBinBySpecification"
+    },
+    "AnalyticsBinByName": {
+      "type": "string",
+      "enum": [
+        "ConversationStartTime",
+        "UtteranceTimestamp"
+      ]
+    },
+    "AnalyticsBinBySpecification": {
+      "type": "structure",
+      "required": [
+        "name",
+        "interval"
+      ],
+      "members": {
+        "name": "AnalyticsBinByName",
+        "interval": "AnalyticsInterval",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "AnalyticsCommonFilterName": {
+      "type": "string",
+      "enum": [
+        "BotAliasId",
+        "BotVersion",
+        "LocaleId",
+        "Modality",
+        "Channel"
+      ]
+    },
+    "AnalyticsFilterOperator": {
+      "type": "string",
+      "enum": [
+        "EQ",
+        "GT",
+        "LT"
+      ]
+    },
+    "AnalyticsFilterValue": {
+      "type": "string"
+    },
+    "AnalyticsFilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AnalyticsFilterValue"
+    },
+    "AnalyticsIntentField": {
+      "type": "string",
+      "enum": [
+        "IntentName",
+        "IntentEndState",
+        "IntentLevel"
+      ]
+    },
+    "AnalyticsIntentFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "AnalyticsIntentFilterName",
+        "operator": "AnalyticsFilterOperator",
+        "values": "AnalyticsFilterValues"
+      }
+    },
+    "AnalyticsIntentFilterName": {
+      "type": "string",
+      "enum": [
+        "BotAliasId",
+        "BotVersion",
+        "LocaleId",
+        "Modality",
+        "Channel",
+        "SessionId",
+        "OriginatingRequestId",
+        "IntentName",
+        "IntentEndState"
+      ]
+    },
+    "AnalyticsIntentFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "AnalyticsIntentFilter"
+    },
+    "AnalyticsIntentGroupByList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "AnalyticsIntentGroupBySpecification"
+    },
+    "AnalyticsIntentGroupBySpecification": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AnalyticsIntentField"
+      }
+    },
+    "AnalyticsIntentMetric": {
+      "type": "structure",
+      "required": [
+        "name",
+        "statistic"
+      ],
+      "members": {
+        "name": "AnalyticsIntentMetricName",
+        "statistic": "AnalyticsMetricStatistic",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "AnalyticsIntentMetricName": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "Success",
+        "Failure",
+        "Switched",
+        "Dropped"
+      ]
+    },
+    "AnalyticsIntentMetrics": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AnalyticsIntentMetric"
+    },
+    "AnalyticsIntentStageField": {
+      "type": "string",
+      "enum": [
+        "IntentStageName",
+        "SwitchedToIntent"
+      ]
+    },
+    "AnalyticsIntentStageFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "AnalyticsIntentStageFilterName",
+        "operator": "AnalyticsFilterOperator",
+        "values": "AnalyticsFilterValues"
+      }
+    },
+    "AnalyticsIntentStageFilterName": {
+      "type": "string",
+      "enum": [
+        "BotAliasId",
+        "BotVersion",
+        "LocaleId",
+        "Modality",
+        "Channel",
+        "SessionId",
+        "OriginatingRequestId",
+        "IntentName",
+        "IntentStageName"
+      ]
+    },
+    "AnalyticsIntentStageFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "AnalyticsIntentStageFilter"
+    },
+    "AnalyticsIntentStageGroupByList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "AnalyticsIntentStageGroupBySpecification"
+    },
+    "AnalyticsIntentStageGroupBySpecification": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AnalyticsIntentStageField"
+      }
+    },
+    "AnalyticsIntentStageMetric": {
+      "type": "structure",
+      "required": [
+        "name",
+        "statistic"
+      ],
+      "members": {
+        "name": "AnalyticsIntentStageMetricName",
+        "statistic": "AnalyticsMetricStatistic",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "AnalyticsIntentStageMetricName": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "Success",
+        "Failed",
+        "Dropped",
+        "Retry"
+      ]
+    },
+    "AnalyticsIntentStageMetrics": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AnalyticsIntentStageMetric"
+    },
+    "AnalyticsInterval": {
+      "type": "string",
+      "enum": [
+        "OneHour",
+        "OneDay"
+      ]
+    },
+    "AnalyticsMetricStatistic": {
+      "type": "string",
+      "enum": [
+        "Sum",
+        "Avg",
+        "Max"
+      ]
+    },
+    "AnalyticsPath": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "AnalyticsPathFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "AnalyticsCommonFilterName",
+        "operator": "AnalyticsFilterOperator",
+        "values": "AnalyticsFilterValues"
+      }
+    },
+    "AnalyticsPathFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AnalyticsPathFilter"
+    },
+    "AnalyticsSessionField": {
+      "type": "string",
+      "enum": [
+        "ConversationEndState",
+        "LocaleId"
+      ]
+    },
+    "AnalyticsSessionFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "AnalyticsSessionFilterName",
+        "operator": "AnalyticsFilterOperator",
+        "values": "AnalyticsFilterValues"
+      }
+    },
+    "AnalyticsSessionFilterName": {
+      "type": "string",
+      "enum": [
+        "BotAliasId",
+        "BotVersion",
+        "LocaleId",
+        "Modality",
+        "Channel",
+        "Duration",
+        "ConversationEndState",
+        "SessionId",
+        "OriginatingRequestId",
+        "IntentPath"
+      ]
+    },
+    "AnalyticsSessionFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AnalyticsSessionFilter"
+    },
+    "AnalyticsSessionGroupByList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "AnalyticsSessionGroupBySpecification"
+    },
+    "AnalyticsSessionGroupBySpecification": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AnalyticsSessionField"
+      }
+    },
+    "AnalyticsSessionMetric": {
+      "type": "structure",
+      "required": [
+        "name",
+        "statistic"
+      ],
+      "members": {
+        "name": "AnalyticsSessionMetricName",
+        "statistic": "AnalyticsMetricStatistic",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "AnalyticsSessionMetricName": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "Success",
+        "Failure",
+        "Dropped",
+        "Duration",
+        "TurnsPerConversation",
+        "Concurrency"
+      ]
+    },
+    "AnalyticsSessionMetrics": {
+      "type": "list",
+      "min": 1,
+      "max": 7,
+      "member": "AnalyticsSessionMetric"
+    },
+    "AnalyticsSessionSortByName": {
+      "type": "string",
+      "enum": [
+        "ConversationStartTime",
+        "NumberOfTurns",
+        "Duration"
+      ]
+    },
+    "AnalyticsSortOrder": {
+      "type": "string",
+      "enum": [
+        "Ascending",
+        "Descending"
+      ]
+    },
+    "AnalyticsUtteranceAttribute": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AnalyticsUtteranceAttributeName"
+      }
+    },
+    "AnalyticsUtteranceAttributeName": {
+      "type": "string",
+      "enum": [
+        "LastUsedIntent"
+      ]
+    },
+    "AnalyticsUtteranceAttributes": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AnalyticsUtteranceAttribute"
+    },
+    "AnalyticsUtteranceField": {
+      "type": "string",
+      "enum": [
+        "UtteranceText",
+        "UtteranceState"
+      ]
+    },
+    "AnalyticsUtteranceFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "AnalyticsUtteranceFilterName",
+        "operator": "AnalyticsFilterOperator",
+        "values": "AnalyticsFilterValues"
+      }
+    },
+    "AnalyticsUtteranceFilterName": {
+      "type": "string",
+      "enum": [
+        "BotAliasId",
+        "BotVersion",
+        "LocaleId",
+        "Modality",
+        "Channel",
+        "SessionId",
+        "OriginatingRequestId",
+        "UtteranceState",
+        "UtteranceText"
+      ]
+    },
+    "AnalyticsUtteranceFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "AnalyticsUtteranceFilter"
+    },
+    "AnalyticsUtteranceGroupByList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "AnalyticsUtteranceGroupBySpecification"
+    },
+    "AnalyticsUtteranceGroupBySpecification": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AnalyticsUtteranceField"
+      }
+    },
+    "AnalyticsUtteranceMetric": {
+      "type": "structure",
+      "required": [
+        "name",
+        "statistic"
+      ],
+      "members": {
+        "name": "AnalyticsUtteranceMetricName",
+        "statistic": "AnalyticsMetricStatistic",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "AnalyticsUtteranceMetricName": {
+      "type": "string",
+      "enum": [
+        "Count",
+        "Missed",
+        "Detected",
+        "UtteranceTimestamp"
+      ]
+    },
+    "AnalyticsUtteranceMetrics": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "AnalyticsUtteranceMetric"
+    },
+    "AnalyticsUtteranceSortByName": {
+      "type": "string",
+      "enum": [
+        "UtteranceTimestamp"
+      ]
+    },
+    "AnswerField": {
+      "type": "string"
+    },
+    "AssistedNluMode": {
+      "type": "string",
+      "enum": [
+        "Primary",
+        "Fallback",
+        "DialogManager"
+      ]
+    },
+    "AssociatedTranscriptFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values"
+      ],
+      "members": {
+        "name": "AssociatedTranscriptFilterName",
+        "values": "FilterValues"
+      }
+    },
+    "AssociatedTranscriptFilterName": {
+      "type": "string",
+      "enum": [
+        "IntentId",
+        "SlotTypeId"
+      ]
+    },
+    "AssociatedTranscriptFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AssociatedTranscriptFilter"
+    },
+    "AttachmentTitle": {
+      "type": "string",
+      "min": 1,
+      "max": 250
+    },
+    "AttachmentUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 250
+    },
+    "AudioAndDTMFInputSpecification": {
+      "type": "structure",
+      "required": [
+        "startTimeoutMs"
+      ],
+      "members": {
+        "startTimeoutMs": "TimeInMilliSeconds",
+        "audioSpecification": "AudioSpecification",
+        "dtmfSpecification": "DTMFSpecification"
+      }
+    },
+    "AudioFillerDelayInMilliseconds": {
+      "type": "integer"
+    },
+    "AudioFillerDeliveryDelayInMilliseconds": {
+      "type": "integer"
+    },
+    "AudioFillerDurationInMilliseconds": {
+      "type": "integer"
+    },
+    "AudioFillerSettings": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean",
+        "audioType": "AudioFillerType",
+        "startDelayInMilliseconds": "AudioFillerDelayInMilliseconds",
+        "minimumPlayDurationInMilliseconds": "AudioFillerDurationInMilliseconds",
+        "responseDeliveryDelayInMilliseconds": "AudioFillerDeliveryDelayInMilliseconds"
+      }
+    },
+    "AudioFillerType": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "MELODY_CHIPPER_CHIME",
+        "MELODY_CURIOUS_CRAWL",
+        "MELODY_RISING_RIPPLE",
+        "MELODY_PATIENT_PING",
+        "MELODY_PONDERING_PONG",
+        "TYPING_KINETIC_KEYS",
+        "TYPING_QUIET_QWERTY"
+      ]
+    },
+    "AudioLogDestination": {
+      "type": "structure",
+      "required": [
+        "s3Bucket"
+      ],
+      "members": {
+        "s3Bucket": "S3BucketLogDestination"
+      }
+    },
+    "AudioLogSetting": {
+      "type": "structure",
+      "required": [
+        "enabled",
+        "destination"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "destination": "AudioLogDestination",
+        "selectiveLoggingEnabled": "BoxedBoolean"
+      }
+    },
+    "AudioLogSettingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AudioLogSetting"
+    },
+    "AudioRecognitionStrategy": {
+      "type": "string",
+      "enum": [
+        "UseSlotValuesAsCustomVocabulary"
+      ]
+    },
+    "AudioSpecification": {
+      "type": "structure",
+      "required": [
+        "maxLengthMs",
+        "endTimeoutMs"
+      ],
+      "members": {
+        "maxLengthMs": "TimeInMilliSeconds",
+        "endTimeoutMs": "TimeInMilliSeconds"
+      }
+    },
+    "BatchCreateCustomVocabularyItemRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "customVocabularyItemList"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "customVocabularyItemList": "CreateCustomVocabularyItemsList"
+      }
+    },
+    "BatchDeleteCustomVocabularyItemRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "customVocabularyItemList"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "customVocabularyItemList": "DeleteCustomVocabularyItemsList"
+      }
+    },
+    "BatchUpdateCustomVocabularyItemRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "customVocabularyItemList"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "customVocabularyItemList": "UpdateCustomVocabularyItemsList"
+      }
+    },
+    "BedrockGuardrailConfiguration": {
+      "type": "structure",
+      "required": [
+        "identifier",
+        "version"
+      ],
+      "members": {
+        "identifier": "BedrockGuardrailIdentifier",
+        "version": "BedrockGuardrailVersion"
+      }
+    },
+    "BedrockGuardrailIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(([a-z0-9]+)|(arn:aws(-[^:]+)?:bedrock:[a-z0-9-]{1,20}:[0-9]{12}:guardrail/[a-z0-9]+))$"
+    },
+    "BedrockGuardrailVersion": {
+      "type": "string",
+      "pattern": "^(([1-9][0-9]{0,7})|(DRAFT))$"
+    },
+    "BedrockKnowledgeBaseArn": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "^arn:aws(-[^:]+)?:bedrock:[a-z0-9-]{1,40}:[0-9]{12}:knowledge-base\\/[A-Za-z0-9]{10}$|^[A-Za-z0-9]{10}$"
+    },
+    "BedrockKnowledgeStoreConfiguration": {
+      "type": "structure",
+      "required": [
+        "bedrockKnowledgeBaseArn"
+      ],
+      "members": {
+        "bedrockKnowledgeBaseArn": "BedrockKnowledgeBaseArn",
+        "exactResponse": "Boolean",
+        "exactResponseFields": "BedrockKnowledgeStoreExactResponseFields"
+      }
+    },
+    "BedrockKnowledgeStoreExactResponseFields": {
+      "type": "structure",
+      "members": {
+        "answerField": "AnswerField"
+      }
+    },
+    "BedrockModelArn": {
+      "type": "string",
+      "pattern": "^arn:aws(-[^:]+)?:bedrock:[a-z0-9-]{1,20}::foundation-model\\/[a-z0-9-]{1,63}[.]{1}([a-z0-9-]{1,63}[.]){0,2}[a-z0-9-]{1,63}([:][a-z0-9-]{1,63}){0,2}$"
+    },
+    "BedrockModelCustomPrompt": {
+      "type": "string",
+      "min": 1,
+      "max": 4000
+    },
+    "BedrockModelSpecification": {
+      "type": "structure",
+      "required": [
+        "modelArn"
+      ],
+      "members": {
+        "modelArn": "BedrockModelArn",
+        "guardrail": "BedrockGuardrailConfiguration",
+        "traceStatus": "BedrockTraceStatus",
+        "customPrompt": "BedrockModelCustomPrompt"
+      }
+    },
+    "BedrockTraceStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BotAliasId": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "^(\\bTSTALIASID\\b|[0-9a-zA-Z]+)$"
+    },
+    "BotAliasLocaleSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "codeHookSpecification": "CodeHookSpecification"
+      }
+    },
+    "BotAliasLocaleSettingsMap": {
+      "type": "map",
+      "min": 1,
+      "key": "LocaleId",
+      "value": "BotAliasLocaleSettings"
+    },
+    "BotAliasName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^(\\bAmazonLexTestAlias\\b|[0-9a-zA-Z][_-]?)+$"
+    },
+    "BotAliasTestExecutionTarget": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAliasId": "BotAliasId",
+        "localeId": "LocaleId"
+      }
+    },
+    "BotExportSpecification": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion"
+      }
+    },
+    "BotFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "BotFilterName",
+        "values": "FilterValues",
+        "operator": "BotFilterOperator"
+      }
+    },
+    "BotFilterName": {
+      "type": "string",
+      "enum": [
+        "BotName",
+        "BotType"
+      ]
+    },
+    "BotFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ",
+        "NE"
+      ]
+    },
+    "BotFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "BotFilter"
+    },
+    "BotImportSpecification": {
+      "type": "structure",
+      "required": [
+        "botName",
+        "roleArn",
+        "dataPrivacy"
+      ],
+      "members": {
+        "botName": "Name",
+        "roleArn": "RoleArn",
+        "dataPrivacy": "DataPrivacy",
+        "errorLogSettings": "ErrorLogSettings",
+        "idleSessionTTLInSeconds": "SessionTTL",
+        "botTags": "TagMap",
+        "testBotAliasTags": "TagMap"
+      }
+    },
+    "BotLocaleExportSpecification": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "BotLocaleFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "BotLocaleFilterName",
+        "values": "FilterValues",
+        "operator": "BotLocaleFilterOperator"
+      }
+    },
+    "BotLocaleFilterName": {
+      "type": "string",
+      "enum": [
+        "BotLocaleName"
+      ]
+    },
+    "BotLocaleFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "BotLocaleFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "BotLocaleFilter"
+    },
+    "BotLocaleImportSpecification": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "nluIntentConfidenceThreshold": "ConfidenceThreshold",
+        "voiceSettings": "VoiceSettings",
+        "speechRecognitionSettings": "SpeechRecognitionSettings",
+        "speechDetectionSensitivity": "SpeechDetectionSensitivity",
+        "unifiedSpeechSettings": "UnifiedSpeechSettings",
+        "audioFillerSettings": "AudioFillerSettings",
+        "speakerDiarizationSettings": "SpeakerDiarizationSettings"
+      }
+    },
+    "BotLocaleSortAttribute": {
+      "type": "string",
+      "enum": [
+        "BotLocaleName"
+      ]
+    },
+    "BotLocaleSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BotLocaleSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BotMember": {
+      "type": "structure",
+      "required": [
+        "botMemberId",
+        "botMemberName",
+        "botMemberAliasId",
+        "botMemberAliasName",
+        "botMemberVersion"
+      ],
+      "members": {
+        "botMemberId": "Id",
+        "botMemberName": "Name",
+        "botMemberAliasId": "BotAliasId",
+        "botMemberAliasName": "BotAliasName",
+        "botMemberVersion": "BotVersion"
+      }
+    },
+    "BotMembers": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BotMember"
+    },
+    "BotSortAttribute": {
+      "type": "string",
+      "enum": [
+        "BotName"
+      ]
+    },
+    "BotSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BotSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BotType": {
+      "type": "string",
+      "enum": [
+        "Bot",
+        "BotNetwork"
+      ]
+    },
+    "BotVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "^(DRAFT|[0-9]+)$"
+    },
+    "BotVersionLocaleDetails": {
+      "type": "structure",
+      "required": [
+        "sourceBotVersion"
+      ],
+      "members": {
+        "sourceBotVersion": "BotVersion"
+      }
+    },
+    "BotVersionLocaleSpecification": {
+      "type": "map",
+      "min": 1,
+      "key": "LocaleId",
+      "value": "BotVersionLocaleDetails"
+    },
+    "BotVersionReplicaSortAttribute": {
+      "type": "string",
+      "enum": [
+        "BotVersion"
+      ]
+    },
+    "BotVersionReplicaSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BotVersionReplicaSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BotVersionSortAttribute": {
+      "type": "string",
+      "enum": [
+        "BotVersion"
+      ]
+    },
+    "BotVersionSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BotVersionSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BoxedBoolean": {
+      "type": "boolean"
+    },
+    "BuildBotLocaleRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "BuildtimeSettings": {
+      "type": "structure",
+      "members": {
+        "descriptiveBotBuilder": "DescriptiveBotBuilderSpecification",
+        "sampleUtteranceGeneration": "SampleUtteranceGenerationSpecification"
+      }
+    },
+    "BuiltInIntentSortAttribute": {
+      "type": "string",
+      "enum": [
+        "IntentSignature"
+      ]
+    },
+    "BuiltInIntentSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BuiltInIntentSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BuiltInOrCustomSlotTypeId": {
+      "type": "string",
+      "min": 1,
+      "max": 25,
+      "pattern": "^((AMAZON\\.)[a-zA-Z_]+?|[0-9a-zA-Z]+)$"
+    },
+    "BuiltInSlotTypeSortAttribute": {
+      "type": "string",
+      "enum": [
+        "SlotTypeSignature"
+      ]
+    },
+    "BuiltInSlotTypeSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "BuiltInSlotTypeSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "BuiltInsMaxResults": {
+      "type": "integer",
+      "min": 20,
+      "max": 20
+    },
+    "Button": {
+      "type": "structure",
+      "required": [
+        "text",
+        "value"
+      ],
+      "members": {
+        "text": "ButtonText",
+        "value": "ButtonValue"
+      }
+    },
+    "ButtonText": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ButtonValue": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ButtonsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "Button"
+    },
+    "ChildDirected": {
+      "type": "boolean"
+    },
+    "CloudWatchLogGroupArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^arn:[\\w\\-]+:logs:[\\w\\-]+:[\\d]{12}:log-group:[\\.\\-_/#A-Za-z0-9]{1,512}(?::\\*)?$"
+    },
+    "CloudWatchLogGroupLogDestination": {
+      "type": "structure",
+      "required": [
+        "cloudWatchLogGroupArn",
+        "logPrefix"
+      ],
+      "members": {
+        "cloudWatchLogGroupArn": "CloudWatchLogGroupArn",
+        "logPrefix": "LogPrefix"
+      }
+    },
+    "CodeHookInterfaceVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 5
+    },
+    "CodeHookSpecification": {
+      "type": "structure",
+      "required": [
+        "lambdaCodeHook"
+      ],
+      "members": {
+        "lambdaCodeHook": "LambdaCodeHook"
+      }
+    },
+    "CompositeSlotTypeSetting": {
+      "type": "structure",
+      "members": {
+        "subSlots": "SubSlotTypeList"
+      }
+    },
+    "Condition": {
+      "type": "structure",
+      "required": [
+        "expressionString"
+      ],
+      "members": {
+        "expressionString": "ConditionExpression"
+      }
+    },
+    "ConditionExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ConditionKey": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ConditionKeyValueMap": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "ConditionKey",
+      "value": "ConditionValue"
+    },
+    "ConditionMap": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "ConditionOperator",
+      "value": "ConditionKeyValueMap"
+    },
+    "ConditionOperator": {
+      "type": "string",
+      "min": 1
+    },
+    "ConditionValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ConditionalBranch": {
+      "type": "structure",
+      "required": [
+        "name",
+        "condition",
+        "nextStep"
+      ],
+      "members": {
+        "name": "Name",
+        "condition": "Condition",
+        "nextStep": "DialogState",
+        "response": "ResponseSpecification"
+      }
+    },
+    "ConditionalBranches": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "ConditionalBranch"
+    },
+    "ConditionalSpecification": {
+      "type": "structure",
+      "required": [
+        "active",
+        "conditionalBranches",
+        "defaultBranch"
+      ],
+      "members": {
+        "active": "BoxedBoolean",
+        "conditionalBranches": "ConditionalBranches",
+        "defaultBranch": "DefaultConditionalBranch"
+      }
+    },
+    "ConfidenceThreshold": {
+      "type": "double",
+      "min": 0,
+      "max": 1
+    },
+    "ContextTimeToLiveInSeconds": {
+      "type": "integer",
+      "min": 5,
+      "max": 86400
+    },
+    "ContextTurnsToLive": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ConversationLevelTestResultsFilterBy": {
+      "type": "structure",
+      "members": {
+        "endToEndResult": "TestResultMatchStatus"
+      }
+    },
+    "ConversationLogSettings": {
+      "type": "structure",
+      "members": {
+        "textLogSettings": "TextLogSettingsList",
+        "audioLogSettings": "AudioLogSettingsList"
+      }
+    },
+    "ConversationLogsDataSource": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "filter"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAliasId": "BotAliasId",
+        "localeId": "LocaleId",
+        "filter": "ConversationLogsDataSourceFilterBy"
+      }
+    },
+    "ConversationLogsDataSourceFilterBy": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime",
+        "inputMode"
+      ],
+      "members": {
+        "startTime": "Timestamp",
+        "endTime": "Timestamp",
+        "inputMode": "ConversationLogsInputModeFilter"
+      }
+    },
+    "ConversationLogsInputModeFilter": {
+      "type": "string",
+      "enum": [
+        "Speech",
+        "Text"
+      ]
+    },
+    "CreateBotAliasRequest": {
+      "type": "structure",
+      "required": [
+        "botAliasName",
+        "botId"
+      ],
+      "members": {
+        "botAliasName": "Name",
+        "description": "Description",
+        "botVersion": "NumericalBotVersion",
+        "botAliasLocaleSettings": "BotAliasLocaleSettingsMap",
+        "conversationLogSettings": "ConversationLogSettings",
+        "sentimentAnalysisSettings": "SentimentAnalysisSettings",
+        "botId": "Id",
+        "tags": "TagMap"
+      }
+    },
+    "CreateBotLocaleRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "nluIntentConfidenceThreshold"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "description": "Description",
+        "nluIntentConfidenceThreshold": "ConfidenceThreshold",
+        "voiceSettings": "VoiceSettings",
+        "unifiedSpeechSettings": "UnifiedSpeechSettings",
+        "audioFillerSettings": "AudioFillerSettings",
+        "speechRecognitionSettings": "SpeechRecognitionSettings",
+        "generativeAISettings": "GenerativeAISettings",
+        "speechDetectionSensitivity": "SpeechDetectionSensitivity",
+        "speakerDiarizationSettings": "SpeakerDiarizationSettings"
+      }
+    },
+    "CreateBotReplicaRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "replicaRegion"
+      ],
+      "members": {
+        "botId": "Id",
+        "replicaRegion": "ReplicaRegion"
+      }
+    },
+    "CreateBotRequest": {
+      "type": "structure",
+      "required": [
+        "botName",
+        "roleArn",
+        "dataPrivacy",
+        "idleSessionTTLInSeconds"
+      ],
+      "members": {
+        "botName": "Name",
+        "description": "Description",
+        "roleArn": "RoleArn",
+        "dataPrivacy": "DataPrivacy",
+        "idleSessionTTLInSeconds": "SessionTTL",
+        "botTags": "TagMap",
+        "testBotAliasTags": "TagMap",
+        "botType": "BotType",
+        "botMembers": "BotMembers",
+        "errorLogSettings": "ErrorLogSettings"
+      }
+    },
+    "CreateBotVersionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersionLocaleSpecification"
+      ],
+      "members": {
+        "botId": "Id",
+        "description": "Description",
+        "botVersionLocaleSpecification": "BotVersionLocaleSpecification"
+      }
+    },
+    "CreateCustomVocabularyItemsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "NewCustomVocabularyItem"
+    },
+    "CreateExportRequest": {
+      "type": "structure",
+      "required": [
+        "resourceSpecification",
+        "fileFormat"
+      ],
+      "members": {
+        "resourceSpecification": "ExportResourceSpecification",
+        "fileFormat": "ImportExportFileFormat",
+        "filePassword": "ImportExportFilePassword"
+      }
+    },
+    "CreateIntentRequest": {
+      "type": "structure",
+      "required": [
+        "intentName",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "intentName": "Name",
+        "intentDisplayName": "DisplayName",
+        "description": "Description",
+        "parentIntentSignature": "IntentSignature",
+        "sampleUtterances": "SampleUtterancesList",
+        "dialogCodeHook": "DialogCodeHookSettings",
+        "fulfillmentCodeHook": "FulfillmentCodeHookSettings",
+        "intentConfirmationSetting": "IntentConfirmationSetting",
+        "intentClosingSetting": "IntentClosingSetting",
+        "inputContexts": "InputContextsList",
+        "outputContexts": "OutputContextsList",
+        "kendraConfiguration": "KendraConfiguration",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "initialResponseSetting": "InitialResponseSetting",
+        "qnAIntentConfiguration": "QnAIntentConfiguration",
+        "qInConnectIntentConfiguration": "QInConnectIntentConfiguration"
+      }
+    },
+    "CreateResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "policy"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "policy": "Policy"
+      }
+    },
+    "CreateResourcePolicyStatementRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "statementId",
+        "effect",
+        "principal",
+        "action"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "statementId": "Name",
+        "effect": "Effect",
+        "principal": "PrincipalList",
+        "action": "OperationList",
+        "condition": "ConditionMap",
+        "expectedRevisionId": "RevisionId"
+      }
+    },
+    "CreateSlotRequest": {
+      "type": "structure",
+      "required": [
+        "slotName",
+        "valueElicitationSetting",
+        "botId",
+        "botVersion",
+        "localeId",
+        "intentId"
+      ],
+      "members": {
+        "slotName": "Name",
+        "description": "Description",
+        "slotTypeId": "BuiltInOrCustomSlotTypeId",
+        "valueElicitationSetting": "SlotValueElicitationSetting",
+        "obfuscationSetting": "ObfuscationSetting",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "intentId": "Id",
+        "multipleValuesSetting": "MultipleValuesSetting",
+        "subSlotSetting": "SubSlotSetting"
+      }
+    },
+    "CreateSlotTypeRequest": {
+      "type": "structure",
+      "required": [
+        "slotTypeName",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "slotTypeName": "Name",
+        "description": "Description",
+        "slotTypeValues": "SlotTypeValues",
+        "valueSelectionSetting": "SlotValueSelectionSetting",
+        "parentSlotTypeSignature": "SlotTypeSignature",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "externalSourceSetting": "ExternalSourceSetting",
+        "compositeSlotTypeSetting": "CompositeSlotTypeSetting"
+      }
+    },
+    "CreateTestSetDiscrepancyReportRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId",
+        "target"
+      ],
+      "members": {
+        "testSetId": "Id",
+        "target": "TestSetDiscrepancyReportResourceTarget"
+      }
+    },
+    "CreateUploadUrlRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "CustomDisambiguationMessage": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "CustomPayload": {
+      "type": "structure",
+      "required": [
+        "value"
+      ],
+      "members": {
+        "value": "CustomPayloadValue"
+      }
+    },
+    "CustomPayloadValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "CustomVocabularyEntryId": {
+      "type": "structure",
+      "required": [
+        "itemId"
+      ],
+      "members": {
+        "itemId": "ItemId"
+      }
+    },
+    "CustomVocabularyExportSpecification": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "CustomVocabularyImportSpecification": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "CustomVocabularyItem": {
+      "type": "structure",
+      "required": [
+        "itemId",
+        "phrase"
+      ],
+      "members": {
+        "itemId": "ItemId",
+        "phrase": "Phrase",
+        "weight": "Weight",
+        "displayAs": "Phrase"
+      }
+    },
+    "DTMFCharacter": {
+      "type": "string",
+      "pattern": "^[A-D0-9#*]{1}$"
+    },
+    "DTMFSpecification": {
+      "type": "structure",
+      "required": [
+        "maxLength",
+        "endTimeoutMs",
+        "deletionCharacter",
+        "endCharacter"
+      ],
+      "members": {
+        "maxLength": "MaxUtteranceDigits",
+        "endTimeoutMs": "TimeInMilliSeconds",
+        "deletionCharacter": "DTMFCharacter",
+        "endCharacter": "DTMFCharacter"
+      }
+    },
+    "DataPrivacy": {
+      "type": "structure",
+      "required": [
+        "childDirected"
+      ],
+      "members": {
+        "childDirected": "ChildDirected"
+      }
+    },
+    "DataSourceConfiguration": {
+      "type": "structure",
+      "members": {
+        "opensearchConfiguration": "OpensearchConfiguration",
+        "kendraConfiguration": "QnAKendraConfiguration",
+        "bedrockKnowledgeStoreConfiguration": "BedrockKnowledgeStoreConfiguration"
+      }
+    },
+    "DateRangeFilter": {
+      "type": "structure",
+      "required": [
+        "startDateTime",
+        "endDateTime"
+      ],
+      "members": {
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp"
+      }
+    },
+    "DeepgramModelId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "DeepgramSpeechModelConfig": {
+      "type": "structure",
+      "required": [
+        "apiTokenSecretArn"
+      ],
+      "members": {
+        "apiTokenSecretArn": "SecretsManagerSecretArn",
+        "modelId": "DeepgramModelId"
+      }
+    },
+    "DefaultConditionalBranch": {
+      "type": "structure",
+      "members": {
+        "nextStep": "DialogState",
+        "response": "ResponseSpecification"
+      }
+    },
+    "DeleteBotAliasRequest": {
+      "type": "structure",
+      "required": [
+        "botAliasId",
+        "botId"
+      ],
+      "members": {
+        "botAliasId": "BotAliasId",
+        "botId": "Id",
+        "skipResourceInUseCheck": "SkipResourceInUseCheck"
+      }
+    },
+    "DeleteBotAnalyzerRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAnalyzerRequestId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAnalyzerRequestId": "UUID"
+      }
+    },
+    "DeleteBotLocaleRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DeleteBotReplicaRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "replicaRegion"
+      ],
+      "members": {
+        "botId": "Id",
+        "replicaRegion": "ReplicaRegion"
+      }
+    },
+    "DeleteBotRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id",
+        "skipResourceInUseCheck": "SkipResourceInUseCheck"
+      }
+    },
+    "DeleteBotVersionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "NumericalBotVersion",
+        "skipResourceInUseCheck": "SkipResourceInUseCheck"
+      }
+    },
+    "DeleteCustomVocabularyItemsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "CustomVocabularyEntryId"
+    },
+    "DeleteCustomVocabularyRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DeleteExportRequest": {
+      "type": "structure",
+      "required": [
+        "exportId"
+      ],
+      "members": {
+        "exportId": "Id"
+      }
+    },
+    "DeleteImportRequest": {
+      "type": "structure",
+      "required": [
+        "importId"
+      ],
+      "members": {
+        "importId": "Id"
+      }
+    },
+    "DeleteIntentRequest": {
+      "type": "structure",
+      "required": [
+        "intentId",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "intentId": "Id",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "expectedRevisionId": "RevisionId"
+      }
+    },
+    "DeleteResourcePolicyStatementRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "statementId"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "statementId": "Name",
+        "expectedRevisionId": "RevisionId"
+      }
+    },
+    "DeleteSlotRequest": {
+      "type": "structure",
+      "required": [
+        "slotId",
+        "botId",
+        "botVersion",
+        "localeId",
+        "intentId"
+      ],
+      "members": {
+        "slotId": "Id",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "intentId": "Id"
+      }
+    },
+    "DeleteSlotTypeRequest": {
+      "type": "structure",
+      "required": [
+        "slotTypeId",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "slotTypeId": "Id",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "skipResourceInUseCheck": "SkipResourceInUseCheck"
+      }
+    },
+    "DeleteTestSetRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId"
+      ],
+      "members": {
+        "testSetId": "Id"
+      }
+    },
+    "DeleteUtterancesRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId"
+      }
+    },
+    "DescribeBotAliasRequest": {
+      "type": "structure",
+      "required": [
+        "botAliasId",
+        "botId"
+      ],
+      "members": {
+        "botAliasId": "BotAliasId",
+        "botId": "Id"
+      }
+    },
+    "DescribeBotAnalyzerRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAnalyzerRequestId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAnalyzerRequestId": "UUID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "DescribeBotLocaleRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DescribeBotRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "botRecommendationId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "botRecommendationId": "Id"
+      }
+    },
+    "DescribeBotReplicaRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "replicaRegion"
+      ],
+      "members": {
+        "botId": "Id",
+        "replicaRegion": "ReplicaRegion"
+      }
+    },
+    "DescribeBotRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id"
+      }
+    },
+    "DescribeBotResourceGenerationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "generationId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "generationId": "Id"
+      }
+    },
+    "DescribeBotVersionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "NumericalBotVersion"
+      }
+    },
+    "DescribeCustomVocabularyMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DescribeExportRequest": {
+      "type": "structure",
+      "required": [
+        "exportId"
+      ],
+      "members": {
+        "exportId": "Id"
+      }
+    },
+    "DescribeImportRequest": {
+      "type": "structure",
+      "required": [
+        "importId"
+      ],
+      "members": {
+        "importId": "Id"
+      }
+    },
+    "DescribeIntentRequest": {
+      "type": "structure",
+      "required": [
+        "intentId",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "intentId": "Id",
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DescribeResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName"
+      }
+    },
+    "DescribeSlotRequest": {
+      "type": "structure",
+      "required": [
+        "slotId",
+        "botId",
+        "botVersion",
+        "localeId",
+        "intentId"
+      ],
+      "members": {
+        "slotId": "Id",
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "intentId": "Id"
+      }
+    },
+    "DescribeSlotTypeRequest": {
+      "type": "structure",
+      "required": [
+        "slotTypeId",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "slotTypeId": "Id",
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "DescribeTestExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "testExecutionId"
+      ],
+      "members": {
+        "testExecutionId": "Id"
+      }
+    },
+    "DescribeTestSetDiscrepancyReportRequest": {
+      "type": "structure",
+      "required": [
+        "testSetDiscrepancyReportId"
+      ],
+      "members": {
+        "testSetDiscrepancyReportId": "Id"
+      }
+    },
+    "DescribeTestSetGenerationRequest": {
+      "type": "structure",
+      "required": [
+        "testSetGenerationId"
+      ],
+      "members": {
+        "testSetGenerationId": "Id"
+      }
+    },
+    "DescribeTestSetRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId"
+      ],
+      "members": {
+        "testSetId": "Id"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 2000
+    },
+    "DescriptiveBotBuilderSpecification": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "bedrockModelSpecification": "BedrockModelSpecification"
+      }
+    },
+    "DialogAction": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "DialogActionType",
+        "slotToElicit": "Name",
+        "suppressNextMessage": "BoxedBoolean"
+      }
+    },
+    "DialogActionType": {
+      "type": "string",
+      "enum": [
+        "ElicitIntent",
+        "StartIntent",
+        "ElicitSlot",
+        "EvaluateConditional",
+        "InvokeDialogCodeHook",
+        "ConfirmIntent",
+        "FulfillIntent",
+        "CloseIntent",
+        "EndConversation"
+      ]
+    },
+    "DialogCodeHookInvocationSetting": {
+      "type": "structure",
+      "required": [
+        "enableCodeHookInvocation",
+        "active",
+        "postCodeHookSpecification"
+      ],
+      "members": {
+        "enableCodeHookInvocation": "BoxedBoolean",
+        "active": "BoxedBoolean",
+        "invocationLabel": "Name",
+        "postCodeHookSpecification": "PostDialogCodeHookInvocationSpecification"
+      }
+    },
+    "DialogCodeHookSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean"
+      }
+    },
+    "DialogState": {
+      "type": "structure",
+      "members": {
+        "dialogAction": "DialogAction",
+        "intent": "IntentOverride",
+        "sessionAttributes": "StringMap"
+      }
+    },
+    "DisplayName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "DomainEndpoint": {
+      "type": "string",
+      "pattern": "^(http|https):\\/\\/+[^\\s]+[\\w]"
+    },
+    "DraftBotVersion": {
+      "type": "string",
+      "min": 5,
+      "max": 5,
+      "pattern": "^DRAFT$"
+    },
+    "Effect": {
+      "type": "string",
+      "enum": [
+        "Allow",
+        "Deny"
+      ]
+    },
+    "ElicitationCodeHookInvocationSetting": {
+      "type": "structure",
+      "required": [
+        "enableCodeHookInvocation"
+      ],
+      "members": {
+        "enableCodeHookInvocation": "BoxedBoolean",
+        "invocationLabel": "Name"
+      }
+    },
+    "Enabled": {
+      "type": "boolean"
+    },
+    "EncryptionSetting": {
+      "type": "structure",
+      "members": {
+        "kmsKeyArn": "KmsKeyArn",
+        "botLocaleExportPassword": "FilePassword",
+        "associatedTranscriptsPassword": "FilePassword"
+      }
+    },
+    "ErrorLogSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "BoxedBoolean"
+      }
+    },
+    "ExactResponseFields": {
+      "type": "structure",
+      "required": [
+        "questionField",
+        "answerField"
+      ],
+      "members": {
+        "questionField": "QuestionField",
+        "answerField": "AnswerField"
+      }
+    },
+    "ExportFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "ExportFilterName",
+        "values": "FilterValues",
+        "operator": "ExportFilterOperator"
+      }
+    },
+    "ExportFilterName": {
+      "type": "string",
+      "enum": [
+        "ExportResourceType"
+      ]
+    },
+    "ExportFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "ExportFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ExportFilter"
+    },
+    "ExportResourceSpecification": {
+      "type": "structure",
+      "members": {
+        "botExportSpecification": "BotExportSpecification",
+        "botLocaleExportSpecification": "BotLocaleExportSpecification",
+        "customVocabularyExportSpecification": "CustomVocabularyExportSpecification",
+        "testSetExportSpecification": "TestSetExportSpecification"
+      }
+    },
+    "ExportSortAttribute": {
+      "type": "string",
+      "enum": [
+        "LastUpdatedDateTime"
+      ]
+    },
+    "ExportSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "ExportSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "ExternalSourceSetting": {
+      "type": "structure",
+      "members": {
+        "grammarSlotTypeSetting": "GrammarSlotTypeSetting"
+      }
+    },
+    "FilePassword": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "FilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[0-9a-zA-Z_()\\s-]+$"
+    },
+    "FilterValues": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "FilterValue"
+    },
+    "FulfillmentCodeHookSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "postFulfillmentStatusSpecification": "PostFulfillmentStatusSpecification",
+        "fulfillmentUpdatesSpecification": "FulfillmentUpdatesSpecification",
+        "active": "BoxedBoolean"
+      }
+    },
+    "FulfillmentStartResponseDelay": {
+      "type": "integer",
+      "min": 1,
+      "max": 900
+    },
+    "FulfillmentStartResponseSpecification": {
+      "type": "structure",
+      "required": [
+        "delayInSeconds",
+        "messageGroups"
+      ],
+      "members": {
+        "delayInSeconds": "FulfillmentStartResponseDelay",
+        "messageGroups": "MessageGroupsList",
+        "allowInterrupt": "BoxedBoolean"
+      }
+    },
+    "FulfillmentTimeout": {
+      "type": "integer",
+      "min": 1,
+      "max": 900
+    },
+    "FulfillmentUpdateResponseFrequency": {
+      "type": "integer",
+      "min": 1,
+      "max": 900
+    },
+    "FulfillmentUpdateResponseSpecification": {
+      "type": "structure",
+      "required": [
+        "frequencyInSeconds",
+        "messageGroups"
+      ],
+      "members": {
+        "frequencyInSeconds": "FulfillmentUpdateResponseFrequency",
+        "messageGroups": "MessageGroupsList",
+        "allowInterrupt": "BoxedBoolean"
+      }
+    },
+    "FulfillmentUpdatesSpecification": {
+      "type": "structure",
+      "required": [
+        "active"
+      ],
+      "members": {
+        "active": "BoxedBoolean",
+        "startResponse": "FulfillmentStartResponseSpecification",
+        "updateResponse": "FulfillmentUpdateResponseSpecification",
+        "timeoutInSeconds": "FulfillmentTimeout"
+      }
+    },
+    "GenerateBotElementRequest": {
+      "type": "structure",
+      "required": [
+        "intentId",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "intentId": "Id",
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "GenerationInput": {
+      "type": "string",
+      "min": 100,
+      "max": 2000
+    },
+    "GenerationSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "GenerationSortByAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "GenerationSortByAttribute": {
+      "type": "string",
+      "enum": [
+        "creationStartTime",
+        "lastUpdatedTime"
+      ]
+    },
+    "GenerativeAISettings": {
+      "type": "structure",
+      "members": {
+        "runtimeSettings": "RuntimeSettings",
+        "buildtimeSettings": "BuildtimeSettings"
+      }
+    },
+    "GetTestExecutionArtifactsUrlRequest": {
+      "type": "structure",
+      "required": [
+        "testExecutionId"
+      ],
+      "members": {
+        "testExecutionId": "Id"
+      }
+    },
+    "GrammarSlotTypeSetting": {
+      "type": "structure",
+      "members": {
+        "source": "GrammarSlotTypeSource"
+      }
+    },
+    "GrammarSlotTypeSource": {
+      "type": "structure",
+      "required": [
+        "s3BucketName",
+        "s3ObjectKey"
+      ],
+      "members": {
+        "s3BucketName": "S3BucketName",
+        "s3ObjectKey": "S3ObjectPath",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "Id": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "^[0-9a-zA-Z]+$"
+    },
+    "ImageResponseCard": {
+      "type": "structure",
+      "required": [
+        "title"
+      ],
+      "members": {
+        "title": "AttachmentTitle",
+        "subtitle": "AttachmentTitle",
+        "imageUrl": "AttachmentUrl",
+        "buttons": "ButtonsList"
+      }
+    },
+    "ImportExportFileFormat": {
+      "type": "string",
+      "enum": [
+        "LexJson",
+        "TSV",
+        "CSV"
+      ]
+    },
+    "ImportExportFilePassword": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ImportFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "ImportFilterName",
+        "values": "FilterValues",
+        "operator": "ImportFilterOperator"
+      }
+    },
+    "ImportFilterName": {
+      "type": "string",
+      "enum": [
+        "ImportResourceType"
+      ]
+    },
+    "ImportFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "ImportFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ImportFilter"
+    },
+    "ImportResourceSpecification": {
+      "type": "structure",
+      "members": {
+        "botImportSpecification": "BotImportSpecification",
+        "botLocaleImportSpecification": "BotLocaleImportSpecification",
+        "customVocabularyImportSpecification": "CustomVocabularyImportSpecification",
+        "testSetImportResourceSpecification": "TestSetImportResourceSpecification"
+      }
+    },
+    "ImportSortAttribute": {
+      "type": "string",
+      "enum": [
+        "LastUpdatedDateTime"
+      ]
+    },
+    "ImportSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "ImportSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "IncludeField": {
+      "type": "string"
+    },
+    "InitialResponseSetting": {
+      "type": "structure",
+      "members": {
+        "initialResponse": "ResponseSpecification",
+        "nextStep": "DialogState",
+        "conditional": "ConditionalSpecification",
+        "codeHook": "DialogCodeHookInvocationSetting"
+      }
+    },
+    "InputContext": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "Name"
+      }
+    },
+    "InputContextsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "InputContext"
+    },
+    "IntentClosingSetting": {
+      "type": "structure",
+      "members": {
+        "closingResponse": "ResponseSpecification",
+        "active": "BoxedBoolean",
+        "nextStep": "DialogState",
+        "conditional": "ConditionalSpecification"
+      }
+    },
+    "IntentConfirmationSetting": {
+      "type": "structure",
+      "members": {
+        "promptSpecification": "PromptSpecification",
+        "declinationResponse": "ResponseSpecification",
+        "active": "BoxedBoolean",
+        "confirmationResponse": "ResponseSpecification",
+        "confirmationNextStep": "DialogState",
+        "confirmationConditional": "ConditionalSpecification",
+        "declinationNextStep": "DialogState",
+        "declinationConditional": "ConditionalSpecification",
+        "failureResponse": "ResponseSpecification",
+        "failureNextStep": "DialogState",
+        "failureConditional": "ConditionalSpecification",
+        "codeHook": "DialogCodeHookInvocationSetting",
+        "elicitationCodeHook": "ElicitationCodeHookInvocationSetting"
+      }
+    },
+    "IntentDisambiguationSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Enabled",
+        "maxDisambiguationIntents": "MaxDisambiguationIntents",
+        "customDisambiguationMessage": "CustomDisambiguationMessage"
+      }
+    },
+    "IntentFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "IntentFilterName",
+        "values": "FilterValues",
+        "operator": "IntentFilterOperator"
+      }
+    },
+    "IntentFilterName": {
+      "type": "string",
+      "enum": [
+        "IntentName"
+      ]
+    },
+    "IntentFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "IntentFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "IntentFilter"
+    },
+    "IntentOverride": {
+      "type": "structure",
+      "members": {
+        "name": "Name",
+        "slots": "SlotValueOverrideMap"
+      }
+    },
+    "IntentSignature": {
+      "type": "string"
+    },
+    "IntentSortAttribute": {
+      "type": "string",
+      "enum": [
+        "IntentName",
+        "LastUpdatedDateTime"
+      ]
+    },
+    "IntentSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "IntentSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "ItemId": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "KendraConfiguration": {
+      "type": "structure",
+      "required": [
+        "kendraIndex"
+      ],
+      "members": {
+        "kendraIndex": "KendraIndexArn",
+        "queryFilterStringEnabled": "Boolean",
+        "queryFilterString": "QueryFilterString"
+      }
+    },
+    "KendraIndexArn": {
+      "type": "string",
+      "min": 32,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:kendra:[a-z]+-[a-z]+-[0-9]:[0-9]{12}:index\\/[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:[\\w\\-]+:kms:[\\w\\-]+:[\\d]{12}:(?:key\\/[\\w\\-]+|alias\\/[a-zA-Z0-9:\\/_\\-]{1,256})$"
+    },
+    "LambdaARN": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws[a-z0-9-]*:lambda:[a-z]+-[a-z]+-[0-9]:[0-9]{12}:function:[a-zA-Z0-9-_]+(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?(:[a-zA-Z0-9-_]+)?"
+    },
+    "LambdaCodeHook": {
+      "type": "structure",
+      "required": [
+        "lambdaARN",
+        "codeHookInterfaceVersion"
+      ],
+      "members": {
+        "lambdaARN": "LambdaARN",
+        "codeHookInterfaceVersion": "CodeHookInterfaceVersion"
+      }
+    },
+    "LexTranscriptFilter": {
+      "type": "structure",
+      "members": {
+        "dateRangeFilter": "DateRangeFilter"
+      }
+    },
+    "ListAggregatedUtterancesRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "localeId",
+        "aggregationDuration"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAliasId": "BotAliasId",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "aggregationDuration": "UtteranceAggregationDuration",
+        "sortBy": "AggregatedUtterancesSortBy",
+        "filters": "AggregatedUtterancesFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotAliasReplicasRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "replicaRegion"
+      ],
+      "members": {
+        "botId": "Id",
+        "replicaRegion": "ReplicaRegion",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotAliasesRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotAnalyzerHistoryRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id",
+        "localeId": "LocaleId",
+        "botVersion": "DraftBotVersion",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBotLocalesRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "sortBy": "BotLocaleSortBy",
+        "filters": "BotLocaleFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotRecommendationsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotReplicasRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id"
+      }
+    },
+    "ListBotResourceGenerationsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "sortBy": "GenerationSortBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotVersionReplicasRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "replicaRegion"
+      ],
+      "members": {
+        "botId": "Id",
+        "replicaRegion": "ReplicaRegion",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "sortBy": "BotVersionReplicaSortBy"
+      }
+    },
+    "ListBotVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "botId"
+      ],
+      "members": {
+        "botId": "Id",
+        "sortBy": "BotVersionSortBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBotsRequest": {
+      "type": "structure",
+      "members": {
+        "sortBy": "BotSortBy",
+        "filters": "BotFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBuiltInIntentsRequest": {
+      "type": "structure",
+      "required": [
+        "localeId"
+      ],
+      "members": {
+        "localeId": "LocaleId",
+        "sortBy": "BuiltInIntentSortBy",
+        "maxResults": "BuiltInsMaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListBuiltInSlotTypesRequest": {
+      "type": "structure",
+      "required": [
+        "localeId"
+      ],
+      "members": {
+        "localeId": "LocaleId",
+        "sortBy": "BuiltInSlotTypeSortBy",
+        "maxResults": "BuiltInsMaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListCustomVocabularyItemsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListExportsRequest": {
+      "type": "structure",
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "sortBy": "ExportSortBy",
+        "filters": "ExportFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "localeId": "LocaleId"
+      }
+    },
+    "ListImportsRequest": {
+      "type": "structure",
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "sortBy": "ImportSortBy",
+        "filters": "ImportFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "localeId": "LocaleId"
+      }
+    },
+    "ListIntentMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime",
+        "metrics"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "metrics": "AnalyticsIntentMetrics",
+        "binBy": "AnalyticsBinByList",
+        "groupBy": "AnalyticsIntentGroupByList",
+        "filters": "AnalyticsIntentFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListIntentPathsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime",
+        "intentPath"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "intentPath": "AnalyticsPath",
+        "filters": "AnalyticsPathFilters"
+      }
+    },
+    "ListIntentStageMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime",
+        "metrics"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "metrics": "AnalyticsIntentStageMetrics",
+        "binBy": "AnalyticsBinByList",
+        "groupBy": "AnalyticsIntentStageGroupByList",
+        "filters": "AnalyticsIntentStageFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListIntentsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "sortBy": "IntentSortBy",
+        "filters": "IntentFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListRecommendedIntentsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "botRecommendationId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "botRecommendationId": "Id",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListSessionAnalyticsDataRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "sortBy": "SessionDataSortBy",
+        "filters": "AnalyticsSessionFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListSessionMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime",
+        "metrics"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "metrics": "AnalyticsSessionMetrics",
+        "binBy": "AnalyticsBinByList",
+        "groupBy": "AnalyticsSessionGroupByList",
+        "filters": "AnalyticsSessionFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListSlotTypesRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "sortBy": "SlotTypeSortBy",
+        "filters": "SlotTypeFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListSlotsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "intentId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "intentId": "Id",
+        "sortBy": "SlotSortBy",
+        "filters": "SlotFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName"
+      }
+    },
+    "ListTestExecutionResultItemsRequest": {
+      "type": "structure",
+      "required": [
+        "testExecutionId",
+        "resultFilterBy"
+      ],
+      "members": {
+        "testExecutionId": "Id",
+        "resultFilterBy": "TestExecutionResultFilterBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTestExecutionsRequest": {
+      "type": "structure",
+      "members": {
+        "sortBy": "TestExecutionSortBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTestSetRecordsRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId"
+      ],
+      "members": {
+        "testSetId": "Id",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTestSetsRequest": {
+      "type": "structure",
+      "members": {
+        "sortBy": "TestSetSortBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListUtteranceAnalyticsDataRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "sortBy": "UtteranceDataSortBy",
+        "filters": "AnalyticsUtteranceFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListUtteranceMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "startDateTime",
+        "endDateTime",
+        "metrics"
+      ],
+      "members": {
+        "botId": "Id",
+        "startDateTime": "Timestamp",
+        "endDateTime": "Timestamp",
+        "metrics": "AnalyticsUtteranceMetrics",
+        "binBy": "AnalyticsBinByList",
+        "groupBy": "AnalyticsUtteranceGroupByList",
+        "attributes": "AnalyticsUtteranceAttributes",
+        "filters": "AnalyticsUtteranceFilters",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "LocaleId": {
+      "type": "string"
+    },
+    "LogPrefix": {
+      "type": "string",
+      "max": 1024
+    },
+    "MaxDisambiguationIntents": {
+      "type": "integer",
+      "min": 2,
+      "max": 5
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "MaxUtteranceDigits": {
+      "type": "integer",
+      "min": 1,
+      "max": 1024
+    },
+    "MergeStrategy": {
+      "type": "string",
+      "enum": [
+        "Overwrite",
+        "FailOnConflict",
+        "Append"
+      ]
+    },
+    "Message": {
+      "type": "structure",
+      "members": {
+        "plainTextMessage": "PlainTextMessage",
+        "customPayload": "CustomPayload",
+        "ssmlMessage": "SSMLMessage",
+        "imageResponseCard": "ImageResponseCard"
+      }
+    },
+    "MessageGroup": {
+      "type": "structure",
+      "required": [
+        "message"
+      ],
+      "members": {
+        "message": "Message",
+        "variations": "MessageVariationsList"
+      }
+    },
+    "MessageGroupsList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "MessageGroup"
+    },
+    "MessageSelectionStrategy": {
+      "type": "string",
+      "enum": [
+        "Random",
+        "Ordered"
+      ]
+    },
+    "MessageVariationsList": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "Message"
+    },
+    "MultipleValuesSetting": {
+      "type": "structure",
+      "members": {
+        "allowMultipleValues": "Boolean"
+      }
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^([0-9a-zA-Z][_-]?){1,100}$"
+    },
+    "NewCustomVocabularyItem": {
+      "type": "structure",
+      "required": [
+        "phrase"
+      ],
+      "members": {
+        "phrase": "Phrase",
+        "weight": "Weight",
+        "displayAs": "Phrase"
+      }
+    },
+    "NextIndex": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000000
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "NluImprovementSpecification": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Enabled",
+        "assistedNluMode": "AssistedNluMode",
+        "intentDisambiguationSettings": "IntentDisambiguationSettings"
+      }
+    },
+    "NonEmptyString": {
+      "type": "string",
+      "min": 1
+    },
+    "NumericalBotVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "^[0-9]+$"
+    },
+    "OSIncludeFields": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "IncludeField"
+    },
+    "OSIndexName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^(?![_-])[a-z0-9][a-z0-9_\\-]{0,254}$"
+    },
+    "ObfuscationSetting": {
+      "type": "structure",
+      "required": [
+        "obfuscationSettingType"
+      ],
+      "members": {
+        "obfuscationSettingType": "ObfuscationSettingType"
+      }
+    },
+    "ObfuscationSettingType": {
+      "type": "string",
+      "enum": [
+        "None",
+        "DefaultObfuscation"
+      ]
+    },
+    "ObjectPrefix": {
+      "type": "string",
+      "min": 1,
+      "pattern": "^[\\/]?+[a-zA-Z0-9!_.*'()-]+(\\/[a-zA-Z0-9!_.*'()-]+)*$"
+    },
+    "ObjectPrefixes": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "ObjectPrefix"
+    },
+    "OpensearchConfiguration": {
+      "type": "structure",
+      "required": [
+        "domainEndpoint",
+        "indexName"
+      ],
+      "members": {
+        "domainEndpoint": "DomainEndpoint",
+        "indexName": "OSIndexName",
+        "exactResponse": "Boolean",
+        "exactResponseFields": "ExactResponseFields",
+        "includeFields": "OSIncludeFields"
+      }
+    },
+    "Operation": {
+      "type": "string",
+      "min": 5,
+      "max": 50,
+      "pattern": "lex:[a-zA-Z*]+$"
+    },
+    "OperationList": {
+      "type": "list",
+      "member": "Operation"
+    },
+    "OutputContext": {
+      "type": "structure",
+      "required": [
+        "name",
+        "timeToLiveInSeconds",
+        "turnsToLive"
+      ],
+      "members": {
+        "name": "Name",
+        "timeToLiveInSeconds": "ContextTimeToLiveInSeconds",
+        "turnsToLive": "ContextTurnsToLive"
+      }
+    },
+    "OutputContextsList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "OutputContext"
+    },
+    "PathFormat": {
+      "type": "structure",
+      "members": {
+        "objectPrefixes": "ObjectPrefixes"
+      }
+    },
+    "Phrase": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "PlainTextMessage": {
+      "type": "structure",
+      "required": [
+        "value"
+      ],
+      "members": {
+        "value": "PlainTextMessageValue"
+      }
+    },
+    "PlainTextMessageValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "Policy": {
+      "type": "string",
+      "min": 2
+    },
+    "PostDialogCodeHookInvocationSpecification": {
+      "type": "structure",
+      "members": {
+        "successResponse": "ResponseSpecification",
+        "successNextStep": "DialogState",
+        "successConditional": "ConditionalSpecification",
+        "failureResponse": "ResponseSpecification",
+        "failureNextStep": "DialogState",
+        "failureConditional": "ConditionalSpecification",
+        "timeoutResponse": "ResponseSpecification",
+        "timeoutNextStep": "DialogState",
+        "timeoutConditional": "ConditionalSpecification"
+      }
+    },
+    "PostFulfillmentStatusSpecification": {
+      "type": "structure",
+      "members": {
+        "successResponse": "ResponseSpecification",
+        "failureResponse": "ResponseSpecification",
+        "timeoutResponse": "ResponseSpecification",
+        "successNextStep": "DialogState",
+        "successConditional": "ConditionalSpecification",
+        "failureNextStep": "DialogState",
+        "failureConditional": "ConditionalSpecification",
+        "timeoutNextStep": "DialogState",
+        "timeoutConditional": "ConditionalSpecification"
+      }
+    },
+    "Principal": {
+      "type": "structure",
+      "members": {
+        "service": "ServicePrincipal",
+        "arn": "PrincipalArn"
+      }
+    },
+    "PrincipalArn": {
+      "type": "string",
+      "min": 30,
+      "max": 1024,
+      "pattern": "^arn:aws[a-z0-9-]*:iam::[0-9]{12}:(root|(user|role)/.*)$"
+    },
+    "PrincipalList": {
+      "type": "list",
+      "member": "Principal"
+    },
+    "PriorityValue": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "PromptAttempt": {
+      "type": "string",
+      "enum": [
+        "Initial",
+        "Retry1",
+        "Retry2",
+        "Retry3",
+        "Retry4",
+        "Retry5"
+      ]
+    },
+    "PromptAttemptSpecification": {
+      "type": "structure",
+      "required": [
+        "allowedInputTypes"
+      ],
+      "members": {
+        "allowInterrupt": "BoxedBoolean",
+        "allowedInputTypes": "AllowedInputTypes",
+        "audioAndDTMFInputSpecification": "AudioAndDTMFInputSpecification",
+        "textInputSpecification": "TextInputSpecification"
+      }
+    },
+    "PromptAttemptsSpecificationMap": {
+      "type": "map",
+      "key": "PromptAttempt",
+      "value": "PromptAttemptSpecification"
+    },
+    "PromptMaxRetries": {
+      "type": "integer",
+      "min": 0,
+      "max": 5
+    },
+    "PromptSpecification": {
+      "type": "structure",
+      "required": [
+        "messageGroups",
+        "maxRetries"
+      ],
+      "members": {
+        "messageGroups": "MessageGroupsList",
+        "maxRetries": "PromptMaxRetries",
+        "allowInterrupt": "BoxedBoolean",
+        "messageSelectionStrategy": "MessageSelectionStrategy",
+        "promptAttemptsSpecification": "PromptAttemptsSpecificationMap"
+      }
+    },
+    "QInConnectAssistantARN": {
+      "type": "string",
+      "pattern": "^arn:[a-z-]*?:wisdom:[a-z0-9-]*?:[0-9]{12}:[a-z-]*?/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}){0,2}$"
+    },
+    "QInConnectAssistantConfiguration": {
+      "type": "structure",
+      "required": [
+        "assistantArn"
+      ],
+      "members": {
+        "assistantArn": "QInConnectAssistantARN"
+      }
+    },
+    "QInConnectIntentConfiguration": {
+      "type": "structure",
+      "members": {
+        "qInConnectAssistantConfiguration": "QInConnectAssistantConfiguration"
+      }
+    },
+    "QnAIntentConfiguration": {
+      "type": "structure",
+      "members": {
+        "dataSourceConfiguration": "DataSourceConfiguration",
+        "bedrockModelConfiguration": "BedrockModelSpecification"
+      }
+    },
+    "QnAKendraConfiguration": {
+      "type": "structure",
+      "required": [
+        "kendraIndex"
+      ],
+      "members": {
+        "kendraIndex": "KendraIndexArn",
+        "queryFilterStringEnabled": "Boolean",
+        "queryFilterString": "QueryFilterString",
+        "exactResponse": "Boolean"
+      }
+    },
+    "QueryFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 5000
+    },
+    "QuestionField": {
+      "type": "string"
+    },
+    "RegexPattern": {
+      "type": "string",
+      "min": 1,
+      "max": 300
+    },
+    "RelativeAggregationDuration": {
+      "type": "structure",
+      "required": [
+        "timeDimension",
+        "timeValue"
+      ],
+      "members": {
+        "timeDimension": "TimeDimension",
+        "timeValue": "TimeValue"
+      }
+    },
+    "ReplicaRegion": {
+      "type": "string",
+      "min": 2,
+      "max": 25
+    },
+    "ResponseSpecification": {
+      "type": "structure",
+      "required": [
+        "messageGroups"
+      ],
+      "members": {
+        "messageGroups": "MessageGroupsList",
+        "allowInterrupt": "BoxedBoolean"
+      }
+    },
+    "RevisionId": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "^[0-9]+$"
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 32,
+      "max": 2048,
+      "pattern": "^arn:aws[a-z0-9-]*:iam::[0-9]{12}:role/.*$"
+    },
+    "RuntimeSettings": {
+      "type": "structure",
+      "members": {
+        "slotResolutionImprovement": "SlotResolutionImprovementSpecification",
+        "nluImprovement": "NluImprovementSpecification"
+      }
+    },
+    "S3BucketArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^arn:[\\w\\-]+:s3:::[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9]$"
+    },
+    "S3BucketLogDestination": {
+      "type": "structure",
+      "required": [
+        "s3BucketArn",
+        "logPrefix"
+      ],
+      "members": {
+        "kmsKeyArn": "KmsKeyArn",
+        "s3BucketArn": "S3BucketArn",
+        "logPrefix": "LogPrefix"
+      }
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "^[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9]$"
+    },
+    "S3BucketTranscriptSource": {
+      "type": "structure",
+      "required": [
+        "s3BucketName",
+        "transcriptFormat"
+      ],
+      "members": {
+        "s3BucketName": "S3BucketName",
+        "pathFormat": "PathFormat",
+        "transcriptFormat": "TranscriptFormat",
+        "transcriptFilter": "TranscriptFilter",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "S3ObjectPath": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[\\.\\-\\!\\*\\_\\'\\(\\)a-zA-Z0-9][\\.\\-\\!\\*\\_\\'\\(\\)\\/a-zA-Z0-9]*$"
+    },
+    "SSMLMessage": {
+      "type": "structure",
+      "required": [
+        "value"
+      ],
+      "members": {
+        "value": "SSMLMessageValue"
+      }
+    },
+    "SSMLMessageValue": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "SampleUtterance": {
+      "type": "structure",
+      "required": [
+        "utterance"
+      ],
+      "members": {
+        "utterance": "Utterance"
+      }
+    },
+    "SampleUtteranceGenerationSpecification": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "bedrockModelSpecification": "BedrockModelSpecification"
+      }
+    },
+    "SampleUtterancesList": {
+      "type": "list",
+      "member": "SampleUtterance"
+    },
+    "SampleValue": {
+      "type": "structure",
+      "required": [
+        "value"
+      ],
+      "members": {
+        "value": "Value"
+      }
+    },
+    "SearchAssociatedTranscriptsRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "botRecommendationId",
+        "filters"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId",
+        "botRecommendationId": "Id",
+        "searchOrder": "SearchOrder",
+        "filters": "AssociatedTranscriptFilters",
+        "maxResults": "MaxResults",
+        "nextIndex": "NextIndex"
+      }
+    },
+    "SearchOrder": {
+      "type": "string",
+      "enum": [
+        "Ascending",
+        "Descending"
+      ]
+    },
+    "SecretsManagerSecretArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:aws[A-Za-z-]*:secretsmanager:[a-z0-9-]{1,20}:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]{1,512}-[A-Za-z0-9]{6}$"
+    },
+    "SentimentAnalysisSettings": {
+      "type": "structure",
+      "required": [
+        "detectSentiment"
+      ],
+      "members": {
+        "detectSentiment": "Boolean"
+      }
+    },
+    "ServicePrincipal": {
+      "type": "string",
+      "min": 15,
+      "max": 1024,
+      "pattern": "^[0-9a-zA-Z_.]+$"
+    },
+    "SessionDataSortBy": {
+      "type": "structure",
+      "required": [
+        "name",
+        "order"
+      ],
+      "members": {
+        "name": "AnalyticsSessionSortByName",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "SessionId": {
+      "type": "string",
+      "min": 2,
+      "max": 100,
+      "pattern": "[0-9a-zA-Z._:-]+"
+    },
+    "SessionTTL": {
+      "type": "integer",
+      "min": 60,
+      "max": 86400
+    },
+    "SkipResourceInUseCheck": {
+      "type": "boolean"
+    },
+    "SlotCaptureSetting": {
+      "type": "structure",
+      "members": {
+        "captureResponse": "ResponseSpecification",
+        "captureNextStep": "DialogState",
+        "captureConditional": "ConditionalSpecification",
+        "failureResponse": "ResponseSpecification",
+        "failureNextStep": "DialogState",
+        "failureConditional": "ConditionalSpecification",
+        "codeHook": "DialogCodeHookInvocationSetting",
+        "elicitationCodeHook": "ElicitationCodeHookInvocationSetting"
+      }
+    },
+    "SlotConstraint": {
+      "type": "string",
+      "enum": [
+        "Required",
+        "Optional"
+      ]
+    },
+    "SlotDefaultValue": {
+      "type": "structure",
+      "required": [
+        "defaultValue"
+      ],
+      "members": {
+        "defaultValue": "SlotDefaultValueString"
+      }
+    },
+    "SlotDefaultValueList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "SlotDefaultValue"
+    },
+    "SlotDefaultValueSpecification": {
+      "type": "structure",
+      "required": [
+        "defaultValueList"
+      ],
+      "members": {
+        "defaultValueList": "SlotDefaultValueList"
+      }
+    },
+    "SlotDefaultValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 202
+    },
+    "SlotFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "SlotFilterName",
+        "values": "FilterValues",
+        "operator": "SlotFilterOperator"
+      }
+    },
+    "SlotFilterName": {
+      "type": "string",
+      "enum": [
+        "SlotName"
+      ]
+    },
+    "SlotFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "SlotFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SlotFilter"
+    },
+    "SlotPrioritiesList": {
+      "type": "list",
+      "member": "SlotPriority"
+    },
+    "SlotPriority": {
+      "type": "structure",
+      "required": [
+        "priority",
+        "slotId"
+      ],
+      "members": {
+        "priority": "PriorityValue",
+        "slotId": "Id"
+      }
+    },
+    "SlotResolutionImprovementSpecification": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Enabled",
+        "bedrockModelSpecification": "BedrockModelSpecification"
+      }
+    },
+    "SlotResolutionSetting": {
+      "type": "structure",
+      "required": [
+        "slotResolutionStrategy"
+      ],
+      "members": {
+        "slotResolutionStrategy": "SlotResolutionStrategy"
+      }
+    },
+    "SlotResolutionStrategy": {
+      "type": "string",
+      "enum": [
+        "EnhancedFallback",
+        "Default"
+      ]
+    },
+    "SlotShape": {
+      "type": "string",
+      "enum": [
+        "Scalar",
+        "List"
+      ]
+    },
+    "SlotSortAttribute": {
+      "type": "string",
+      "enum": [
+        "SlotName",
+        "LastUpdatedDateTime"
+      ]
+    },
+    "SlotSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "SlotSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "SlotTypeFilter": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values",
+        "operator"
+      ],
+      "members": {
+        "name": "SlotTypeFilterName",
+        "values": "FilterValues",
+        "operator": "SlotTypeFilterOperator"
+      }
+    },
+    "SlotTypeFilterName": {
+      "type": "string",
+      "enum": [
+        "SlotTypeName",
+        "ExternalSourceType"
+      ]
+    },
+    "SlotTypeFilterOperator": {
+      "type": "string",
+      "enum": [
+        "CO",
+        "EQ"
+      ]
+    },
+    "SlotTypeFilters": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SlotTypeFilter"
+    },
+    "SlotTypeSignature": {
+      "type": "string"
+    },
+    "SlotTypeSortAttribute": {
+      "type": "string",
+      "enum": [
+        "SlotTypeName",
+        "LastUpdatedDateTime"
+      ]
+    },
+    "SlotTypeSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "SlotTypeSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "SlotTypeValue": {
+      "type": "structure",
+      "members": {
+        "sampleValue": "SampleValue",
+        "synonyms": "SynonymList"
+      }
+    },
+    "SlotTypeValues": {
+      "type": "list",
+      "min": 1,
+      "max": 10000,
+      "member": "SlotTypeValue"
+    },
+    "SlotValue": {
+      "type": "structure",
+      "members": {
+        "interpretedValue": "NonEmptyString"
+      }
+    },
+    "SlotValueElicitationSetting": {
+      "type": "structure",
+      "required": [
+        "slotConstraint"
+      ],
+      "members": {
+        "defaultValueSpecification": "SlotDefaultValueSpecification",
+        "slotConstraint": "SlotConstraint",
+        "promptSpecification": "PromptSpecification",
+        "sampleUtterances": "SampleUtterancesList",
+        "waitAndContinueSpecification": "WaitAndContinueSpecification",
+        "slotCaptureSetting": "SlotCaptureSetting",
+        "slotResolutionSetting": "SlotResolutionSetting"
+      }
+    },
+    "SlotValueOverride": {
+      "type": "structure",
+      "members": {
+        "shape": "SlotShape",
+        "value": "SlotValue",
+        "values": "SlotValues"
+      }
+    },
+    "SlotValueOverrideMap": {
+      "type": "map",
+      "key": "Name",
+      "value": "SlotValueOverride"
+    },
+    "SlotValueRegexFilter": {
+      "type": "structure",
+      "required": [
+        "pattern"
+      ],
+      "members": {
+        "pattern": "RegexPattern"
+      }
+    },
+    "SlotValueResolutionStrategy": {
+      "type": "string",
+      "enum": [
+        "OriginalValue",
+        "TopResolution",
+        "Concatenation"
+      ]
+    },
+    "SlotValueSelectionSetting": {
+      "type": "structure",
+      "required": [
+        "resolutionStrategy"
+      ],
+      "members": {
+        "resolutionStrategy": "SlotValueResolutionStrategy",
+        "regexFilter": "SlotValueRegexFilter",
+        "advancedRecognitionSetting": "AdvancedRecognitionSetting"
+      }
+    },
+    "SlotValues": {
+      "type": "list",
+      "member": "SlotValueOverride"
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "Ascending",
+        "Descending"
+      ]
+    },
+    "SpeakerDiarizationSettings": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "Enabled"
+      }
+    },
+    "Specifications": {
+      "type": "structure",
+      "required": [
+        "slotTypeId",
+        "valueElicitationSetting"
+      ],
+      "members": {
+        "slotTypeId": "BuiltInOrCustomSlotTypeId",
+        "valueElicitationSetting": "SubSlotValueElicitationSetting"
+      }
+    },
+    "SpeechDetectionSensitivity": {
+      "type": "string",
+      "enum": [
+        "Default",
+        "HighNoiseTolerance",
+        "MaximumNoiseTolerance"
+      ]
+    },
+    "SpeechFoundationModel": {
+      "type": "structure",
+      "required": [
+        "modelArn"
+      ],
+      "members": {
+        "modelArn": "BedrockModelArn",
+        "voiceId": "VoiceId"
+      }
+    },
+    "SpeechModelConfig": {
+      "type": "structure",
+      "members": {
+        "deepgramConfig": "DeepgramSpeechModelConfig"
+      }
+    },
+    "SpeechModelPreference": {
+      "type": "string",
+      "enum": [
+        "Standard",
+        "Neural",
+        "Deepgram",
+        "Advanced"
+      ]
+    },
+    "SpeechRecognitionSettings": {
+      "type": "structure",
+      "members": {
+        "speechModelPreference": "SpeechModelPreference",
+        "speechModelConfig": "SpeechModelConfig"
+      }
+    },
+    "StartBotAnalyzerRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "analysisScope"
+      ],
+      "members": {
+        "botId": "Id",
+        "analysisScope": "AnalysisScope",
+        "localeId": "LocaleId",
+        "botVersion": "DraftBotVersion"
+      }
+    },
+    "StartBotRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "transcriptSourceSetting"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "transcriptSourceSetting": "TranscriptSourceSetting",
+        "encryptionSetting": "EncryptionSetting"
+      }
+    },
+    "StartBotResourceGenerationRequest": {
+      "type": "structure",
+      "required": [
+        "generationInputPrompt",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "generationInputPrompt": "GenerationInput",
+        "botId": "Id",
+        "botVersion": "BotVersion",
+        "localeId": "LocaleId"
+      }
+    },
+    "StartImportRequest": {
+      "type": "structure",
+      "required": [
+        "importId",
+        "resourceSpecification",
+        "mergeStrategy"
+      ],
+      "members": {
+        "importId": "Id",
+        "resourceSpecification": "ImportResourceSpecification",
+        "mergeStrategy": "MergeStrategy",
+        "filePassword": "ImportExportFilePassword"
+      }
+    },
+    "StartTestExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId",
+        "target",
+        "apiMode"
+      ],
+      "members": {
+        "testSetId": "Id",
+        "target": "TestExecutionTarget",
+        "apiMode": "TestExecutionApiMode",
+        "testExecutionModality": "TestExecutionModality"
+      }
+    },
+    "StartTestSetGenerationRequest": {
+      "type": "structure",
+      "required": [
+        "testSetName",
+        "storageLocation",
+        "generationDataSource",
+        "roleArn"
+      ],
+      "members": {
+        "testSetName": "Name",
+        "description": "Description",
+        "storageLocation": "TestSetStorageLocation",
+        "generationDataSource": "TestSetGenerationDataSource",
+        "roleArn": "RoleArn",
+        "testSetTags": "TagMap"
+      }
+    },
+    "StillWaitingResponseFrequency": {
+      "type": "integer",
+      "min": 1,
+      "max": 300
+    },
+    "StillWaitingResponseSpecification": {
+      "type": "structure",
+      "required": [
+        "messageGroups",
+        "frequencyInSeconds",
+        "timeoutInSeconds"
+      ],
+      "members": {
+        "messageGroups": "MessageGroupsList",
+        "frequencyInSeconds": "StillWaitingResponseFrequency",
+        "timeoutInSeconds": "StillWaitingResponseTimeout",
+        "allowInterrupt": "BoxedBoolean"
+      }
+    },
+    "StillWaitingResponseTimeout": {
+      "type": "integer",
+      "min": 1,
+      "max": 900
+    },
+    "StopBotAnalyzerRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAnalyzerRequestId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAnalyzerRequestId": "UUID"
+      }
+    },
+    "StopBotRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "botRecommendationId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "botRecommendationId": "Id"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringMap": {
+      "type": "map",
+      "key": "NonEmptyString",
+      "value": "String"
+    },
+    "SubSlotExpression": {
+      "type": "string",
+      "min": 0,
+      "max": 640,
+      "pattern": "[0-9A-Za-z_\\-\\s\\(\\)]+"
+    },
+    "SubSlotSetting": {
+      "type": "structure",
+      "members": {
+        "expression": "SubSlotExpression",
+        "slotSpecifications": "SubSlotSpecificationMap"
+      }
+    },
+    "SubSlotSpecificationMap": {
+      "type": "map",
+      "min": 0,
+      "max": 6,
+      "key": "Name",
+      "value": "Specifications"
+    },
+    "SubSlotTypeComposition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "slotTypeId"
+      ],
+      "members": {
+        "name": "Name",
+        "slotTypeId": "BuiltInOrCustomSlotTypeId"
+      }
+    },
+    "SubSlotTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 6,
+      "member": "SubSlotTypeComposition"
+    },
+    "SubSlotValueElicitationSetting": {
+      "type": "structure",
+      "required": [
+        "promptSpecification"
+      ],
+      "members": {
+        "defaultValueSpecification": "SlotDefaultValueSpecification",
+        "promptSpecification": "PromptSpecification",
+        "sampleUtterances": "SampleUtterancesList",
+        "waitAndContinueSpecification": "WaitAndContinueSpecification"
+      }
+    },
+    "SynonymList": {
+      "type": "list",
+      "min": 1,
+      "max": 10000,
+      "member": "SampleValue"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TestExecutionApiMode": {
+      "type": "string",
+      "enum": [
+        "Streaming",
+        "NonStreaming"
+      ]
+    },
+    "TestExecutionModality": {
+      "type": "string",
+      "enum": [
+        "Text",
+        "Audio"
+      ]
+    },
+    "TestExecutionResultFilterBy": {
+      "type": "structure",
+      "required": [
+        "resultTypeFilter"
+      ],
+      "members": {
+        "resultTypeFilter": "TestResultTypeFilter",
+        "conversationLevelTestResultsFilterBy": "ConversationLevelTestResultsFilterBy"
+      }
+    },
+    "TestExecutionSortAttribute": {
+      "type": "string",
+      "enum": [
+        "TestSetName",
+        "CreationDateTime"
+      ]
+    },
+    "TestExecutionSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "TestExecutionSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "TestExecutionTarget": {
+      "type": "structure",
+      "members": {
+        "botAliasTarget": "BotAliasTestExecutionTarget"
+      }
+    },
+    "TestResultMatchStatus": {
+      "type": "string",
+      "enum": [
+        "Matched",
+        "Mismatched",
+        "ExecutionError"
+      ]
+    },
+    "TestResultTypeFilter": {
+      "type": "string",
+      "enum": [
+        "OverallTestResults",
+        "ConversationLevelTestResults",
+        "IntentClassificationTestResults",
+        "SlotResolutionTestResults",
+        "UtteranceLevelResults"
+      ]
+    },
+    "TestSetDiscrepancyReportBotAliasTarget": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId"
+      ],
+      "members": {
+        "botId": "Id",
+        "botAliasId": "BotAliasId",
+        "localeId": "LocaleId"
+      }
+    },
+    "TestSetDiscrepancyReportResourceTarget": {
+      "type": "structure",
+      "members": {
+        "botAliasTarget": "TestSetDiscrepancyReportBotAliasTarget"
+      }
+    },
+    "TestSetExportSpecification": {
+      "type": "structure",
+      "required": [
+        "testSetId"
+      ],
+      "members": {
+        "testSetId": "Id"
+      }
+    },
+    "TestSetGenerationDataSource": {
+      "type": "structure",
+      "members": {
+        "conversationLogsDataSource": "ConversationLogsDataSource"
+      }
+    },
+    "TestSetImportInputLocation": {
+      "type": "structure",
+      "required": [
+        "s3BucketName",
+        "s3Path"
+      ],
+      "members": {
+        "s3BucketName": "S3BucketName",
+        "s3Path": "S3ObjectPath"
+      }
+    },
+    "TestSetImportResourceSpecification": {
+      "type": "structure",
+      "required": [
+        "testSetName",
+        "roleArn",
+        "storageLocation",
+        "importInputLocation",
+        "modality"
+      ],
+      "members": {
+        "testSetName": "Name",
+        "description": "Description",
+        "roleArn": "RoleArn",
+        "storageLocation": "TestSetStorageLocation",
+        "importInputLocation": "TestSetImportInputLocation",
+        "modality": "TestSetModality",
+        "testSetTags": "TagMap"
+      }
+    },
+    "TestSetModality": {
+      "type": "string",
+      "enum": [
+        "Text",
+        "Audio"
+      ]
+    },
+    "TestSetSortAttribute": {
+      "type": "string",
+      "enum": [
+        "TestSetName",
+        "LastUpdatedDateTime"
+      ]
+    },
+    "TestSetSortBy": {
+      "type": "structure",
+      "required": [
+        "attribute",
+        "order"
+      ],
+      "members": {
+        "attribute": "TestSetSortAttribute",
+        "order": "SortOrder"
+      }
+    },
+    "TestSetStorageLocation": {
+      "type": "structure",
+      "required": [
+        "s3BucketName",
+        "s3Path"
+      ],
+      "members": {
+        "s3BucketName": "S3BucketName",
+        "s3Path": "S3ObjectPath",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "TextInputSpecification": {
+      "type": "structure",
+      "required": [
+        "startTimeoutMs"
+      ],
+      "members": {
+        "startTimeoutMs": "TimeInMilliSeconds"
+      }
+    },
+    "TextLogDestination": {
+      "type": "structure",
+      "required": [
+        "cloudWatch"
+      ],
+      "members": {
+        "cloudWatch": "CloudWatchLogGroupLogDestination"
+      }
+    },
+    "TextLogSetting": {
+      "type": "structure",
+      "required": [
+        "enabled",
+        "destination"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "destination": "TextLogDestination",
+        "selectiveLoggingEnabled": "BoxedBoolean"
+      }
+    },
+    "TextLogSettingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "TextLogSetting"
+    },
+    "TimeDimension": {
+      "type": "string",
+      "enum": [
+        "Hours",
+        "Days",
+        "Weeks"
+      ]
+    },
+    "TimeInMilliSeconds": {
+      "type": "integer",
+      "min": 1
+    },
+    "TimeValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 24
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TranscriptFilter": {
+      "type": "structure",
+      "members": {
+        "lexTranscriptFilter": "LexTranscriptFilter"
+      }
+    },
+    "TranscriptFormat": {
+      "type": "string",
+      "enum": [
+        "Lex"
+      ]
+    },
+    "TranscriptSourceSetting": {
+      "type": "structure",
+      "members": {
+        "s3BucketTranscriptSource": "S3BucketTranscriptSource"
+      }
+    },
+    "UUID": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
+    },
+    "UnifiedSpeechSettings": {
+      "type": "structure",
+      "required": [
+        "speechFoundationModel"
+      ],
+      "members": {
+        "speechFoundationModel": "SpeechFoundationModel"
+      }
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateBotAliasRequest": {
+      "type": "structure",
+      "required": [
+        "botAliasId",
+        "botAliasName",
+        "botId"
+      ],
+      "members": {
+        "botAliasId": "BotAliasId",
+        "botAliasName": "Name",
+        "description": "Description",
+        "botVersion": "BotVersion",
+        "botAliasLocaleSettings": "BotAliasLocaleSettingsMap",
+        "conversationLogSettings": "ConversationLogSettings",
+        "sentimentAnalysisSettings": "SentimentAnalysisSettings",
+        "botId": "Id"
+      }
+    },
+    "UpdateBotLocaleRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "nluIntentConfidenceThreshold"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "description": "Description",
+        "nluIntentConfidenceThreshold": "ConfidenceThreshold",
+        "voiceSettings": "VoiceSettings",
+        "unifiedSpeechSettings": "UnifiedSpeechSettings",
+        "audioFillerSettings": "AudioFillerSettings",
+        "speechRecognitionSettings": "SpeechRecognitionSettings",
+        "generativeAISettings": "GenerativeAISettings",
+        "speechDetectionSensitivity": "SpeechDetectionSensitivity",
+        "speakerDiarizationSettings": "SpeakerDiarizationSettings"
+      }
+    },
+    "UpdateBotRecommendationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botVersion",
+        "localeId",
+        "botRecommendationId",
+        "encryptionSetting"
+      ],
+      "members": {
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "botRecommendationId": "Id",
+        "encryptionSetting": "EncryptionSetting"
+      }
+    },
+    "UpdateBotRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botName",
+        "roleArn",
+        "dataPrivacy",
+        "idleSessionTTLInSeconds"
+      ],
+      "members": {
+        "botId": "Id",
+        "botName": "Name",
+        "description": "Description",
+        "roleArn": "RoleArn",
+        "dataPrivacy": "DataPrivacy",
+        "idleSessionTTLInSeconds": "SessionTTL",
+        "botType": "BotType",
+        "botMembers": "BotMembers",
+        "errorLogSettings": "ErrorLogSettings"
+      }
+    },
+    "UpdateCustomVocabularyItemsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "CustomVocabularyItem"
+    },
+    "UpdateExportRequest": {
+      "type": "structure",
+      "required": [
+        "exportId"
+      ],
+      "members": {
+        "exportId": "Id",
+        "filePassword": "ImportExportFilePassword"
+      }
+    },
+    "UpdateIntentRequest": {
+      "type": "structure",
+      "required": [
+        "intentId",
+        "intentName",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "intentId": "Id",
+        "intentName": "Name",
+        "intentDisplayName": "DisplayName",
+        "description": "Description",
+        "parentIntentSignature": "IntentSignature",
+        "sampleUtterances": "SampleUtterancesList",
+        "dialogCodeHook": "DialogCodeHookSettings",
+        "fulfillmentCodeHook": "FulfillmentCodeHookSettings",
+        "slotPriorities": "SlotPrioritiesList",
+        "intentConfirmationSetting": "IntentConfirmationSetting",
+        "intentClosingSetting": "IntentClosingSetting",
+        "inputContexts": "InputContextsList",
+        "outputContexts": "OutputContextsList",
+        "kendraConfiguration": "KendraConfiguration",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "initialResponseSetting": "InitialResponseSetting",
+        "qnAIntentConfiguration": "QnAIntentConfiguration",
+        "qInConnectIntentConfiguration": "QInConnectIntentConfiguration"
+      }
+    },
+    "UpdateResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "policy"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "policy": "Policy",
+        "expectedRevisionId": "RevisionId"
+      }
+    },
+    "UpdateSlotRequest": {
+      "type": "structure",
+      "required": [
+        "slotId",
+        "slotName",
+        "valueElicitationSetting",
+        "botId",
+        "botVersion",
+        "localeId",
+        "intentId"
+      ],
+      "members": {
+        "slotId": "Id",
+        "slotName": "Name",
+        "description": "Description",
+        "slotTypeId": "BuiltInOrCustomSlotTypeId",
+        "valueElicitationSetting": "SlotValueElicitationSetting",
+        "obfuscationSetting": "ObfuscationSetting",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "intentId": "Id",
+        "multipleValuesSetting": "MultipleValuesSetting",
+        "subSlotSetting": "SubSlotSetting"
+      }
+    },
+    "UpdateSlotTypeRequest": {
+      "type": "structure",
+      "required": [
+        "slotTypeId",
+        "slotTypeName",
+        "botId",
+        "botVersion",
+        "localeId"
+      ],
+      "members": {
+        "slotTypeId": "Id",
+        "slotTypeName": "Name",
+        "description": "Description",
+        "slotTypeValues": "SlotTypeValues",
+        "valueSelectionSetting": "SlotValueSelectionSetting",
+        "parentSlotTypeSignature": "SlotTypeSignature",
+        "botId": "Id",
+        "botVersion": "DraftBotVersion",
+        "localeId": "LocaleId",
+        "externalSourceSetting": "ExternalSourceSetting",
+        "compositeSlotTypeSetting": "CompositeSlotTypeSetting"
+      }
+    },
+    "UpdateTestSetRequest": {
+      "type": "structure",
+      "required": [
+        "testSetId",
+        "testSetName"
+      ],
+      "members": {
+        "testSetId": "Id",
+        "testSetName": "Name",
+        "description": "Description"
+      }
+    },
+    "Utterance": {
+      "type": "string"
+    },
+    "UtteranceAggregationDuration": {
+      "type": "structure",
+      "required": [
+        "relativeAggregationDuration"
+      ],
+      "members": {
+        "relativeAggregationDuration": "RelativeAggregationDuration"
+      }
+    },
+    "UtteranceDataSortBy": {
+      "type": "structure",
+      "required": [
+        "name",
+        "order"
+      ],
+      "members": {
+        "name": "AnalyticsUtteranceSortByName",
+        "order": "AnalyticsSortOrder"
+      }
+    },
+    "Value": {
+      "type": "string",
+      "min": 1,
+      "max": 140
+    },
+    "VoiceEngine": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "neural",
+        "long-form",
+        "generative"
+      ]
+    },
+    "VoiceId": {
+      "type": "string"
+    },
+    "VoiceSettings": {
+      "type": "structure",
+      "required": [
+        "voiceId"
+      ],
+      "members": {
+        "engine": "VoiceEngine",
+        "voiceId": "VoiceId"
+      }
+    },
+    "WaitAndContinueSpecification": {
+      "type": "structure",
+      "members": {
+        "waitingResponse": "ResponseSpecification",
+        "continueResponse": "ResponseSpecification",
+        "stillWaitingResponse": "StillWaitingResponseSpecification",
+        "active": "BoxedBoolean"
+      }
+    },
+    "Weight": {
+      "type": "integer",
+      "min": 0,
+      "max": 3
+    }
+  }
+}

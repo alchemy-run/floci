@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -41,7 +42,7 @@ class RedshiftServerlessSnapshotCopyIntegrationTest {
     void stubRuntime() {
         when(runtime.generatePassword()).thenReturn("Generated123");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
     }
 

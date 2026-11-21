@@ -1,0 +1,1015 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_fms_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateAdminAccount": "AssociateAdminAccountRequest",
+    "AssociateThirdPartyFirewall": "AssociateThirdPartyFirewallRequest",
+    "BatchAssociateResource": "BatchAssociateResourceRequest",
+    "BatchDisassociateResource": "BatchDisassociateResourceRequest",
+    "DeleteAppsList": "DeleteAppsListRequest",
+    "DeleteNotificationChannel": "DeleteNotificationChannelRequest",
+    "DeletePolicy": "DeletePolicyRequest",
+    "DeleteProtocolsList": "DeleteProtocolsListRequest",
+    "DeleteResourceSet": "DeleteResourceSetRequest",
+    "DisassociateAdminAccount": "DisassociateAdminAccountRequest",
+    "DisassociateThirdPartyFirewall": "DisassociateThirdPartyFirewallRequest",
+    "GetAdminAccount": "GetAdminAccountRequest",
+    "GetAdminScope": "GetAdminScopeRequest",
+    "GetAppsList": "GetAppsListRequest",
+    "GetComplianceDetail": "GetComplianceDetailRequest",
+    "GetNotificationChannel": "GetNotificationChannelRequest",
+    "GetPolicy": "GetPolicyRequest",
+    "GetProtectionStatus": "GetProtectionStatusRequest",
+    "GetProtocolsList": "GetProtocolsListRequest",
+    "GetResourceSet": "GetResourceSetRequest",
+    "GetThirdPartyFirewallAssociationStatus": "GetThirdPartyFirewallAssociationStatusRequest",
+    "GetViolationDetails": "GetViolationDetailsRequest",
+    "ListAdminAccountsForOrganization": "ListAdminAccountsForOrganizationRequest",
+    "ListAdminsManagingAccount": "ListAdminsManagingAccountRequest",
+    "ListAppsLists": "ListAppsListsRequest",
+    "ListComplianceStatus": "ListComplianceStatusRequest",
+    "ListDiscoveredResources": "ListDiscoveredResourcesRequest",
+    "ListMemberAccounts": "ListMemberAccountsRequest",
+    "ListPolicies": "ListPoliciesRequest",
+    "ListProtocolsLists": "ListProtocolsListsRequest",
+    "ListResourceSetResources": "ListResourceSetResourcesRequest",
+    "ListResourceSets": "ListResourceSetsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListThirdPartyFirewallFirewallPolicies": "ListThirdPartyFirewallFirewallPoliciesRequest",
+    "PutAdminAccount": "PutAdminAccountRequest",
+    "PutAppsList": "PutAppsListRequest",
+    "PutNotificationChannel": "PutNotificationChannelRequest",
+    "PutPolicy": "PutPolicyRequest",
+    "PutProtocolsList": "PutProtocolsListRequest",
+    "PutResourceSet": "PutResourceSetRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest"
+  },
+  "shapes": {
+    "AWSAccountId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^[0-9]+$"
+    },
+    "AWSAccountIdList": {
+      "type": "list",
+      "member": "AWSAccountId"
+    },
+    "AWSRegion": {
+      "type": "string",
+      "min": 6,
+      "max": 32,
+      "pattern": "^(af|ap|ca|eu|il|me|mx|sa|us|cn|us-gov)-\\w+-\\d+$"
+    },
+    "AWSRegionList": {
+      "type": "list",
+      "min": 0,
+      "max": 64,
+      "member": "AWSRegion"
+    },
+    "AccountIdList": {
+      "type": "list",
+      "member": "AWSAccountId"
+    },
+    "AccountScope": {
+      "type": "structure",
+      "members": {
+        "Accounts": "AccountIdList",
+        "AllAccountsEnabled": "Boolean",
+        "ExcludeSpecifiedAccounts": "Boolean"
+      }
+    },
+    "AdminScope": {
+      "type": "structure",
+      "members": {
+        "AccountScope": "AccountScope",
+        "OrganizationalUnitScope": "OrganizationalUnitScope",
+        "RegionScope": "RegionScope",
+        "PolicyTypeScope": "PolicyTypeScope"
+      }
+    },
+    "App": {
+      "type": "structure",
+      "required": [
+        "AppName",
+        "Protocol",
+        "Port"
+      ],
+      "members": {
+        "AppName": "ResourceName",
+        "Protocol": "Protocol",
+        "Port": "IPPortNumber"
+      }
+    },
+    "AppsList": {
+      "type": "list",
+      "member": "App"
+    },
+    "AppsListData": {
+      "type": "structure",
+      "required": [
+        "ListName",
+        "AppsList"
+      ],
+      "members": {
+        "ListId": "ListId",
+        "ListName": "ResourceName",
+        "ListUpdateToken": "UpdateToken",
+        "CreateTime": "TimeStamp",
+        "LastUpdateTime": "TimeStamp",
+        "AppsList": "AppsList",
+        "PreviousAppsList": "PreviousAppsList"
+      }
+    },
+    "AssociateAdminAccountRequest": {
+      "type": "structure",
+      "required": [
+        "AdminAccount"
+      ],
+      "members": {
+        "AdminAccount": "AWSAccountId"
+      }
+    },
+    "AssociateThirdPartyFirewallRequest": {
+      "type": "structure",
+      "required": [
+        "ThirdPartyFirewall"
+      ],
+      "members": {
+        "ThirdPartyFirewall": "ThirdPartyFirewall"
+      }
+    },
+    "Base62Id": {
+      "type": "string",
+      "min": 22,
+      "max": 22,
+      "pattern": "^[a-z0-9A-Z]{22}$"
+    },
+    "BatchAssociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceSetIdentifier",
+        "Items"
+      ],
+      "members": {
+        "ResourceSetIdentifier": "Identifier",
+        "Items": "IdentifierList"
+      }
+    },
+    "BatchDisassociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceSetIdentifier",
+        "Items"
+      ],
+      "members": {
+        "ResourceSetIdentifier": "Identifier",
+        "Items": "IdentifierList"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BooleanObject": {
+      "type": "boolean"
+    },
+    "CustomerPolicyScopeId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "CustomerPolicyScopeIdList": {
+      "type": "list",
+      "member": "CustomerPolicyScopeId"
+    },
+    "CustomerPolicyScopeIdType": {
+      "type": "string",
+      "enum": [
+        "ACCOUNT",
+        "ORG_UNIT"
+      ]
+    },
+    "CustomerPolicyScopeMap": {
+      "type": "map",
+      "key": "CustomerPolicyScopeIdType",
+      "value": "CustomerPolicyScopeIdList"
+    },
+    "CustomerPolicyStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "OUT_OF_ADMIN_SCOPE"
+      ]
+    },
+    "DeleteAppsListRequest": {
+      "type": "structure",
+      "required": [
+        "ListId"
+      ],
+      "members": {
+        "ListId": "ListId"
+      }
+    },
+    "DeleteNotificationChannelRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeletePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "DeleteAllPolicyResources": "Boolean"
+      }
+    },
+    "DeleteProtocolsListRequest": {
+      "type": "structure",
+      "required": [
+        "ListId"
+      ],
+      "members": {
+        "ListId": "ListId"
+      }
+    },
+    "DeleteResourceSetRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "Base62Id"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "DisassociateAdminAccountRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DisassociateThirdPartyFirewallRequest": {
+      "type": "structure",
+      "required": [
+        "ThirdPartyFirewall"
+      ],
+      "members": {
+        "ThirdPartyFirewall": "ThirdPartyFirewall"
+      }
+    },
+    "FirewallDeploymentModel": {
+      "type": "string",
+      "enum": [
+        "CENTRALIZED",
+        "DISTRIBUTED"
+      ]
+    },
+    "GetAdminAccountRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetAdminScopeRequest": {
+      "type": "structure",
+      "required": [
+        "AdminAccount"
+      ],
+      "members": {
+        "AdminAccount": "AWSAccountId"
+      }
+    },
+    "GetAppsListRequest": {
+      "type": "structure",
+      "required": [
+        "ListId"
+      ],
+      "members": {
+        "ListId": "ListId",
+        "DefaultList": "Boolean"
+      }
+    },
+    "GetComplianceDetailRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId",
+        "MemberAccount"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "MemberAccount": "AWSAccountId"
+      }
+    },
+    "GetNotificationChannelRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId"
+      ],
+      "members": {
+        "PolicyId": "PolicyId"
+      }
+    },
+    "GetProtectionStatusRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "MemberAccountId": "AWSAccountId",
+        "StartTime": "TimeStamp",
+        "EndTime": "TimeStamp",
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "GetProtocolsListRequest": {
+      "type": "structure",
+      "required": [
+        "ListId"
+      ],
+      "members": {
+        "ListId": "ListId",
+        "DefaultList": "Boolean"
+      }
+    },
+    "GetResourceSetRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "Base62Id"
+      }
+    },
+    "GetThirdPartyFirewallAssociationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "ThirdPartyFirewall"
+      ],
+      "members": {
+        "ThirdPartyFirewall": "ThirdPartyFirewall"
+      }
+    },
+    "GetViolationDetailsRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId",
+        "MemberAccount",
+        "ResourceId",
+        "ResourceType"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "MemberAccount": "AWSAccountId",
+        "ResourceId": "ResourceId",
+        "ResourceType": "ResourceType"
+      }
+    },
+    "IPPortNumber": {
+      "type": "long",
+      "min": 0,
+      "max": 65535
+    },
+    "IPPortNumberInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "Identifier": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "IdentifierList": {
+      "type": "list",
+      "member": "Identifier"
+    },
+    "IntegerObject": {
+      "type": "integer",
+      "min": -2147483648,
+      "max": 2147483647
+    },
+    "LengthBoundedNonEmptyString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "LengthBoundedString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "ListAdminAccountsForOrganizationRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListAdminsManagingAccountRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListAppsListsRequest": {
+      "type": "structure",
+      "required": [
+        "MaxResults"
+      ],
+      "members": {
+        "DefaultLists": "Boolean",
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListComplianceStatusRequest": {
+      "type": "structure",
+      "required": [
+        "PolicyId"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListDiscoveredResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "MemberAccountIds",
+        "ResourceType"
+      ],
+      "members": {
+        "MemberAccountIds": "AWSAccountIdList",
+        "ResourceType": "ResourceType",
+        "MaxResults": "PaginationMaxResults",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "ListId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-z0-9A-Z-]{36}$"
+    },
+    "ListMemberAccountsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListPoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListProtocolsListsRequest": {
+      "type": "structure",
+      "required": [
+        "MaxResults"
+      ],
+      "members": {
+        "DefaultLists": "Boolean",
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListResourceSetResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ResourceId",
+        "MaxResults": "PaginationMaxResults",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "ListResourceSetsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn"
+      }
+    },
+    "ListThirdPartyFirewallFirewallPoliciesRequest": {
+      "type": "structure",
+      "required": [
+        "ThirdPartyFirewall",
+        "MaxResults"
+      ],
+      "members": {
+        "ThirdPartyFirewall": "ThirdPartyFirewall",
+        "NextToken": "PaginationToken",
+        "MaxResults": "PaginationMaxResults"
+      }
+    },
+    "ManagedServiceData": {
+      "type": "string",
+      "min": 1,
+      "max": 30000,
+      "pattern": "^((?!\\\\[nr]).)+"
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "NetworkAclCommonPolicy": {
+      "type": "structure",
+      "required": [
+        "NetworkAclEntrySet"
+      ],
+      "members": {
+        "NetworkAclEntrySet": "NetworkAclEntrySet"
+      }
+    },
+    "NetworkAclEntries": {
+      "type": "list",
+      "member": "NetworkAclEntry"
+    },
+    "NetworkAclEntry": {
+      "type": "structure",
+      "required": [
+        "Protocol",
+        "RuleAction",
+        "Egress"
+      ],
+      "members": {
+        "IcmpTypeCode": "NetworkAclIcmpTypeCode",
+        "Protocol": "LengthBoundedString",
+        "PortRange": "NetworkAclPortRange",
+        "CidrBlock": "LengthBoundedNonEmptyString",
+        "Ipv6CidrBlock": "LengthBoundedNonEmptyString",
+        "RuleAction": "NetworkAclRuleAction",
+        "Egress": "BooleanObject"
+      }
+    },
+    "NetworkAclEntrySet": {
+      "type": "structure",
+      "required": [
+        "ForceRemediateForFirstEntries",
+        "ForceRemediateForLastEntries"
+      ],
+      "members": {
+        "FirstEntries": "NetworkAclEntries",
+        "ForceRemediateForFirstEntries": "BooleanObject",
+        "LastEntries": "NetworkAclEntries",
+        "ForceRemediateForLastEntries": "BooleanObject"
+      }
+    },
+    "NetworkAclIcmpTypeCode": {
+      "type": "structure",
+      "members": {
+        "Code": "IntegerObject",
+        "Type": "IntegerObject"
+      }
+    },
+    "NetworkAclPortRange": {
+      "type": "structure",
+      "members": {
+        "From": "IPPortNumberInteger",
+        "To": "IPPortNumberInteger"
+      }
+    },
+    "NetworkAclRuleAction": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny"
+      ]
+    },
+    "NetworkFirewallPolicy": {
+      "type": "structure",
+      "members": {
+        "FirewallDeploymentModel": "FirewallDeploymentModel"
+      }
+    },
+    "OrganizationalUnitId": {
+      "type": "string",
+      "min": 16,
+      "max": 68,
+      "pattern": "^ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}$"
+    },
+    "OrganizationalUnitIdList": {
+      "type": "list",
+      "member": "OrganizationalUnitId"
+    },
+    "OrganizationalUnitScope": {
+      "type": "structure",
+      "members": {
+        "OrganizationalUnits": "OrganizationalUnitIdList",
+        "AllOrganizationalUnitsEnabled": "Boolean",
+        "ExcludeSpecifiedOrganizationalUnits": "Boolean"
+      }
+    },
+    "PaginationMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "Policy": {
+      "type": "structure",
+      "required": [
+        "PolicyName",
+        "SecurityServicePolicyData",
+        "ResourceType",
+        "ExcludeResourceTags",
+        "RemediationEnabled"
+      ],
+      "members": {
+        "PolicyId": "PolicyId",
+        "PolicyName": "ResourceName",
+        "PolicyUpdateToken": "PolicyUpdateToken",
+        "SecurityServicePolicyData": "SecurityServicePolicyData",
+        "ResourceType": "ResourceType",
+        "ResourceTypeList": "ResourceTypeList",
+        "ResourceTags": "ResourceTags",
+        "ExcludeResourceTags": "Boolean",
+        "RemediationEnabled": "Boolean",
+        "DeleteUnusedFMManagedResources": "Boolean",
+        "IncludeMap": "CustomerPolicyScopeMap",
+        "ExcludeMap": "CustomerPolicyScopeMap",
+        "ResourceSetIds": "ResourceSetIds",
+        "PolicyDescription": "ResourceDescription",
+        "PolicyStatus": "CustomerPolicyStatus",
+        "ResourceTagLogicalOperator": "ResourceTagLogicalOperator"
+      }
+    },
+    "PolicyId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-z0-9A-Z-]{36}$"
+    },
+    "PolicyOption": {
+      "type": "structure",
+      "members": {
+        "NetworkFirewallPolicy": "NetworkFirewallPolicy",
+        "ThirdPartyFirewallPolicy": "ThirdPartyFirewallPolicy",
+        "NetworkAclCommonPolicy": "NetworkAclCommonPolicy"
+      }
+    },
+    "PolicyTypeScope": {
+      "type": "structure",
+      "members": {
+        "PolicyTypes": "SecurityServiceTypeList",
+        "AllPolicyTypesEnabled": "Boolean"
+      }
+    },
+    "PolicyUpdateToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "PreviousAppsList": {
+      "type": "map",
+      "key": "PreviousListVersion",
+      "value": "AppsList"
+    },
+    "PreviousListVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 2,
+      "pattern": "^\\d{1,2}$"
+    },
+    "PreviousProtocolsList": {
+      "type": "map",
+      "key": "PreviousListVersion",
+      "value": "ProtocolsList"
+    },
+    "Protocol": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ProtocolsList": {
+      "type": "list",
+      "member": "Protocol"
+    },
+    "ProtocolsListData": {
+      "type": "structure",
+      "required": [
+        "ListName",
+        "ProtocolsList"
+      ],
+      "members": {
+        "ListId": "ListId",
+        "ListName": "ResourceName",
+        "ListUpdateToken": "UpdateToken",
+        "CreateTime": "TimeStamp",
+        "LastUpdateTime": "TimeStamp",
+        "ProtocolsList": "ProtocolsList",
+        "PreviousProtocolsList": "PreviousProtocolsList"
+      }
+    },
+    "PutAdminAccountRequest": {
+      "type": "structure",
+      "required": [
+        "AdminAccount"
+      ],
+      "members": {
+        "AdminAccount": "AWSAccountId",
+        "AdminScope": "AdminScope"
+      }
+    },
+    "PutAppsListRequest": {
+      "type": "structure",
+      "required": [
+        "AppsList"
+      ],
+      "members": {
+        "AppsList": "AppsListData",
+        "TagList": "TagList"
+      }
+    },
+    "PutNotificationChannelRequest": {
+      "type": "structure",
+      "required": [
+        "SnsTopicArn",
+        "SnsRoleName"
+      ],
+      "members": {
+        "SnsTopicArn": "ResourceArn",
+        "SnsRoleName": "ResourceArn"
+      }
+    },
+    "PutPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "Policy"
+      ],
+      "members": {
+        "Policy": "Policy",
+        "TagList": "TagList"
+      }
+    },
+    "PutProtocolsListRequest": {
+      "type": "structure",
+      "required": [
+        "ProtocolsList"
+      ],
+      "members": {
+        "ProtocolsList": "ProtocolsListData",
+        "TagList": "TagList"
+      }
+    },
+    "PutResourceSetRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceSet"
+      ],
+      "members": {
+        "ResourceSet": "ResourceSet",
+        "TagList": "TagList"
+      }
+    },
+    "RegionScope": {
+      "type": "structure",
+      "members": {
+        "Regions": "AWSRegionList",
+        "AllRegionsEnabled": "Boolean"
+      }
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ResourceDescription": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ResourceId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ResourceSet": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ResourceTypeList"
+      ],
+      "members": {
+        "Id": "Base62Id",
+        "Name": "Name",
+        "Description": "Description",
+        "UpdateToken": "UpdateToken",
+        "ResourceTypeList": "ResourceTypeList",
+        "LastUpdateTime": "TimeStamp",
+        "ResourceSetStatus": "ResourceSetStatus"
+      }
+    },
+    "ResourceSetIds": {
+      "type": "list",
+      "member": "Base62Id"
+    },
+    "ResourceSetStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "OUT_OF_ADMIN_SCOPE"
+      ]
+    },
+    "ResourceTag": {
+      "type": "structure",
+      "required": [
+        "Key"
+      ],
+      "members": {
+        "Key": "ResourceTagKey",
+        "Value": "ResourceTagValue"
+      }
+    },
+    "ResourceTagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:\\/=+\\-@*\\\\]*)$"
+    },
+    "ResourceTagLogicalOperator": {
+      "type": "string",
+      "enum": [
+        "AND",
+        "OR"
+      ]
+    },
+    "ResourceTagValue": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:\\/=+\\-@*\\\\]*)$"
+    },
+    "ResourceTags": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "ResourceTag"
+    },
+    "ResourceType": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ResourceTypeList": {
+      "type": "list",
+      "member": "ResourceType"
+    },
+    "SecurityServicePolicyData": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "SecurityServiceType",
+        "ManagedServiceData": "ManagedServiceData",
+        "PolicyOption": "PolicyOption"
+      }
+    },
+    "SecurityServiceType": {
+      "type": "string",
+      "enum": [
+        "WAF",
+        "WAFV2",
+        "SHIELD_ADVANCED",
+        "SECURITY_GROUPS_COMMON",
+        "SECURITY_GROUPS_CONTENT_AUDIT",
+        "SECURITY_GROUPS_USAGE_AUDIT",
+        "NETWORK_FIREWALL",
+        "DNS_FIREWALL",
+        "THIRD_PARTY_FIREWALL",
+        "IMPORT_NETWORK_FIREWALL",
+        "NETWORK_ACL_COMMON"
+      ]
+    },
+    "SecurityServiceTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "SecurityServiceType"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagList"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "TagList": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "ThirdPartyFirewall": {
+      "type": "string",
+      "enum": [
+        "PALO_ALTO_NETWORKS_CLOUD_NGFW",
+        "FORTIGATE_CLOUD_NATIVE_FIREWALL"
+      ]
+    },
+    "ThirdPartyFirewallPolicy": {
+      "type": "structure",
+      "members": {
+        "FirewallDeploymentModel": "FirewallDeploymentModel"
+      }
+    },
+    "TimeStamp": {
+      "type": "timestamp"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "ResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    }
+  }
+}

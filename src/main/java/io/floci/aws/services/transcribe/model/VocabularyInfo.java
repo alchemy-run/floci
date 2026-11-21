@@ -10,5 +10,10 @@ public record VocabularyInfo(
         @JsonProperty("VocabularyName") String vocabularyName,
         @JsonProperty("LanguageCode") String languageCode,
         @JsonProperty("VocabularyState") String vocabularyState,
-        @JsonProperty("LastModifiedTime") Long lastModifiedTime
-) {}
+        @JsonProperty("LastModifiedTime") Long lastModifiedTime,
+        @JsonProperty("FailureReason") String failureReason
+) {
+    public VocabularyInfo(String vocabularyName, String languageCode, String vocabularyState, Long lastModifiedTime) {
+        this(vocabularyName, languageCode, vocabularyState, lastModifiedTime, null);
+    }
+}

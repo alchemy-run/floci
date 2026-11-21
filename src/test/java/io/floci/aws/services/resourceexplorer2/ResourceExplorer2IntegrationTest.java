@@ -1499,6 +1499,17 @@ class ResourceExplorer2IntegrationTest {
 
         @Test
         void arnContainsServiceAndRegion() {
+            // A log group in a China Region is listed in the aws-cn partition, not aws.
+            given()
+                .header("X-Amz-Target", "Logs_20140328.CreateLogGroup")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260528/cn-north-1/logs/aws4_request")
+                .contentType("application/x-amz-json-1.1")
+                .body("{\"logGroupName\": \"/re2/partition-check\"}")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
+
             List<Map<String, Object>> resources = given()
                 .header("Authorization", AUTH)
                 .contentType("application/json")

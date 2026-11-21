@@ -1,0 +1,2367 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "omics",
+ "apiVersion": "2022-11-28",
+ "operations": {
+  "AbortMultipartReadSetUpload": {
+   "method": "DELETE",
+   "requestUri": "/sequencestore/{sequenceStoreId}/upload/{uploadId}/abort",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "uploadId": {
+      "location": "uri",
+      "name": "uploadId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AcceptShare": {
+   "method": "POST",
+   "requestUri": "/share/{shareId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "shareId": {
+      "location": "uri",
+      "name": "shareId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchDeleteReadSet": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/readset/batch/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelAnnotationImportJob": {
+   "method": "DELETE",
+   "requestUri": "/import/annotation/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelRun": {
+   "method": "POST",
+   "requestUri": "/run/{id}/cancel",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelRunBatch": {
+   "method": "POST",
+   "requestUri": "/runBatch/cancel",
+   "responseCode": 202,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelVariantImportJob": {
+   "method": "DELETE",
+   "requestUri": "/import/variant/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CompleteMultipartReadSetUpload": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/upload/{uploadId}/complete",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "uploadId": {
+      "location": "uri",
+      "name": "uploadId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAnnotationStore": {
+   "method": "POST",
+   "requestUri": "/annotationStore",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateAnnotationStoreVersion": {
+   "method": "POST",
+   "requestUri": "/annotationStore/{name}/version",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateConfiguration": {
+   "method": "POST",
+   "requestUri": "/configuration",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateMultipartReadSetUpload": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/upload",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateReferenceStore": {
+   "method": "POST",
+   "requestUri": "/referencestore",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateRunCache": {
+   "method": "POST",
+   "requestUri": "/runCache",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateRunGroup": {
+   "method": "POST",
+   "requestUri": "/runGroup",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSequenceStore": {
+   "method": "POST",
+   "requestUri": "/sequencestore",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateShare": {
+   "method": "POST",
+   "requestUri": "/share",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateVariantStore": {
+   "method": "POST",
+   "requestUri": "/variantStore",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "CreateWorkflow": {
+   "method": "POST",
+   "requestUri": "/workflow",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWorkflowVersion": {
+   "method": "POST",
+   "requestUri": "/workflow/{workflowId}/version",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "workflowId": {
+      "location": "uri",
+      "name": "workflowId"
+     },
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAnnotationStore": {
+   "method": "DELETE",
+   "requestUri": "/annotationStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAnnotationStoreVersions": {
+   "method": "POST",
+   "requestUri": "/annotationStore/{name}/versions/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteBatch": {
+   "method": "DELETE",
+   "requestUri": "/runBatch/{batchId}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "batchId": {
+      "location": "uri",
+      "name": "batchId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/configuration/{name}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteReference": {
+   "method": "DELETE",
+   "requestUri": "/referencestore/{referenceStoreId}/reference/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteReferenceStore": {
+   "method": "DELETE",
+   "requestUri": "/referencestore/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRun": {
+   "method": "DELETE",
+   "requestUri": "/run/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRunBatch": {
+   "method": "POST",
+   "requestUri": "/runBatch/delete",
+   "responseCode": 202,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRunCache": {
+   "method": "DELETE",
+   "requestUri": "/runCache/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRunGroup": {
+   "method": "DELETE",
+   "requestUri": "/runGroup/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteS3AccessPolicy": {
+   "method": "DELETE",
+   "requestUri": "/s3accesspolicy/{s3AccessPointArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "s3AccessPointArn": {
+      "location": "uri",
+      "name": "s3AccessPointArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSequenceStore": {
+   "method": "DELETE",
+   "requestUri": "/sequencestore/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteShare": {
+   "method": "DELETE",
+   "requestUri": "/share/{shareId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "shareId": {
+      "location": "uri",
+      "name": "shareId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteVariantStore": {
+   "method": "DELETE",
+   "requestUri": "/variantStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "force": {
+      "location": "querystring",
+      "name": "force",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWorkflow": {
+   "method": "DELETE",
+   "requestUri": "/workflow/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWorkflowVersion": {
+   "method": "DELETE",
+   "requestUri": "/workflow/{workflowId}/version/{versionName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "workflowId": {
+      "location": "uri",
+      "name": "workflowId"
+     },
+     "versionName": {
+      "location": "uri",
+      "name": "versionName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAnnotationImportJob": {
+   "method": "GET",
+   "requestUri": "/import/annotation/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetAnnotationStore": {
+   "method": "GET",
+   "requestUri": "/annotationStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "GetAnnotationStoreVersion": {
+   "method": "GET",
+   "requestUri": "/annotationStore/{name}/version/{versionName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "versionName": {
+      "location": "uri",
+      "name": "versionName"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "GetBatch": {
+   "method": "GET",
+   "requestUri": "/runBatch/{batchId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "batchId": {
+      "location": "uri",
+      "name": "batchId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "submittedTime",
+     "processedTime",
+     "failedTime"
+    ]
+   }
+  },
+  "GetConfiguration": {
+   "method": "GET",
+   "requestUri": "/configuration/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetReadSet": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{sequenceStoreId}/readset/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "file": {
+      "location": "querystring",
+      "name": "file"
+     },
+     "partNumber": {
+      "location": "querystring",
+      "name": "partNumber",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {
+     "payload": {
+      "location": "payload",
+      "type": "blob"
+     }
+    }
+   }
+  },
+  "GetReadSetActivationJob": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{sequenceStoreId}/activationjob/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetReadSetExportJob": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{sequenceStoreId}/exportjob/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetReadSetImportJob": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{sequenceStoreId}/importjob/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetReadSetMetadata": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{sequenceStoreId}/readset/{id}/metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetReference": {
+   "method": "GET",
+   "requestUri": "/referencestore/{referenceStoreId}/reference/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     },
+     "range": {
+      "location": "header",
+      "name": "Range"
+     },
+     "partNumber": {
+      "location": "querystring",
+      "name": "partNumber",
+      "type": "integer"
+     },
+     "file": {
+      "location": "querystring",
+      "name": "file"
+     }
+    }
+   },
+   "output": {
+    "members": {
+     "payload": {
+      "location": "payload",
+      "type": "blob"
+     }
+    }
+   }
+  },
+  "GetReferenceImportJob": {
+   "method": "GET",
+   "requestUri": "/referencestore/{referenceStoreId}/importjob/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetReferenceMetadata": {
+   "method": "GET",
+   "requestUri": "/referencestore/{referenceStoreId}/reference/{id}/metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "GetReferenceStore": {
+   "method": "GET",
+   "requestUri": "/referencestore/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetRun": {
+   "method": "GET",
+   "requestUri": "/run/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "export": {
+      "location": "querystring",
+      "name": "export",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "startTime",
+     "stopTime"
+    ]
+   }
+  },
+  "GetRunCache": {
+   "method": "GET",
+   "requestUri": "/runCache/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetRunGroup": {
+   "method": "GET",
+   "requestUri": "/runGroup/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetRunTask": {
+   "method": "GET",
+   "requestUri": "/run/{id}/task/{taskId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "taskId": {
+      "location": "uri",
+      "name": "taskId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "startTime",
+     "stopTime"
+    ]
+   }
+  },
+  "GetS3AccessPolicy": {
+   "method": "GET",
+   "requestUri": "/s3accesspolicy/{s3AccessPointArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "s3AccessPointArn": {
+      "location": "uri",
+      "name": "s3AccessPointArn"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "updateTime"
+    ]
+   }
+  },
+  "GetSequenceStore": {
+   "method": "GET",
+   "requestUri": "/sequencestore/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "GetShare": {
+   "method": "GET",
+   "requestUri": "/share/{shareId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "shareId": {
+      "location": "uri",
+      "name": "shareId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "share.creationTime",
+     "share.updateTime"
+    ]
+   }
+  },
+  "GetVariantImportJob": {
+   "method": "GET",
+   "requestUri": "/import/variant/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime",
+     "completionTime"
+    ]
+   }
+  },
+  "GetVariantStore": {
+   "method": "GET",
+   "requestUri": "/variantStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "GetWorkflow": {
+   "method": "GET",
+   "requestUri": "/workflow/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "export": {
+      "location": "querystring",
+      "name": "export",
+      "type": "list"
+     },
+     "workflowOwnerId": {
+      "location": "querystring",
+      "name": "workflowOwnerId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetWorkflowVersion": {
+   "method": "GET",
+   "requestUri": "/workflow/{workflowId}/version/{versionName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowId": {
+      "location": "uri",
+      "name": "workflowId"
+     },
+     "versionName": {
+      "location": "uri",
+      "name": "versionName"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "export": {
+      "location": "querystring",
+      "name": "export",
+      "type": "list"
+     },
+     "workflowOwnerId": {
+      "location": "querystring",
+      "name": "workflowOwnerId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "ListAnnotationImportJobs": {
+   "method": "POST",
+   "requestUri": "/import/annotations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "annotationImportJobs[].creationTime",
+     "annotationImportJobs[].updateTime",
+     "annotationImportJobs[].completionTime"
+    ]
+   }
+  },
+  "ListAnnotationStoreVersions": {
+   "method": "POST",
+   "requestUri": "/annotationStore/{name}/versions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "annotationStoreVersions[].creationTime",
+     "annotationStoreVersions[].updateTime"
+    ]
+   }
+  },
+  "ListAnnotationStores": {
+   "method": "POST",
+   "requestUri": "/annotationStores",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "annotationStores[].creationTime",
+     "annotationStores[].updateTime"
+    ]
+   }
+  },
+  "ListBatch": {
+   "method": "GET",
+   "requestUri": "/runBatch",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxItems": {
+      "location": "querystring",
+      "name": "maxItems",
+      "type": "integer"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "runGroupId": {
+      "location": "querystring",
+      "name": "runGroupId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt"
+    ]
+   }
+  },
+  "ListConfigurations": {
+   "method": "GET",
+   "requestUri": "/configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime"
+    ]
+   }
+  },
+  "ListMultipartReadSetUploads": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/uploads",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "uploads[].creationTime"
+    ]
+   }
+  },
+  "ListReadSetActivationJobs": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/activationjobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "activationJobs[].creationTime",
+     "activationJobs[].completionTime"
+    ]
+   }
+  },
+  "ListReadSetExportJobs": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/exportjobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "exportJobs[].creationTime",
+     "exportJobs[].completionTime"
+    ]
+   }
+  },
+  "ListReadSetImportJobs": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/importjobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "importJobs[].creationTime",
+     "importJobs[].completionTime"
+    ]
+   }
+  },
+  "ListReadSetUploadParts": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/upload/{uploadId}/parts",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "uploadId": {
+      "location": "uri",
+      "name": "uploadId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "parts[].creationTime",
+     "parts[].lastUpdatedTime"
+    ]
+   }
+  },
+  "ListReadSets": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/readsets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "readSets[].creationTime"
+    ]
+   }
+  },
+  "ListReferenceImportJobs": {
+   "method": "POST",
+   "requestUri": "/referencestore/{referenceStoreId}/importjobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "importJobs[].creationTime",
+     "importJobs[].completionTime"
+    ]
+   }
+  },
+  "ListReferenceStores": {
+   "method": "POST",
+   "requestUri": "/referencestores",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "referenceStores[].creationTime"
+    ]
+   }
+  },
+  "ListReferences": {
+   "method": "POST",
+   "requestUri": "/referencestore/{referenceStoreId}/references",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "references[].creationTime",
+     "references[].updateTime"
+    ]
+   }
+  },
+  "ListRunCaches": {
+   "method": "GET",
+   "requestUri": "/runCache",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime"
+    ]
+   }
+  },
+  "ListRunGroups": {
+   "method": "GET",
+   "requestUri": "/runGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime"
+    ]
+   }
+  },
+  "ListRunTasks": {
+   "method": "GET",
+   "requestUri": "/run/{id}/task",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime",
+     "items[].startTime",
+     "items[].stopTime"
+    ]
+   }
+  },
+  "ListRuns": {
+   "method": "GET",
+   "requestUri": "/run",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "runGroupId": {
+      "location": "querystring",
+      "name": "runGroupId"
+     },
+     "batchId": {
+      "location": "querystring",
+      "name": "batchId"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime",
+     "items[].startTime",
+     "items[].stopTime"
+    ]
+   }
+  },
+  "ListRunsInBatch": {
+   "method": "GET",
+   "requestUri": "/runBatch/{batchId}/run",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "batchId": {
+      "location": "uri",
+      "name": "batchId"
+     },
+     "maxItems": {
+      "location": "querystring",
+      "name": "maxItems",
+      "type": "integer"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "submissionStatus": {
+      "location": "querystring",
+      "name": "submissionStatus"
+     },
+     "runSettingId": {
+      "location": "querystring",
+      "name": "runSettingId"
+     },
+     "runId": {
+      "location": "querystring",
+      "name": "runId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSequenceStores": {
+   "method": "POST",
+   "requestUri": "/sequencestores",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "timestamps": [
+     "filter.createdAfter",
+     "filter.createdBefore",
+     "filter.updatedAfter",
+     "filter.updatedBefore"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sequenceStores[].creationTime",
+     "sequenceStores[].updateTime"
+    ]
+   }
+  },
+  "ListShares": {
+   "method": "POST",
+   "requestUri": "/shares",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "shares[].creationTime",
+     "shares[].updateTime"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListVariantImportJobs": {
+   "method": "POST",
+   "requestUri": "/import/variants",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "variantImportJobs[].creationTime",
+     "variantImportJobs[].updateTime",
+     "variantImportJobs[].completionTime"
+    ]
+   }
+  },
+  "ListVariantStores": {
+   "method": "POST",
+   "requestUri": "/variantStores",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "variantStores[].creationTime",
+     "variantStores[].updateTime"
+    ]
+   }
+  },
+  "ListWorkflowVersions": {
+   "method": "GET",
+   "requestUri": "/workflow/{workflowId}/version",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowId": {
+      "location": "uri",
+      "name": "workflowId"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "workflowOwnerId": {
+      "location": "querystring",
+      "name": "workflowOwnerId"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime"
+    ]
+   }
+  },
+  "ListWorkflows": {
+   "method": "GET",
+   "requestUri": "/workflow",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "startingToken": {
+      "location": "querystring",
+      "name": "startingToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].creationTime"
+    ]
+   }
+  },
+  "PutS3AccessPolicy": {
+   "method": "PUT",
+   "requestUri": "/s3accesspolicy/{s3AccessPointArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "s3AccessPointArn": {
+      "location": "uri",
+      "name": "s3AccessPointArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartAnnotationImportJob": {
+   "method": "POST",
+   "requestUri": "/import/annotation",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartReadSetActivationJob": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/activationjob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "StartReadSetExportJob": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/exportjob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "StartReadSetImportJob": {
+   "method": "POST",
+   "requestUri": "/sequencestore/{sequenceStoreId}/importjob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "StartReferenceImportJob": {
+   "method": "POST",
+   "requestUri": "/referencestore/{referenceStoreId}/importjob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "referenceStoreId": {
+      "location": "uri",
+      "name": "referenceStoreId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "StartRun": {
+   "method": "POST",
+   "requestUri": "/run",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartRunBatch": {
+   "method": "POST",
+   "requestUri": "/runBatch",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "requestId": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartVariantImportJob": {
+   "method": "POST",
+   "requestUri": "/import/variant",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateAnnotationStore": {
+   "method": "POST",
+   "requestUri": "/annotationStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "UpdateAnnotationStoreVersion": {
+   "method": "POST",
+   "requestUri": "/annotationStore/{name}/version/{versionName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "versionName": {
+      "location": "uri",
+      "name": "versionName"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "UpdateRunCache": {
+   "method": "POST",
+   "requestUri": "/runCache/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRunGroup": {
+   "method": "POST",
+   "requestUri": "/runGroup/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSequenceStore": {
+   "method": "PATCH",
+   "requestUri": "/sequencestore/{id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "UpdateVariantStore": {
+   "method": "POST",
+   "requestUri": "/variantStore/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "updateTime"
+    ]
+   }
+  },
+  "UpdateWorkflow": {
+   "method": "POST",
+   "requestUri": "/workflow/{id}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWorkflowVersion": {
+   "method": "POST",
+   "requestUri": "/workflow/{workflowId}/version/{versionName}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "workflowId": {
+      "location": "uri",
+      "name": "workflowId"
+     },
+     "versionName": {
+      "location": "uri",
+      "name": "versionName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UploadReadSetPart": {
+   "method": "PUT",
+   "requestUri": "/sequencestore/{sequenceStoreId}/upload/{uploadId}/part",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sequenceStoreId": {
+      "location": "uri",
+      "name": "sequenceStoreId"
+     },
+     "uploadId": {
+      "location": "uri",
+      "name": "uploadId"
+     },
+     "partSource": {
+      "location": "querystring",
+      "name": "partSource"
+     },
+     "partNumber": {
+      "location": "querystring",
+      "name": "partNumber",
+      "type": "integer"
+     },
+     "payload": {
+      "location": "payload",
+      "type": "blob"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

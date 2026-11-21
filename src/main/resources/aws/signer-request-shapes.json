@@ -1,0 +1,491 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_signer_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AddProfilePermission": "AddProfilePermissionRequest",
+    "CancelSigningProfile": "CancelSigningProfileRequest",
+    "DescribeSigningJob": "DescribeSigningJobRequest",
+    "GetRevocationStatus": "GetRevocationStatusRequest",
+    "GetSigningPlatform": "GetSigningPlatformRequest",
+    "GetSigningProfile": "GetSigningProfileRequest",
+    "ListProfilePermissions": "ListProfilePermissionsRequest",
+    "ListSigningJobs": "ListSigningJobsRequest",
+    "ListSigningPlatforms": "ListSigningPlatformsRequest",
+    "ListSigningProfiles": "ListSigningProfilesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutSigningProfile": "PutSigningProfileRequest",
+    "RemoveProfilePermission": "RemoveProfilePermissionRequest",
+    "RevokeSignature": "RevokeSignatureRequest",
+    "RevokeSigningProfile": "RevokeSigningProfileRequest",
+    "SignPayload": "SignPayloadRequest",
+    "StartSigningJob": "StartSigningJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest"
+  },
+  "shapes": {
+    "AccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^[0-9]{12}$"
+    },
+    "AddProfilePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "action",
+        "principal",
+        "statementId",
+        "profileName"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "profileVersion": "ProfileVersion",
+        "action": "String",
+        "principal": "String",
+        "revisionId": "String",
+        "statementId": "String"
+      }
+    },
+    "Arn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "BucketName": {
+      "type": "string"
+    },
+    "CancelSigningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileName"
+      ],
+      "members": {
+        "profileName": "ProfileName"
+      }
+    },
+    "CertificateArn": {
+      "type": "string"
+    },
+    "CertificateHashes": {
+      "type": "list",
+      "member": "String"
+    },
+    "ClientRequestToken": {
+      "type": "string"
+    },
+    "DescribeSigningJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "JobId"
+      }
+    },
+    "Destination": {
+      "type": "structure",
+      "members": {
+        "s3": "S3Destination"
+      }
+    },
+    "EncryptionAlgorithm": {
+      "type": "string",
+      "enum": [
+        "RSA",
+        "ECDSA"
+      ]
+    },
+    "GetRevocationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "signatureTimestamp",
+        "platformId",
+        "profileVersionArn",
+        "jobArn",
+        "certificateHashes"
+      ],
+      "members": {
+        "signatureTimestamp": "Timestamp",
+        "platformId": "PlatformId",
+        "profileVersionArn": "Arn",
+        "jobArn": "Arn",
+        "certificateHashes": "CertificateHashes"
+      }
+    },
+    "GetSigningPlatformRequest": {
+      "type": "structure",
+      "required": [
+        "platformId"
+      ],
+      "members": {
+        "platformId": "PlatformId"
+      }
+    },
+    "GetSigningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileName"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "profileOwner": "AccountId"
+      }
+    },
+    "HashAlgorithm": {
+      "type": "string",
+      "enum": [
+        "SHA1",
+        "SHA256"
+      ]
+    },
+    "ImageFormat": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "JSONEmbedded",
+        "JSONDetached"
+      ]
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "JobId": {
+      "type": "string"
+    },
+    "Key": {
+      "type": "string"
+    },
+    "ListProfilePermissionsRequest": {
+      "type": "structure",
+      "required": [
+        "profileName"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "nextToken": "String"
+      }
+    },
+    "ListSigningJobsRequest": {
+      "type": "structure",
+      "members": {
+        "status": "SigningStatus",
+        "platformId": "PlatformId",
+        "requestedBy": "RequestedBy",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "isRevoked": "bool",
+        "signatureExpiresBefore": "Timestamp",
+        "signatureExpiresAfter": "Timestamp",
+        "jobInvoker": "AccountId"
+      }
+    },
+    "ListSigningPlatformsRequest": {
+      "type": "structure",
+      "members": {
+        "category": "String",
+        "partner": "String",
+        "target": "String",
+        "maxResults": "MaxResults",
+        "nextToken": "String"
+      }
+    },
+    "ListSigningProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "includeCanceled": "bool",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "platformId": "PlatformId",
+        "statuses": "Statuses"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "Payload": {
+      "type": "blob",
+      "min": 1,
+      "max": 4096
+    },
+    "PlatformId": {
+      "type": "string"
+    },
+    "Prefix": {
+      "type": "string"
+    },
+    "ProfileName": {
+      "type": "string",
+      "min": 2,
+      "max": 64,
+      "pattern": "^[a-zA-Z0-9_]{2,}"
+    },
+    "ProfileVersion": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "^[a-zA-Z0-9]{10}$"
+    },
+    "PutSigningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileName",
+        "platformId"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "signingMaterial": "SigningMaterial",
+        "signatureValidityPeriod": "SignatureValidityPeriod",
+        "platformId": "PlatformId",
+        "overrides": "SigningPlatformOverrides",
+        "signingParameters": "SigningParameters",
+        "tags": "TagMap"
+      }
+    },
+    "RemoveProfilePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "revisionId",
+        "profileName",
+        "statementId"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "revisionId": "String",
+        "statementId": "String"
+      }
+    },
+    "RequestedBy": {
+      "type": "string"
+    },
+    "RevocationReasonString": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "RevokeSignatureRequest": {
+      "type": "structure",
+      "required": [
+        "reason",
+        "jobId"
+      ],
+      "members": {
+        "jobId": "JobId",
+        "jobOwner": "AccountId",
+        "reason": "RevocationReasonString"
+      }
+    },
+    "RevokeSigningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileVersion",
+        "reason",
+        "effectiveTime",
+        "profileName"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "profileVersion": "ProfileVersion",
+        "reason": "RevocationReasonString",
+        "effectiveTime": "Timestamp"
+      }
+    },
+    "S3Destination": {
+      "type": "structure",
+      "members": {
+        "bucketName": "BucketName",
+        "prefix": "Prefix"
+      }
+    },
+    "S3Source": {
+      "type": "structure",
+      "required": [
+        "bucketName",
+        "key",
+        "version"
+      ],
+      "members": {
+        "bucketName": "BucketName",
+        "key": "Key",
+        "version": "Version"
+      }
+    },
+    "SignPayloadRequest": {
+      "type": "structure",
+      "required": [
+        "profileName",
+        "payload",
+        "payloadFormat"
+      ],
+      "members": {
+        "profileName": "ProfileName",
+        "profileOwner": "AccountId",
+        "payload": "Payload",
+        "payloadFormat": "String"
+      }
+    },
+    "SignatureValidityPeriod": {
+      "type": "structure",
+      "members": {
+        "value": "Integer",
+        "type": "ValidityType"
+      }
+    },
+    "SigningConfigurationOverrides": {
+      "type": "structure",
+      "members": {
+        "encryptionAlgorithm": "EncryptionAlgorithm",
+        "hashAlgorithm": "HashAlgorithm"
+      }
+    },
+    "SigningMaterial": {
+      "type": "structure",
+      "required": [
+        "certificateArn"
+      ],
+      "members": {
+        "certificateArn": "CertificateArn"
+      }
+    },
+    "SigningParameterKey": {
+      "type": "string"
+    },
+    "SigningParameterValue": {
+      "type": "string"
+    },
+    "SigningParameters": {
+      "type": "map",
+      "key": "SigningParameterKey",
+      "value": "SigningParameterValue"
+    },
+    "SigningPlatformOverrides": {
+      "type": "structure",
+      "members": {
+        "signingConfiguration": "SigningConfigurationOverrides",
+        "signingImageFormat": "ImageFormat"
+      }
+    },
+    "SigningProfileStatus": {
+      "type": "string",
+      "enum": [
+        "Active",
+        "Canceled",
+        "Revoked"
+      ]
+    },
+    "SigningStatus": {
+      "type": "string",
+      "enum": [
+        "InProgress",
+        "Failed",
+        "Succeeded"
+      ]
+    },
+    "Source": {
+      "type": "structure",
+      "members": {
+        "s3": "S3Source"
+      }
+    },
+    "StartSigningJobRequest": {
+      "type": "structure",
+      "required": [
+        "source",
+        "destination",
+        "profileName",
+        "clientRequestToken"
+      ],
+      "members": {
+        "source": "Source",
+        "destination": "Destination",
+        "profileName": "ProfileName",
+        "clientRequestToken": "ClientRequestToken",
+        "profileOwner": "AccountId"
+      }
+    },
+    "Statuses": {
+      "type": "list",
+      "member": "SigningProfileStatus"
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z+-=._:/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "ValidityType": {
+      "type": "string",
+      "enum": [
+        "DAYS",
+        "MONTHS",
+        "YEARS"
+      ]
+    },
+    "Version": {
+      "type": "string"
+    },
+    "bool": {
+      "type": "boolean"
+    }
+  }
+}

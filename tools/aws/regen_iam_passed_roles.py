@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "datasync", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "ssm-contacts", "ssm-incidents", "schemas", "securitylake", "shield", "signer", "sdb", "social-messaging", "synthetics", "vpc-lattice", "xray", "application-signals", "frauddetector", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -90,7 +90,18 @@ NAMESPACES = (
 # Namespaces Floci serves whose operations list iam:PassRole but are not read here yet, each with
 # why. `PassedRolesCoverageTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
+    "codeconnections": "not read yet: its JSON operations name connections, hosts and repository links by ARN or ID",
+    "chatbot": "REST routes no rule maps yet: channel configurations pass IamRoleArn",
+    "backup-search": "REST routes no rule maps yet: StartSearchResultExportJob passes RoleArn",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
+    "wafv2": "not read yet: AWS lists iam:PassRole on CreateWebACL and UpdateWebACL, but no member of "
+             "botocore's model of their requests names a role",
+    "aiops": "REST routes no rule maps yet",
+    "amplify": "REST routes no rule maps yet",
+    "appflow": "REST routes no rule maps yet",
+    "apprunner": "not read yet: CreateService and UpdateService pass AccessRoleArn and InstanceRoleArn",
+    "comprehendmedical": "not read yet: its Start*Job operations pass DataAccessRoleArn; a later batch",
+    "geo": "REST routes no rule maps yet",
     "apigateway": "authorized by HTTP method, so no request is checked as one of these operations",
     "access-analyzer": "REST routes no rule maps yet",
     "airflow": "REST routes no rule maps yet",
@@ -189,6 +200,8 @@ BY_HAND = {
     "events:PutRule": "the rule's role",
     "events:PutTargets": "each target's role",
     "iam:AddRoleToInstanceProfile": "the role it adds, on the ARN IAM holds it under",
+    "imagebuilder:CreateInfrastructureConfiguration": "the roles of the instance profile it names",
+    "imagebuilder:UpdateInfrastructureConfiguration": "the roles of the instance profile it names",
     "lambda:CreateFunction": "the execution role",
     "lambda:CreateMicrovmImage": "the build role",
     "lambda:CreateNetworkConnector": "the operator role",
@@ -248,12 +261,32 @@ BY_HAND.update({
 NO_ROLE_MEMBER = "no member of the request names a role"
 RUNBOOK_PARAMETER = "the role is a parameter of the runbook it runs, not a member of the request"
 XML_BODY = "the request body is XML, which PassedRoles does not read"
+URI_LABEL = "the role is a label of the request URI, which PassedRoles does not read"
 
 # Operations whose request names no role this file can read.
 NOT_READ = {
+    "dms:CreateReplicationTask": NO_ROLE_MEMBER,
+    "dms:ModifyReplicationTask": NO_ROLE_MEMBER,
+    "logs:StartQuery": NO_ROLE_MEMBER,
+    "events:CreateEventSource": "botocore's model has no such operation",
+    "events:UpdateEventSource": "botocore's model has no such operation",
+    "glue:CreateDataQualityEvaluationConfig": "botocore's model has no such operation",
+    "glue:UpdateDataQualityEvaluationConfig": "botocore's model has no such operation",
+    "kinesisanalytics:ExportSnapshot": "botocore's model has no such operation",
+    "kinesisanalytics:ImportSnapshot": "botocore's model has no such operation",
+    "observabilityadmin:CreateConnector": "botocore's model has no such operation",
+    "sagemaker:CreateGlobalInferenceGateway": "botocore's model has no such operation",
+    "secretsmanager:AssociateCrossAccountReplica": "botocore's model has no such operation",
+    "ssm:RegisterDefaultHostManagementConfiguration": "botocore's model has no such operation",
+    "omics:CreateConfiguration": NO_ROLE_MEMBER,
+    "observabilityadmin:CreateTelemetryPipeline": "the role is the source's aws.sts_role_arn inside the YAML "
+                                                   "configuration body",
+    "observabilityadmin:UpdateTelemetryPipeline": "the role is the source's aws.sts_role_arn inside the YAML "
+                                                   "configuration body",
     "config:PutConformancePack": NO_ROLE_MEMBER,
     "config:PutOrganizationConformancePack": NO_ROLE_MEMBER,
     "config:PutRemediationConfigurations": RUNBOOK_PARAMETER,
+    "datazone:AssociateEnvironmentRole": URI_LABEL,
     "dms:CreateInstanceProfile": NO_ROLE_MEMBER,
     "dms:ModifyInstanceProfile": NO_ROLE_MEMBER,
     "ec2:RequestSpotFleet": "the request names its roles in EC2's own protocol, one of them as an instance profile",
@@ -266,16 +299,20 @@ NOT_READ = {
                                    "to three services without saying which goes where",
     "elasticmapreduce:UpdateStudio": NO_ROLE_MEMBER,
     "glue:GetJob": NO_ROLE_MEMBER,
+    "iotsitewise:CreateAssetModelCompositeModel": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS "
+                                                  "attribute, a JSON document",
+    "iotsitewise:CreateGateway": NO_ROLE_MEMBER,
+    "iotsitewise:UpdateAssetModelCompositeModel": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS "
+                                                  "attribute, a JSON document",
     "glue:GetJobs": NO_ROLE_MEMBER,
     "lambda:AddEventSource": "botocore's model has no such operation",
     "logs:CreateImportTask": "the reference passes the role to cloudtrail or logs and nothing says which",
     "rds:CreateBlueGreenDeployment": NO_ROLE_MEMBER,
+    "rolesanywhere:EnableProfile": "the roles are the profile's, named when it was created or updated",
     "s3:CreateAccessGrantsLocation": XML_BODY,
     "s3:PutBucketReplication": XML_BODY,
     "redshift:ModifyLakehouseConfiguration": NO_ROLE_MEMBER,
     "redshift-serverless:UpdateLakehouseConfiguration": NO_ROLE_MEMBER,
-    "sagemaker:CreateTrainingSession": "the reference passes the role to sagemaker or training-session.sagemaker "
-                                       "and nothing says which",
     "sagemaker:CreateTransformJob": NO_ROLE_MEMBER,
     "sagemaker:ImportHubContent": NO_ROLE_MEMBER,
     "ssm:CreateDocument": NO_ROLE_MEMBER,
@@ -380,6 +417,19 @@ EXTRA_MEMBERS = {
 ECS_INFRASTRUCTURE = "ecs"
 ECS_TASKS = "ecs-tasks"
 MEMBER_SERVICES = {
+    # Security Lake: S3 assumes the replication role to copy objects between Regions, and the metastore manager
+    # role is the one its partition-updating Lambda runs as.
+    "securitylake:CreateDataLake": {
+        "configurations[].replicationConfiguration.roleArn": "s3",
+        "metaStoreManagerRoleArn": "lambda",
+    },
+    "securitylake:UpdateDataLake": {
+        "configurations[].replicationConfiguration.roleArn": "s3",
+    },
+    # A dataset integration's role is assumed by CloudWatch Logs to read the integrated data.
+    "observabilityadmin:*": {
+        "RoleArn": "logs",
+    },
     # "The Amazon Resource Name (ARN) for CodePipeline to use", and "The pipeline role ARN associated
     # with the rule".
     "codepipeline:*": {
@@ -395,9 +445,6 @@ MEMBER_SERVICES = {
         "taskRoleArn": ECS_TASKS,
         "infrastructureRoleArn": ECS_INFRASTRUCTURE,
     },
-    # "Amazon EMR uses this role" for the session. The reference also lists
-    # managed-compute.elasticmapreduce, but the request cannot say which compute it runs on.
-    "elasticmapreduce:StartSession": {"ExecutionRoleArn": "elasticmapreduce"},
     # rds-preview is the principal of RDS's preview environment; PassedRoles' RDS cases pass to rds.
     "rds:*": {"*": "rds"},
 }

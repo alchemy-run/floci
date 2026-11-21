@@ -1,5 +1,7 @@
 package io.floci.aws.core.common.docker;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -99,6 +101,26 @@ public final class ContainerReachableUrls {
                             + "/v1/apis/" + match.group(2) + "/graphql"));
         }
         return rewriteExecuteApiWssToPathStyle(rewriteLoopbackHosts(rewritten, port), port);
+    }
+
+    /**
+     * {@link #rewriteFunctionEnv(String, int)} over every {@code KEY=value} entry of a container's
+     * environment, for runners that build the list themselves (App Runner, Batch).
+     */
+    public static List<String> rewriteEnvEntries(List<String> env, int hostGatewayPort) {
+        List<String> rewritten = new ArrayList<>(env.size());
+        for (String entry : env) {
+            int equals = entry.indexOf('=');
+            rewritten.add(equals < 0 ? entry
+                    : entry.substring(0, equals + 1)
+                            + rewriteFunctionEnv(entry.substring(equals + 1), hostGatewayPort));
+        }
+        return rewritten;
+    }
+
+    /** The published gateway port, or the default where none is configured. */
+    public static int gatewayPort(int configuredPort) {
+        return configuredPort > 0 ? configuredPort : DEFAULT_HOST_GATEWAY_PORT;
     }
 
     /**

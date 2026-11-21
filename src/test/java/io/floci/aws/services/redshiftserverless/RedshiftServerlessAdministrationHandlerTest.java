@@ -11,11 +11,13 @@ import io.floci.aws.services.acm.AcmService;
 import io.floci.aws.services.acm.model.Certificate;
 import io.floci.aws.services.redshift.RedshiftIamDbUserResolver;
 import io.floci.aws.services.redshift.model.Endpoint;
+import io.floci.aws.services.redshiftserverless.model.Workgroup;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -24,8 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -51,7 +55,8 @@ class RedshiftServerlessAdministrationHandlerTest {
     void setUp() {
         StorageFactory storageFactory = mock(StorageFactory.class);
         for (String file : List.of("namespaces", "workgroups", "snapshots", "usagelimits", "resourcepolicies",
-                "endpointaccess", "customdomains", "snapshotcopyconfigurations", "scheduledactions")) {
+                "endpointaccess", "customdomains", "snapshotcopyconfigurations", "scheduledactions",
+                "recovery-points", "table-restores")) {
             when(storageFactory.create(eq("redshiftserverless"), eq("redshiftserverless-" + file + ".json"),
                 any(TypeReference.class))).thenReturn((AccountAwareStorageBackend)
                 AccountAwareStorageBackend.inMemory(ACCOUNT_ID));
@@ -63,11 +68,11 @@ class RedshiftServerlessAdministrationHandlerTest {
                         + invocation.getArgument(1, String.class) + ":" + ACCOUNT_ID + ":"
                         + invocation.getArgument(2, String.class));
         RedshiftServerlessEndpoints endpoints = mock(RedshiftServerlessEndpoints.class);
-        when(endpoints.allocate()).thenReturn(new Endpoint("localhost", 7100));
+        doAnswer(invocation -> { Workgroup w = invocation.getArgument(0); w.setProxyPort(7100); w.setEndpoint(new Endpoint("localhost", 7100)); return null; }).when(endpoints).allocate(any(), any(), any());
         RedshiftServerlessRuntime runtime = mock(RedshiftServerlessRuntime.class);
         when(runtime.generatePassword()).thenReturn("Generated123");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.storage().persistentPath()).thenReturn(System.getProperty("java.io.tmpdir"));
@@ -95,7 +100,7 @@ class RedshiftServerlessAdministrationHandlerTest {
                         new RedshiftServerlessSnapshotCopyService(storageFactory, regionResolver, serverlessService),
                         new RedshiftServerlessScheduledActionService(storageFactory, serverlessService,
                                 mock(RedshiftServerlessScheduledActionAuthorizer.class), regionResolver)),
-                customDomains);
+                customDomains, new RedshiftServerlessRecoveryService(storageFactory, serverlessService, Duration.ofMinutes(30)));
     }
 
     @Test

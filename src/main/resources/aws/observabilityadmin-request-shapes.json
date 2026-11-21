@@ -1,0 +1,1162 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_observabilityadmin_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateCentralizationRuleForOrganization": "CreateCentralizationRuleForOrganizationInput",
+    "CreateDatasetIntegration": "CreateDatasetIntegrationInput",
+    "CreateS3TableIntegration": "CreateS3TableIntegrationInput",
+    "CreateTelemetryPipeline": "CreateTelemetryPipelineInput",
+    "CreateTelemetryRule": "CreateTelemetryRuleInput",
+    "CreateTelemetryRuleForOrganization": "CreateTelemetryRuleForOrganizationInput",
+    "DeleteCentralizationRuleForOrganization": "DeleteCentralizationRuleForOrganizationInput",
+    "DeleteDatasetIntegration": "DeleteDatasetIntegrationInput",
+    "DeleteS3TableIntegration": "DeleteS3TableIntegrationInput",
+    "DeleteTelemetryPipeline": "DeleteTelemetryPipelineInput",
+    "DeleteTelemetryRule": "DeleteTelemetryRuleInput",
+    "DeleteTelemetryRuleForOrganization": "DeleteTelemetryRuleForOrganizationInput",
+    "GetCentralizationRuleForOrganization": "GetCentralizationRuleForOrganizationInput",
+    "GetDatasetIntegration": "GetDatasetIntegrationInput",
+    "GetS3TableIntegration": "GetS3TableIntegrationInput",
+    "GetTelemetryPipeline": "GetTelemetryPipelineInput",
+    "GetTelemetryRule": "GetTelemetryRuleInput",
+    "GetTelemetryRuleForOrganization": "GetTelemetryRuleForOrganizationInput",
+    "ListCentralizationRulesForOrganization": "ListCentralizationRulesForOrganizationInput",
+    "ListDatasetIntegrations": "ListDatasetIntegrationsInput",
+    "ListResourceTelemetry": "ListResourceTelemetryInput",
+    "ListResourceTelemetryForOrganization": "ListResourceTelemetryForOrganizationInput",
+    "ListS3TableIntegrations": "ListS3TableIntegrationsInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "ListTelemetryPipelines": "ListTelemetryPipelinesInput",
+    "ListTelemetryRules": "ListTelemetryRulesInput",
+    "ListTelemetryRulesForOrganization": "ListTelemetryRulesForOrganizationInput",
+    "StartTelemetryEvaluation": "StartTelemetryEvaluationInput",
+    "StartTelemetryEvaluationForOrganization": "StartTelemetryEvaluationForOrganizationInput",
+    "TagResource": "TagResourceInput",
+    "TestTelemetryPipeline": "TestTelemetryPipelineInput",
+    "UntagResource": "UntagResourceInput",
+    "UpdateCentralizationRuleForOrganization": "UpdateCentralizationRuleForOrganizationInput",
+    "UpdateDatasetIntegration": "UpdateDatasetIntegrationInput",
+    "UpdateTelemetryPipeline": "UpdateTelemetryPipelineInput",
+    "UpdateTelemetryRule": "UpdateTelemetryRuleInput",
+    "UpdateTelemetryRuleForOrganization": "UpdateTelemetryRuleForOrganizationInput",
+    "ValidateTelemetryPipelineConfiguration": "ValidateTelemetryPipelineConfigurationInput"
+  },
+  "shapes": {
+    "AccountIdentifier": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "[0-9]{12}"
+    },
+    "AccountIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AccountIdentifier"
+    },
+    "Action": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "BLOCK",
+        "COUNT",
+        "CAPTCHA",
+        "CHALLENGE",
+        "EXCLUDED_AS_COUNT"
+      ]
+    },
+    "ActionCondition": {
+      "type": "structure",
+      "members": {
+        "Action": "Action"
+      }
+    },
+    "AdvancedEventSelector": {
+      "type": "structure",
+      "required": [
+        "FieldSelectors"
+      ],
+      "members": {
+        "Name": "String",
+        "FieldSelectors": "FieldSelectors"
+      }
+    },
+    "AdvancedEventSelectors": {
+      "type": "list",
+      "member": "AdvancedEventSelector"
+    },
+    "AdvancedFieldSelector": {
+      "type": "structure",
+      "required": [
+        "Field"
+      ],
+      "members": {
+        "Field": "String",
+        "Equals": "StringList",
+        "StartsWith": "StringList",
+        "EndsWith": "StringList",
+        "NotEquals": "StringList",
+        "NotStartsWith": "StringList",
+        "NotEndsWith": "StringList"
+      }
+    },
+    "AllRegions": {
+      "type": "boolean"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CentralizationRule": {
+      "type": "structure",
+      "required": [
+        "Source",
+        "Destination"
+      ],
+      "members": {
+        "Source": "CentralizationRuleSource",
+        "Destination": "CentralizationRuleDestination"
+      }
+    },
+    "CentralizationRuleDestination": {
+      "type": "structure",
+      "required": [
+        "Region"
+      ],
+      "members": {
+        "Region": "Region",
+        "Account": "AccountIdentifier",
+        "DestinationLogsConfiguration": "DestinationLogsConfiguration",
+        "DestinationMetricsConfiguration": "DestinationMetricsConfiguration"
+      }
+    },
+    "CentralizationRuleSource": {
+      "type": "structure",
+      "required": [
+        "Regions"
+      ],
+      "members": {
+        "Regions": "Regions",
+        "Scope": "SourceFilterString",
+        "SourceLogsConfiguration": "SourceLogsConfiguration",
+        "SourceMetricsConfiguration": "SourceMetricsConfiguration",
+        "SourceContextGraphConfiguration": "SourceContextGraphConfiguration"
+      }
+    },
+    "CloudtrailParameters": {
+      "type": "structure",
+      "required": [
+        "AdvancedEventSelectors"
+      ],
+      "members": {
+        "AdvancedEventSelectors": "AdvancedEventSelectors"
+      }
+    },
+    "Condition": {
+      "type": "structure",
+      "members": {
+        "ActionCondition": "ActionCondition",
+        "LabelNameCondition": "LabelNameCondition"
+      }
+    },
+    "Conditions": {
+      "type": "list",
+      "min": 1,
+      "member": "Condition"
+    },
+    "CreateCentralizationRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleName",
+        "Rule"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "Rule": "CentralizationRule",
+        "Tags": "TagMapInput"
+      }
+    },
+    "CreateDatasetIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "RoleArn"
+      ],
+      "members": {
+        "RoleArn": "ResourceArn",
+        "Tags": "TagMapInput"
+      }
+    },
+    "CreateS3TableIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Encryption",
+        "RoleArn"
+      ],
+      "members": {
+        "Encryption": "Encryption",
+        "RoleArn": "ResourceArn",
+        "Tags": "TagMapInput"
+      }
+    },
+    "CreateTelemetryPipelineInput": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Configuration"
+      ],
+      "members": {
+        "Name": "TelemetryPipelineName",
+        "Configuration": "TelemetryPipelineConfiguration",
+        "Tags": "TagMapInput"
+      }
+    },
+    "CreateTelemetryRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleName",
+        "Rule"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "Rule": "TelemetryRule",
+        "Tags": "TagMapInput"
+      }
+    },
+    "CreateTelemetryRuleInput": {
+      "type": "structure",
+      "required": [
+        "RuleName",
+        "Rule"
+      ],
+      "members": {
+        "RuleName": "RuleName",
+        "Rule": "TelemetryRule",
+        "Tags": "TagMapInput"
+      }
+    },
+    "DataSourceFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "DeleteCentralizationRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "DeleteDatasetIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "ResourceArn"
+      }
+    },
+    "DeleteS3TableIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "ResourceArn"
+      }
+    },
+    "DeleteTelemetryPipelineInput": {
+      "type": "structure",
+      "required": [
+        "PipelineIdentifier"
+      ],
+      "members": {
+        "PipelineIdentifier": "TelemetryPipelineIdentifier"
+      }
+    },
+    "DeleteTelemetryRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "DeleteTelemetryRuleInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "DeletionProtection": {
+      "type": "string",
+      "enum": [
+        "ENABLED"
+      ]
+    },
+    "DestinationLogsConfiguration": {
+      "type": "structure",
+      "members": {
+        "LogsEncryptionConfiguration": "LogsEncryptionConfiguration",
+        "BackupConfiguration": "LogsBackupConfiguration",
+        "LogGroupNameConfiguration": "LogGroupNameConfiguration",
+        "TagPropagationConfiguration": "TagPropagationConfiguration",
+        "LogGroupDeletionProtection": "DeletionProtection"
+      }
+    },
+    "DestinationMetricsConfiguration": {
+      "type": "structure",
+      "members": {
+        "BackupConfiguration": "MetricsBackupConfiguration"
+      }
+    },
+    "DestinationType": {
+      "type": "string",
+      "enum": [
+        "cloud-watch-logs"
+      ]
+    },
+    "ELBLoadBalancerLoggingParameters": {
+      "type": "structure",
+      "members": {
+        "OutputFormat": "OutputFormat",
+        "FieldDelimiter": "String"
+      }
+    },
+    "EncryptedLogGroupStrategy": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "SKIP"
+      ]
+    },
+    "Encryption": {
+      "type": "structure",
+      "required": [
+        "SseAlgorithm"
+      ],
+      "members": {
+        "SseAlgorithm": "SSEAlgorithm",
+        "KmsKeyArn": "ResourceArn"
+      }
+    },
+    "EncryptionConflictResolutionStrategy": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "SKIP"
+      ]
+    },
+    "EncryptionScope": {
+      "type": "string",
+      "enum": [
+        "ENCRYPTED_SOURCE_ONLY",
+        "NEW_DESTINATION_LOG_GROUPS"
+      ]
+    },
+    "EncryptionStrategy": {
+      "type": "string",
+      "enum": [
+        "CUSTOMER_MANAGED",
+        "AWS_OWNED"
+      ]
+    },
+    "FieldSelectors": {
+      "type": "list",
+      "member": "AdvancedFieldSelector"
+    },
+    "FieldToMatch": {
+      "type": "structure",
+      "members": {
+        "SingleHeader": "SingleHeader",
+        "UriPath": "String",
+        "QueryString": "String",
+        "Method": "String"
+      }
+    },
+    "Filter": {
+      "type": "structure",
+      "members": {
+        "Behavior": "FilterBehavior",
+        "Requirement": "FilterRequirement",
+        "Conditions": "Conditions"
+      }
+    },
+    "FilterBehavior": {
+      "type": "string",
+      "enum": [
+        "KEEP",
+        "DROP"
+      ]
+    },
+    "FilterRequirement": {
+      "type": "string",
+      "enum": [
+        "MEETS_ALL",
+        "MEETS_ANY"
+      ]
+    },
+    "Filters": {
+      "type": "list",
+      "min": 1,
+      "member": "Filter"
+    },
+    "GetCentralizationRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "GetDatasetIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "ResourceArn"
+      }
+    },
+    "GetS3TableIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "ResourceArn"
+      }
+    },
+    "GetTelemetryPipelineInput": {
+      "type": "structure",
+      "required": [
+        "PipelineIdentifier"
+      ],
+      "members": {
+        "PipelineIdentifier": "TelemetryPipelineIdentifier"
+      }
+    },
+    "GetTelemetryRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "GetTelemetryRuleInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier"
+      }
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws[a-zA-Z-]*:iam::\\d{12}:role/[\\w+=,.@/-]+"
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/(mrk-)?[a-f0-9-]+"
+    },
+    "LabelNameCondition": {
+      "type": "structure",
+      "members": {
+        "LabelName": "LabelNameConditionLabelNameString"
+      }
+    },
+    "LabelNameConditionLabelNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[0-9A-Za-z_\\-:]+"
+    },
+    "ListCentralizationRulesForOrganizationInput": {
+      "type": "structure",
+      "members": {
+        "RuleNamePrefix": "ListCentralizationRulesForOrganizationInputRuleNamePrefixString",
+        "AllRegions": "Boolean",
+        "MaxResults": "ListCentralizationRulesForOrganizationMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListCentralizationRulesForOrganizationInputRuleNamePrefixString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "ListCentralizationRulesForOrganizationMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListDatasetIntegrationsInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListDatasetIntegrationsMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListDatasetIntegrationsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListResourceTelemetryForOrganizationInput": {
+      "type": "structure",
+      "members": {
+        "AccountIdentifiers": "AccountIdentifiers",
+        "ResourceIdentifierPrefix": "ResourceIdentifierPrefix",
+        "ResourceTypes": "ResourceTypes",
+        "TelemetryConfigurationState": "TelemetryConfigurationState",
+        "ResourceTags": "TagMapInput",
+        "MaxResults": "ListResourceTelemetryForOrganizationMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListResourceTelemetryForOrganizationMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListResourceTelemetryInput": {
+      "type": "structure",
+      "members": {
+        "ResourceIdentifierPrefix": "ResourceIdentifierPrefix",
+        "ResourceTypes": "ResourceTypes",
+        "TelemetryConfigurationState": "TelemetryConfigurationState",
+        "ResourceTags": "TagMapInput",
+        "MaxResults": "ListResourceTelemetryMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListResourceTelemetryMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListS3TableIntegrationsInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListS3TableIntegrationsMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListS3TableIntegrationsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn"
+      }
+    },
+    "ListTelemetryPipelinesInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListTelemetryPipelinesMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTelemetryPipelinesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTelemetryRulesForOrganizationInput": {
+      "type": "structure",
+      "members": {
+        "RuleNamePrefix": "String",
+        "SourceAccountIds": "AccountIdentifiers",
+        "SourceOrganizationUnitIds": "OrganizationUnitIdentifiers",
+        "MaxResults": "ListTelemetryRulesForOrganizationMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTelemetryRulesForOrganizationMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTelemetryRulesInput": {
+      "type": "structure",
+      "members": {
+        "RuleNamePrefix": "String",
+        "MaxResults": "ListTelemetryRulesMaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTelemetryRulesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "LogDeliveryParameters": {
+      "type": "structure",
+      "members": {
+        "LogTypes": "LogTypes"
+      }
+    },
+    "LogGroupNameConfiguration": {
+      "type": "structure",
+      "required": [
+        "LogGroupNamePattern"
+      ],
+      "members": {
+        "LogGroupNamePattern": "LogGroupNamePattern"
+      }
+    },
+    "LogGroupNamePattern": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "(?:[\\._\\-/#A-Za-z0-9]+|\\$\\{[A-Za-z]+(?:\\.[A-Za-z]+){1,2}\\})+"
+    },
+    "LogType": {
+      "type": "string",
+      "enum": [
+        "APPLICATION_LOGS",
+        "USAGE_LOGS",
+        "SECURITY_FINDING_LOGS",
+        "ACCESS_LOGS",
+        "CONNECTION_LOGS",
+        "S3_SERVER_ACCESS_LOGS",
+        "ALB_ACCESS_LOGS",
+        "ALB_CONNECTION_LOGS",
+        "ALB_HEALTH_CHECK_LOGS"
+      ]
+    },
+    "LogTypes": {
+      "type": "list",
+      "member": "LogType"
+    },
+    "LoggingFilter": {
+      "type": "structure",
+      "members": {
+        "Filters": "Filters",
+        "DefaultBehavior": "FilterBehavior"
+      }
+    },
+    "LogsBackupConfiguration": {
+      "type": "structure",
+      "required": [
+        "Region"
+      ],
+      "members": {
+        "Region": "Region",
+        "KmsKeyArn": "ResourceArn"
+      }
+    },
+    "LogsEncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "EncryptionStrategy"
+      ],
+      "members": {
+        "EncryptionStrategy": "EncryptionStrategy",
+        "KmsKeyArn": "ResourceArn",
+        "EncryptionConflictResolutionStrategy": "EncryptionConflictResolutionStrategy",
+        "EncryptionScope": "EncryptionScope"
+      }
+    },
+    "LogsFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "MetricsBackupConfiguration": {
+      "type": "structure",
+      "required": [
+        "Region"
+      ],
+      "members": {
+        "Region": "Region"
+      }
+    },
+    "MetricsFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "MskEnhancedMonitoringLevel": {
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "PER_BROKER",
+        "PER_TOPIC_PER_BROKER",
+        "PER_TOPIC_PER_PARTITION"
+      ]
+    },
+    "MskMonitoringParameters": {
+      "type": "structure",
+      "members": {
+        "EnhancedMonitoring": "MskEnhancedMonitoringLevel"
+      }
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "OrganizationUnitIdentifier": {
+      "type": "string",
+      "pattern": "ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}"
+    },
+    "OrganizationUnitIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "member": "OrganizationUnitIdentifier"
+    },
+    "OutputFormat": {
+      "type": "string",
+      "enum": [
+        "plain",
+        "json"
+      ]
+    },
+    "Record": {
+      "type": "structure",
+      "members": {
+        "Data": "String",
+        "Type": "RecordFormat"
+      }
+    },
+    "RecordFormat": {
+      "type": "string",
+      "enum": [
+        "STRING",
+        "JSON"
+      ]
+    },
+    "Records": {
+      "type": "list",
+      "member": "Record"
+    },
+    "RedactedFields": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "FieldToMatch"
+    },
+    "Region": {
+      "type": "string",
+      "min": 1
+    },
+    "Regions": {
+      "type": "list",
+      "min": 1,
+      "member": "Region"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws([a-z0-9\\-]+)?:([a-zA-Z0-9\\-]+):([a-z0-9\\-]+)?:([0-9]{12})?:(.+)"
+    },
+    "ResourceIdentifierPrefix": {
+      "type": "string",
+      "min": 3,
+      "max": 768
+    },
+    "ResourceType": {
+      "type": "string",
+      "enum": [
+        "AWS::EC2::Instance",
+        "AWS::EC2::VPC",
+        "AWS::Lambda::Function",
+        "AWS::CloudTrail",
+        "AWS::EKS::Cluster",
+        "AWS::WAFv2::WebACL",
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        "AWS::Route53Resolver::ResolverEndpoint",
+        "AWS::BedrockAgentCore::Runtime",
+        "AWS::BedrockAgentCore::Browser",
+        "AWS::BedrockAgentCore::CodeInterpreter",
+        "AWS::BedrockAgentCore::Gateway",
+        "AWS::BedrockAgentCore::Memory",
+        "AWS::BedrockAgentCore::WorkloadIdentity",
+        "AWS::BedrockAgentCore::PaymentManager",
+        "AWS::SecurityHub::Hub",
+        "AWS::CloudFront::Distribution",
+        "AWS::SecurityHub::HubV2",
+        "AWS::CloudWatch::OTelEnrichment",
+        "AWS::MSK::Cluster",
+        "AWS::S3::Bucket",
+        "AWS::Bedrock::KnowledgeBase",
+        "AWS::XRay::TransactionSearchConfig"
+      ]
+    },
+    "ResourceTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "ResourceType"
+    },
+    "RetentionPeriodInDays": {
+      "type": "integer",
+      "min": 1,
+      "max": 3653
+    },
+    "RuleIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[0-9A-Za-z-_.#/]+"
+    },
+    "SSEAlgorithm": {
+      "type": "string",
+      "enum": [
+        "aws:kms",
+        "AES256"
+      ]
+    },
+    "SignalType": {
+      "type": "string",
+      "enum": [
+        "LOG",
+        "METRIC"
+      ]
+    },
+    "SingleHeader": {
+      "type": "structure",
+      "members": {
+        "Name": "SingleHeaderNameString"
+      }
+    },
+    "SingleHeaderNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "SourceContextGraphConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "SourceFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "SourceLogsConfiguration": {
+      "type": "structure",
+      "required": [
+        "EncryptedLogGroupStrategy"
+      ],
+      "members": {
+        "LogGroupSelectionCriteria": "LogsFilterString",
+        "DataSourceSelectionCriteria": "DataSourceFilterString",
+        "EncryptedLogGroupStrategy": "EncryptedLogGroupStrategy"
+      }
+    },
+    "SourceMetricsConfiguration": {
+      "type": "structure",
+      "members": {
+        "MetricsSelectionCriteria": "MetricsFilterString"
+      }
+    },
+    "StartTelemetryEvaluationForOrganizationInput": {
+      "type": "structure",
+      "members": {
+        "Regions": "Regions",
+        "AllRegions": "AllRegions"
+      }
+    },
+    "StartTelemetryEvaluationInput": {
+      "type": "structure",
+      "members": {
+        "Regions": "Regions",
+        "AllRegions": "AllRegions"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "TagConflictResolutionStrategy": {
+      "type": "string",
+      "enum": [
+        "IN_SYNC",
+        "ADD_ONLY",
+        "UPDATE_SYNC"
+      ]
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMapInput": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagPropagationConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationRoleArn"
+      ],
+      "members": {
+        "DestinationRoleArn": "IamRoleArn",
+        "TagConflictResolutionStrategy": "TagConflictResolutionStrategy"
+      }
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn",
+        "Tags": "TagMapInput"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TelemetryConfigurationState": {
+      "type": "map",
+      "key": "TelemetryType",
+      "value": "TelemetryState"
+    },
+    "TelemetryDestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "DestinationType": "DestinationType",
+        "DestinationPattern": "String",
+        "RetentionInDays": "RetentionPeriodInDays",
+        "VPCFlowLogParameters": "VPCFlowLogParameters",
+        "CloudtrailParameters": "CloudtrailParameters",
+        "ELBLoadBalancerLoggingParameters": "ELBLoadBalancerLoggingParameters",
+        "WAFLoggingParameters": "WAFLoggingParameters",
+        "LogDeliveryParameters": "LogDeliveryParameters",
+        "MskMonitoringParameters": "MskMonitoringParameters",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "TelemetryPipelineConfiguration": {
+      "type": "structure",
+      "required": [
+        "Body"
+      ],
+      "members": {
+        "Body": "TelemetryPipelineConfigurationBody"
+      }
+    },
+    "TelemetryPipelineConfigurationBody": {
+      "type": "string",
+      "min": 1,
+      "max": 24000
+    },
+    "TelemetryPipelineIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "TelemetryPipelineName": {
+      "type": "string",
+      "min": 3,
+      "max": 28,
+      "pattern": ".*[a-z][a-z0-9\\-]+.*"
+    },
+    "TelemetryRule": {
+      "type": "structure",
+      "required": [
+        "TelemetryType"
+      ],
+      "members": {
+        "ResourceType": "ResourceType",
+        "TelemetryType": "TelemetryType",
+        "TelemetrySourceTypes": "TelemetrySourceTypes",
+        "DestinationConfiguration": "TelemetryDestinationConfiguration",
+        "Scope": "String",
+        "SelectionCriteria": "String",
+        "AllowFieldUpdates": "Boolean",
+        "Regions": "Regions",
+        "AllRegions": "AllRegions"
+      }
+    },
+    "TelemetrySourceType": {
+      "type": "string",
+      "enum": [
+        "VPC_FLOW_LOGS",
+        "ROUTE53_RESOLVER_QUERY_LOGS",
+        "EKS_AUDIT_LOGS",
+        "EKS_AUTHENTICATOR_LOGS",
+        "EKS_CONTROLLER_MANAGER_LOGS",
+        "EKS_SCHEDULER_LOGS",
+        "EKS_API_LOGS"
+      ]
+    },
+    "TelemetrySourceTypes": {
+      "type": "list",
+      "member": "TelemetrySourceType"
+    },
+    "TelemetryState": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled",
+        "NotApplicable"
+      ]
+    },
+    "TelemetryType": {
+      "type": "string",
+      "enum": [
+        "Logs",
+        "Metrics",
+        "Traces",
+        "Insights"
+      ]
+    },
+    "TestTelemetryPipelineInput": {
+      "type": "structure",
+      "required": [
+        "Records",
+        "Configuration"
+      ],
+      "members": {
+        "Records": "Records",
+        "Configuration": "TelemetryPipelineConfiguration",
+        "SignalType": "SignalType"
+      }
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "ResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateCentralizationRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier",
+        "Rule"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier",
+        "Rule": "CentralizationRule"
+      }
+    },
+    "UpdateDatasetIntegrationInput": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "RoleArn"
+      ],
+      "members": {
+        "Arn": "ResourceArn",
+        "RoleArn": "ResourceArn"
+      }
+    },
+    "UpdateTelemetryPipelineInput": {
+      "type": "structure",
+      "required": [
+        "PipelineIdentifier",
+        "Configuration"
+      ],
+      "members": {
+        "PipelineIdentifier": "TelemetryPipelineIdentifier",
+        "Configuration": "TelemetryPipelineConfiguration"
+      }
+    },
+    "UpdateTelemetryRuleForOrganizationInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier",
+        "Rule"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier",
+        "Rule": "TelemetryRule"
+      }
+    },
+    "UpdateTelemetryRuleInput": {
+      "type": "structure",
+      "required": [
+        "RuleIdentifier",
+        "Rule"
+      ],
+      "members": {
+        "RuleIdentifier": "RuleIdentifier",
+        "Rule": "TelemetryRule"
+      }
+    },
+    "VPCFlowLogParameters": {
+      "type": "structure",
+      "members": {
+        "LogFormat": "String",
+        "TrafficType": "String",
+        "MaxAggregationInterval": "Integer"
+      }
+    },
+    "ValidateTelemetryPipelineConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "Configuration"
+      ],
+      "members": {
+        "Configuration": "TelemetryPipelineConfiguration"
+      }
+    },
+    "WAFLogType": {
+      "type": "string",
+      "enum": [
+        "WAF_LOGS"
+      ]
+    },
+    "WAFLoggingParameters": {
+      "type": "structure",
+      "members": {
+        "RedactedFields": "RedactedFields",
+        "LoggingFilter": "LoggingFilter",
+        "LogType": "WAFLogType"
+      }
+    }
+  }
+}

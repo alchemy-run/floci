@@ -15,7 +15,9 @@ import io.floci.aws.services.redshiftserverless.model.ConfigParameter;
 import io.floci.aws.services.redshiftserverless.model.CustomDomainAssociation;
 import io.floci.aws.services.redshiftserverless.model.Namespace;
 import io.floci.aws.services.redshiftserverless.model.PricePerformanceTarget;
+import io.floci.aws.services.redshiftserverless.model.RecoveryPoint;
 import io.floci.aws.services.redshiftserverless.model.RedshiftServerlessSnapshot;
+import io.floci.aws.services.redshiftserverless.model.TableRestoreStatus;
 import io.floci.aws.services.redshiftserverless.model.UsageLimit;
 import io.floci.aws.services.redshiftserverless.model.Workgroup;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -47,19 +49,22 @@ public class RedshiftServerlessJsonHandler {
     private final RedshiftServerlessUsageLimitService usageLimits;
     private final RedshiftServerlessAdminJsonHandler admin;
     private final RedshiftServerlessCustomDomainService customDomains;
+    private final RedshiftServerlessRecoveryService recovery;
 
     @Inject
     public RedshiftServerlessJsonHandler(RedshiftServerlessService service, ObjectMapper objectMapper,
                                          RedshiftIamDbUserResolver iamDbUserResolver,
                                          RedshiftServerlessUsageLimitService usageLimits,
                                          RedshiftServerlessAdminJsonHandler admin,
-                                         RedshiftServerlessCustomDomainService customDomains) {
+                                         RedshiftServerlessCustomDomainService customDomains,
+                                         RedshiftServerlessRecoveryService recovery) {
         this.service = service;
         this.objectMapper = objectMapper;
         this.iamDbUserResolver = iamDbUserResolver;
         this.usageLimits = usageLimits;
         this.admin = admin;
         this.customDomains = customDomains;
+        this.recovery = recovery;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -86,6 +91,23 @@ public class RedshiftServerlessJsonHandler {
                 case "UpdateSnapshot" -> () -> handleUpdateSnapshot(request, region);
                 case "DeleteSnapshot" -> () -> handleDeleteSnapshot(request, region);
                 case "RestoreFromSnapshot" -> () -> handleRestoreFromSnapshot(request, region);
+                case "GetRecoveryPoint" -> () -> recoveryPointResponse(recovery.getRecoveryPoint(
+                        ServerlessSupport.text(request, "recoveryPointId"), region));
+                case "ListRecoveryPoints" -> () -> handleListRecoveryPoints(request, region);
+                case "RestoreFromRecoveryPoint" -> () -> handleRestoreFromRecoveryPoint(request, region);
+                case "ConvertRecoveryPointToSnapshot" -> () -> snapshotResponse(
+                        recovery.convertRecoveryPointToSnapshot(ServerlessSupport.text(request, "recoveryPointId"),
+                                ServerlessSupport.text(request, "snapshotName"),
+                                ServerlessSupport.integer(request, "retentionPeriod"),
+                                parseTagList(request.path("tags"), "tags"), region));
+                case "RestoreTableFromSnapshot" -> () -> tableRestoreResponse(recovery.restoreTableFromSnapshot(
+                        ServerlessSupport.text(request, "snapshotName"), tableRestoreRequest(request), region));
+                case "RestoreTableFromRecoveryPoint" -> () -> tableRestoreResponse(
+                        recovery.restoreTableFromRecoveryPoint(ServerlessSupport.text(request, "recoveryPointId"),
+                                tableRestoreRequest(request), region));
+                case "GetTableRestoreStatus" -> () -> tableRestoreResponse(recovery.getTableRestoreStatus(
+                        ServerlessSupport.text(request, "tableRestoreRequestId"), region));
+                case "ListTableRestoreStatus" -> () -> handleListTableRestoreStatus(request, region);
                 case "CreateUsageLimit" -> () -> handleCreateUsageLimit(request, region);
                 case "GetUsageLimit" -> () -> handleGetUsageLimit(request, region);
                 case "ListUsageLimits" -> () -> handleListUsageLimits(request, region);
@@ -291,6 +313,104 @@ public class RedshiftServerlessJsonHandler {
         response.put("ownerAccount", result.snapshot().getOwnerAccount());
         response.put("snapshotName", result.snapshot().getSnapshotName());
         return Response.ok(response).build();
+    }
+
+    private Response handleListRecoveryPoints(JsonNode request, String region) {
+        PaginatedResult<RecoveryPoint> page = recovery.listRecoveryPoints(
+                ServerlessSupport.text(request, "namespaceName"), ServerlessSupport.text(request, "namespaceArn"),
+                AwsJsonTimestamp.epochSeconds(request, "startTime", "ValidationException"),
+                AwsJsonTimestamp.epochSeconds(request, "endTime", "ValidationException"), region,
+                ServerlessSupport.maxResults(request), ServerlessSupport.text(request, "nextToken"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode items = response.putArray("recoveryPoints");
+        page.items().forEach(point -> items.add(recoveryPointNode(point)));
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRestoreFromRecoveryPoint(JsonNode request, String region) {
+        String recoveryPointId = ServerlessSupport.text(request, "recoveryPointId");
+        Namespace namespace = recovery.restoreFromRecoveryPoint(recoveryPointId,
+                ServerlessSupport.text(request, "namespaceName"), ServerlessSupport.text(request, "workgroupName"),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("recoveryPointId", recoveryPointId);
+        response.set("namespace", namespaceNode(namespace));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListTableRestoreStatus(JsonNode request, String region) {
+        PaginatedResult<TableRestoreStatus> page = recovery.listTableRestoreStatus(
+                ServerlessSupport.text(request, "namespaceName"), ServerlessSupport.text(request, "workgroupName"),
+                region, ServerlessSupport.maxResults(request), ServerlessSupport.text(request, "nextToken"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode items = response.putArray("tableRestoreStatuses");
+        page.items().forEach(status -> items.add(tableRestoreNode(status)));
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    private static RedshiftServerlessRecoveryService.TableRestoreRequest tableRestoreRequest(JsonNode request) {
+        return new RedshiftServerlessRecoveryService.TableRestoreRequest(
+                ServerlessSupport.text(request, "namespaceName"), ServerlessSupport.text(request, "workgroupName"),
+                ServerlessSupport.text(request, "sourceDatabaseName"), ServerlessSupport.text(request, "sourceSchemaName"),
+                ServerlessSupport.text(request, "sourceTableName"), ServerlessSupport.text(request, "targetDatabaseName"),
+                ServerlessSupport.text(request, "targetSchemaName"), ServerlessSupport.text(request, "newTableName"),
+                ServerlessSupport.bool(request, "activateCaseSensitiveIdentifier"));
+    }
+
+    private Response recoveryPointResponse(RecoveryPoint point) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("recoveryPoint", recoveryPointNode(point));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode recoveryPointNode(RecoveryPoint point) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("recoveryPointId", point.recoveryPointId);
+        node.put("recoveryPointCreateTime", ServerlessSupport.ISO_8601.format(point.recoveryPointCreateTime));
+        node.put("totalSizeInMegaBytes", point.totalSizeInMegaBytes);
+        node.put("namespaceName", point.namespaceName);
+        node.put("workgroupName", point.workgroupName);
+        node.put("namespaceArn", point.namespaceArn);
+        return node;
+    }
+
+    private Response tableRestoreResponse(TableRestoreStatus status) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("tableRestoreStatus", tableRestoreNode(status));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode tableRestoreNode(TableRestoreStatus status) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("tableRestoreRequestId", status.tableRestoreRequestId);
+        node.put("status", status.status);
+        if (status.message != null) {
+            node.put("message", status.message);
+        }
+        node.put("requestTime", ServerlessSupport.ISO_8601.format(status.requestTime));
+        node.put("namespaceName", status.namespaceName);
+        node.put("workgroupName", status.workgroupName);
+        if (status.snapshotName != null) {
+            node.put("snapshotName", status.snapshotName);
+        }
+        if (status.recoveryPointId != null) {
+            node.put("recoveryPointId", status.recoveryPointId);
+        }
+        node.put("progressInMegaBytes", Math.round(status.progressInMegaBytes));
+        node.put("totalDataInMegaBytes", Math.round(status.totalDataInMegaBytes));
+        node.put("sourceDatabaseName", status.sourceDatabaseName);
+        node.put("sourceSchemaName", status.sourceSchemaName);
+        node.put("sourceTableName", status.sourceTableName);
+        node.put("targetDatabaseName", status.targetDatabaseName);
+        node.put("targetSchemaName", status.targetSchemaName);
+        node.put("newTableName", status.newTableName);
+        return node;
     }
 
     /** The snapshot name from {@code snapshotName}, or recovered from {@code snapshotArn} when absent. */

@@ -1,0 +1,72 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kinesisvideo_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetMedia": "GetMediaInput"
+  },
+  "shapes": {
+    "ContinuationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[a-zA-Z0-9_\\.\\-]+$"
+    },
+    "FragmentNumberString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[0-9]+$"
+    },
+    "GetMediaInput": {
+      "type": "structure",
+      "required": [
+        "StartSelector"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "StartSelector": "StartSelector"
+      }
+    },
+    "ResourceARN": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws[a-z0-9-]*:kinesisvideo:[a-z0-9-]+:[0-9]+:[a-z]+/[a-zA-Z0-9_.-]+/[0-9]+"
+    },
+    "StartSelector": {
+      "type": "structure",
+      "required": [
+        "StartSelectorType"
+      ],
+      "members": {
+        "StartSelectorType": "StartSelectorType",
+        "AfterFragmentNumber": "FragmentNumberString",
+        "StartTimestamp": "Timestamp",
+        "ContinuationToken": "ContinuationToken"
+      }
+    },
+    "StartSelectorType": {
+      "type": "string",
+      "enum": [
+        "FRAGMENT_NUMBER",
+        "SERVER_TIMESTAMP",
+        "PRODUCER_TIMESTAMP",
+        "NOW",
+        "EARLIEST",
+        "CONTINUATION_TOKEN"
+      ]
+    },
+    "StreamName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    }
+  }
+}
