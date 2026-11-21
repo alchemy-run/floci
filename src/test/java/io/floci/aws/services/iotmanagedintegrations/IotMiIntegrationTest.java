@@ -14,7 +14,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -331,6 +334,26 @@ class IotMiIntegrationTest {
     }
 
     /** Every record on the stream's first shard, decoded, once at least {@code count} have arrived. */
+    /** A stream's records, read until every message type in {@code types} has arrived, however many come first. */
+    static List<JsonNode> recordsWithTypes(String stream, Collection<String> types) throws Exception {
+        String iterator = json(kinesis("GetShardIterator", "{\"StreamName\":\"" + stream + "\",\"ShardId\":"
+                + "\"shardId-000000000000\",\"ShardIteratorType\":\"TRIM_HORIZON\"}")).path("ShardIterator").asText();
+        List<JsonNode> messages = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (!seen.containsAll(types) && System.currentTimeMillis() < deadline) {
+            JsonNode page = json(kinesis("GetRecords", "{\"ShardIterator\":\"" + iterator + "\"}"));
+            for (JsonNode record : page.path("Records")) {
+                JsonNode message = MAPPER.readTree(Base64.getDecoder().decode(record.path("Data").asText()));
+                messages.add(message);
+                seen.add(message.path("messageType").asText());
+            }
+            iterator = page.path("NextShardIterator").asText();
+            Thread.sleep(200);
+        }
+        return messages;
+    }
+
     static List<JsonNode> records(String stream, int count) throws Exception {
         String iterator = json(kinesis("GetShardIterator", "{\"StreamName\":\"" + stream + "\",\"ShardId\":"
                 + "\"shardId-000000000000\",\"ShardIteratorType\":\"TRIM_HORIZON\"}")).path("ShardIterator").asText();

@@ -29,7 +29,7 @@ import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.
 import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.json;
 import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.kinesis;
 import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.mi;
-import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.records;
+import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.recordsWithTypes;
 import static io.floci.aws.services.iotmanagedintegrations.IotMiIntegrationTest.signed;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -267,11 +267,12 @@ class IotMiConnectorDockerIntegrationTest {
                 + "\"name\":\"On/Off\",\"version\":\"6\",\"actions\":[{\"name\":\"Toggle\"}]}]}]}")
                 .post("/managed-things-command/" + broken).then().statusCode(200);
 
-        List<JsonNode> events = records(stream, 9);
+        List<String> expected = List.of("ACCOUNT_ASSOCIATION", "DEVICE_DISCOVERY_STATUS", "DEVICE_COMMAND",
+                "DEVICE_STATE", "DEVICE_EVENT", "CONNECTOR_ERROR_REPORT");
+        List<JsonNode> events = recordsWithTypes(stream, expected);
         List<String> types = new ArrayList<>();
         events.forEach(event -> types.add(event.path("messageType").asText()));
-        for (String type : List.of("ACCOUNT_ASSOCIATION", "DEVICE_DISCOVERY_STATUS", "DEVICE_COMMAND", "DEVICE_STATE",
-                "DEVICE_EVENT", "CONNECTOR_ERROR_REPORT")) {
+        for (String type : expected) {
             assertTrue(types.contains(type), type + " in " + types);
         }
         List<String> results = new ArrayList<>();
