@@ -3,6 +3,7 @@ package io.floci.aws.services.imagebuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.aws.testing.RestAssuredJsonUtils;
+import io.floci.aws.testutil.FreePorts;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -12,6 +13,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -42,11 +45,30 @@ import static org.junit.jupiter.api.Assertions.fail;
 @TestProfile(ImageBuilderDockerIntegrationTest.RealInstances.class)
 class ImageBuilderDockerIntegrationTest {
 
-    /** Builds need real instances: EC2 instances run as containers. */
+    /**
+     * Builds need real instances: EC2 instances run as containers. A container image build is pushed by
+     * the Docker daemon to the repository URI, which names {@code floci.port}, so Floci listens on that
+     * port too rather than on a test port the URI doesn't name.
+     */
     public static class RealInstances implements QuarkusTestProfile {
+        private static final int PORT = freePort();
+
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.ec2.mock", "false");
+            return Map.of(
+                    "floci.services.ec2.mock", "false",
+                    "quarkus.http.test-port", String.valueOf(PORT),
+                    "quarkus.http.port", String.valueOf(PORT),
+                    "floci.port", String.valueOf(PORT),
+                    "floci.base-url", "http://localhost:" + PORT);
+        }
+
+        private static int freePort() {
+            try {
+                return FreePorts.anyInterfacePort();
+            } catch (IOException e) {
+                throw new UncheckedIOException("No free port for the Image Builder test application", e);
+            }
         }
     }
 

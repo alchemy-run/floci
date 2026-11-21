@@ -288,46 +288,50 @@ class XRayIntegrationTest {
 
     @Test
     void faultSpikesOpenInsightsAnnouncedToEventBridge() {
+        // Names of its own, so traces and groups another test leaves in the shared application can't skew
+        // this service's fault baseline.
+        String service = "payments-" + hex(4);
+        String rule = "xray-insights-" + hex(4);
         String queue = given().header("X-Amz-Target", "AmazonSQS.CreateQueue").contentType("application/x-amz-json-1.0")
-                .body("{\"QueueName\":\"xray-insights\"}").post("/").then().statusCode(200).extract().path("QueueUrl");
+                .body("{\"QueueName\":\"" + rule + "\"}").post("/").then().statusCode(200).extract().path("QueueUrl");
         given().header("X-Amz-Target", "AWSEvents.PutRule").contentType("application/x-amz-json-1.1")
-                .body("{\"Name\":\"xray-insights\",\"EventPattern\":\"{\\\"source\\\":[\\\"aws.xray\\\"]}\"}").post("/")
+                .body("{\"Name\":\"" + rule + "\",\"EventPattern\":\"{\\\"source\\\":[\\\"aws.xray\\\"]}\"}").post("/")
                 .then().statusCode(200);
         given().header("X-Amz-Target", "AWSEvents.PutTargets").contentType("application/x-amz-json-1.1")
-                .body("{\"Rule\":\"xray-insights\",\"Targets\":[{\"Id\":\"q\",\"Arn\":\"arn:aws:sqs:us-east-1:" + ACCOUNT
-                        + ":xray-insights\"}]}").post("/").then().statusCode(200);
-        post("/CreateGroup", "{\"GroupName\":\"payments\",\"FilterExpression\":\"service(\\\"payments\\\")\","
+                .body("{\"Rule\":\"" + rule + "\",\"Targets\":[{\"Id\":\"q\",\"Arn\":\"arn:aws:sqs:us-east-1:" + ACCOUNT
+                        + ":" + rule + "\"}]}").post("/").then().statusCode(200);
+        post("/CreateGroup", "{\"GroupName\":\"" + service + "\",\"FilterExpression\":\"service(\\\"" + service + "\\\")\","
                 + "\"InsightsConfiguration\":{\"InsightsEnabled\":true,\"NotificationsEnabled\":true}}").statusCode(200);
         for (int i = 0; i < 5; i++) {
             double start = now() - 0.2;
-            put("{\"name\":\"payments\",\"id\":\"" + hex(16) + "\",\"trace_id\":\"" + traceId() + "\",\"start_time\":"
+            put("{\"name\":\"" + service + "\",\"id\":\"" + hex(16) + "\",\"trace_id\":\"" + traceId() + "\",\"start_time\":"
                     + start + ",\"end_time\":" + (start + 0.1) + ",\"fault\":true}");
         }
         double window = now();
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> post("/InsightSummaries",
-                "{\"GroupName\":\"payments\",\"StartTime\":" + (window - 600) + ",\"EndTime\":" + (now() + 60) + "}")
+                "{\"GroupName\":\"" + service + "\",\"StartTime\":" + (window - 600) + ",\"EndTime\":" + (now() + 60) + "}")
                 .statusCode(200).body("InsightSummaries[0].State", equalTo("ACTIVE"))
-                .body("InsightSummaries[0].RootCauseServiceId.Name", equalTo("payments")));
-        String insight = post("/InsightSummaries", "{\"GroupName\":\"payments\",\"StartTime\":" + (window - 600)
+                .body("InsightSummaries[0].RootCauseServiceId.Name", equalTo(service)));
+        String insight = post("/InsightSummaries", "{\"GroupName\":\"" + service + "\",\"StartTime\":" + (window - 600)
                 + ",\"EndTime\":" + (now() + 60) + "}").extract().path("InsightSummaries[0].InsightId");
         post("/Insight", "{\"InsightId\":\"" + insight + "\"}").statusCode(200)
                 .body("Insight.Categories", equalTo(List.of("FAULT")))
                 .body("Insight.RootCauseServiceRequestImpactStatistics.FaultCount", notNullValue());
         post("/InsightEvents", "{\"InsightId\":\"" + insight + "\"}").statusCode(200)
-                .body("InsightEvents[0].Summary", containsString("payments"));
+                .body("InsightEvents[0].Summary", containsString(service));
         post("/InsightImpactGraph", "{\"InsightId\":\"" + insight + "\",\"StartTime\":" + (window - 600)
-                + ",\"EndTime\":" + (now() + 60) + "}").statusCode(200).body("Services.Name", hasItem("payments"));
+                + ",\"EndTime\":" + (now() + 60) + "}").statusCode(200).body("Services.Name", hasItem(service));
         post("/Insight", "{\"InsightId\":\"missing\"}").statusCode(400);
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             List<String> bodies = given().header("X-Amz-Target", "AmazonSQS.ReceiveMessage")
                     .contentType("application/x-amz-json-1.0").body("{\"QueueUrl\":\"" + queue
                             + "\",\"MaxNumberOfMessages\":10}").post("/").then().extract().path("Messages.Body");
             assertTrue(bodies != null && bodies.stream().anyMatch(b -> b.contains("AWS X-Ray Insight Update")
-                    && b.contains("payments")), String.valueOf(bodies));
+                    && b.contains(service)), String.valueOf(bodies));
         });
         // The insight closes once the service stops faulting.
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> post("/Insight", "{\"InsightId\":\"" + insight
                 + "\"}").body("Insight.State", equalTo("CLOSED")));
-        post("/DeleteGroup", "{\"GroupName\":\"payments\"}").statusCode(200);
+        post("/DeleteGroup", "{\"GroupName\":\"" + service + "\"}").statusCode(200);
     }
 }
