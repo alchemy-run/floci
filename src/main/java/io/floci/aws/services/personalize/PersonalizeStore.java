@@ -59,8 +59,8 @@ public class PersonalizeStore implements Resettable {
 
     @Inject
     public PersonalizeStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("personalize", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
-        this.data = storageFactory.create("personalize", "data.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("personalize", "personalize-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.data = storageFactory.create("personalize", "personalize-data.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

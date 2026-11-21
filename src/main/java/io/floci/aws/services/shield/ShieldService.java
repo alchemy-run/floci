@@ -73,7 +73,7 @@ public class ShieldService implements Resettable {
                          Provider<CloudFrontService> cloudFront, Provider<Route53Service> route53,
                          Provider<GlobalAcceleratorService> globalAccelerator, Provider<WafV2Service> waf,
                          Provider<IamService> iam, Provider<S3Service> s3) {
-        this.state = storageFactory.create("shield", "state.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.state = storageFactory.create("shield", "shield-state.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.protections = storageFactory.create("shield", "protections.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.groups = storageFactory.create("shield", "protection-groups.json",

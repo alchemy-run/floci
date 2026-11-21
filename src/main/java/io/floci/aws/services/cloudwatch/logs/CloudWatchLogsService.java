@@ -1951,8 +1951,7 @@ public class CloudWatchLogsService implements ResourceProvider {
             }
             String region = key.substring(0, separator);
             resources.add(new ExplorerResource(
-                    "arn:aws:logs:" + region + ":" + regionResolver.getAccountId()
-                            + ":log-group:" + group.getLogGroupName() + ":*",
+                    regionResolver.buildArn("logs", region, "log-group:" + group.getLogGroupName() + ":*"),
                     "logs:log-group", "logs",
                     region, regionResolver.getAccountId(),
                     group.getCreatedTime() > 0 ? Instant.ofEpochMilli(group.getCreatedTime()) : Instant.now(),

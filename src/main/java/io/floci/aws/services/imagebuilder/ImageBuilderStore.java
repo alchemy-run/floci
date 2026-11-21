@@ -40,7 +40,7 @@ public class ImageBuilderStore implements Resettable {
 
     @Inject
     public ImageBuilderStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "imagebuilder-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

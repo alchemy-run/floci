@@ -55,7 +55,7 @@ public class ObservabilityAdminStore implements Resettable {
 
     @Inject
     public ObservabilityAdminStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("observabilityadmin", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("observabilityadmin", "observabilityadmin-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

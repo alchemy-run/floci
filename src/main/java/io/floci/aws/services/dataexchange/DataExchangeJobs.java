@@ -110,7 +110,7 @@ public class DataExchangeJobs implements Resettable {
     public DataExchangeJobs(DataExchangeService service, StorageFactory storageFactory, Instance<S3Service> s3,
                             Instance<ApiGatewayService> apiGateway, ObjectMapper mapper, EmulatorConfig config) {
         this.service = service;
-        this.jobs = storageFactory.create("dataexchange", "jobs.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.jobs = storageFactory.create("dataexchange", "dataexchange-jobs.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.s3 = s3;
         this.apiGateway = apiGateway;
         this.mapper = mapper;

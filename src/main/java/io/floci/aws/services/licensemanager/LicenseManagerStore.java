@@ -63,7 +63,7 @@ public class LicenseManagerStore implements Resettable {
 
     @Inject
     public LicenseManagerStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("licensemanager", "resources.json",
+        this.storage = storageFactory.create("licensemanager", "licensemanager-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

@@ -58,7 +58,7 @@ public class MediaTailorStore implements Resettable {
 
     @Inject
     public MediaTailorStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("mediatailor", "resources.json",
+        this.storage = storageFactory.create("mediatailor", "mediatailor-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

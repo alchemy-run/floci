@@ -48,7 +48,7 @@ public class OsisStore implements Resettable {
 
     @Inject
     public OsisStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("osis", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("osis", "osis-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

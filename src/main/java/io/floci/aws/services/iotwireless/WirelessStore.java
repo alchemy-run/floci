@@ -55,7 +55,7 @@ public class WirelessStore implements Resettable {
 
     @Inject
     public WirelessStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "iotwireless-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

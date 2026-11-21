@@ -44,7 +44,7 @@ public class DataZoneStore implements Resettable {
 
     @Inject
     public DataZoneStore(StorageFactory storageFactory, ObjectMapper mapper, RegionResolver regionResolver) {
-        this.storage = storageFactory.create("datazone", "resources.json",
+        this.storage = storageFactory.create("datazone", "datazone-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.regionResolver = regionResolver;

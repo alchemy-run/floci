@@ -41,7 +41,7 @@ public class IvsStore implements Resettable {
 
     @Inject
     public IvsStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("ivs", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("ivs", "ivs-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

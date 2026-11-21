@@ -53,7 +53,7 @@ public class AossStore implements Resettable {
 
     @Inject
     public AossStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("opensearchserverless", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("opensearchserverless", "opensearchserverless-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

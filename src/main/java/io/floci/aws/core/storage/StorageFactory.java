@@ -39,6 +39,8 @@ public class StorageFactory {
     // A file path identifies one logical store: callers sharing a path are expected to agree on
     // its value type and storage mode. The first create() wins; repeat calls reuse that backend.
     private final Map<Path, StorageBackend<?, ?>> backendsByPath = new HashMap<>();
+    /** The service each file belongs to: one file shared by two services mixes their records. */
+    private final Map<Path, String> servicesByPath = new HashMap<>();
     private final List<HybridStorage<?, ?>> hybridBackends = new ArrayList<>();
     private final List<WalStorage<?, ?>> walBackends = new ArrayList<>();
     private final List<PartitionedFileStorage<?>> partitionedBackends = new ArrayList<>();
@@ -83,6 +85,19 @@ public class StorageFactory {
      * @param typeReference Jackson type reference for deserialization
      * @param profile       how the store is written
      */
+    /**
+     * Refuses a file another service already stores in. Every service's files share one directory, so
+     * two services naming the same file would read each other's records, and a typed store would be
+     * handed another service's type.
+     */
+    private void requireOwnFile(String serviceName, Path path) {
+        String owner = servicesByPath.putIfAbsent(path, serviceName);
+        if (owner != null && !owner.equals(serviceName)) {
+            throw new IllegalStateException("Storage file " + path.getFileName() + " is used by both " + owner
+                    + " and " + serviceName + "; give one of them a file name of its own");
+        }
+    }
+
     public synchronized <V> AccountAwareStorageBackend<V> create(String serviceName, String fileName,
                                                  TypeReference<Map<String, V>> typeReference,
                                                  WriteProfile profile) {
@@ -94,6 +109,7 @@ public class StorageFactory {
         // Reuse an existing backend for the same file. Handing out a second backend bound to the
         // same path creates a duplicate in-memory store; on shutdown the stale duplicate flushes
         // after the active instance and clobbers persisted state (issue #1921).
+        requireOwnFile(serviceName, filePath);
         StorageBackend<?, ?> existing = backendsByPath.get(filePath);
         if (existing != null) {
             LOG.debugv("Reusing existing {0} storage for service {1} (file: {2})", mode, serviceName, filePath);
@@ -170,6 +186,7 @@ public class StorageFactory {
         }
         Path basePath = Path.of(config.storage().persistentPath());
         Path directory = basePath.resolve(fileName.replace(".json", ""));
+        requireOwnFile(serviceName, directory);
         StorageBackend<?, ?> existing = backendsByPath.get(directory);
         if (existing != null) {
             @SuppressWarnings("unchecked")

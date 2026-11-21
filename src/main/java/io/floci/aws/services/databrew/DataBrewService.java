@@ -101,7 +101,7 @@ public class DataBrewService implements Resettable {
         this.datasets = storageFactory.create("databrew", "datasets.json", type);
         this.recipes = storageFactory.create("databrew", "recipes.json", type);
         this.projects = storageFactory.create("databrew", "projects.json", type);
-        this.jobs = storageFactory.create("databrew", "jobs.json", type);
+        this.jobs = storageFactory.create("databrew", "databrew-jobs.json", type);
         this.runs = storageFactory.create("databrew", "job-runs.json", type);
         this.rulesets = storageFactory.create("databrew", "rulesets.json", type);
         this.schedules = storageFactory.create("databrew", "schedules.json", type);

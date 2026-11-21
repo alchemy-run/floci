@@ -44,7 +44,7 @@ public class IvsChatStore implements Resettable {
 
     @Inject
     public IvsChatStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json",
+        this.storage = storageFactory.create(SERVICE, "ivschat-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

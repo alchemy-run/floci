@@ -93,7 +93,7 @@ public class DevOpsGuruService implements Resettable {
                              Instance<ResourceGroupsTaggingService> tagging, Instance<SnsService> sns,
                              Instance<EventBridgeService> events, Instance<CloudTrailEventService> trail,
                              Instance<CloudWatchLogsService> logs, Instance<KmsService> kms, EmulatorConfig config) {
-        this.storage = storageFactory.create("devopsguru", "state.json",
+        this.storage = storageFactory.create("devopsguru", "devopsguru-state.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.regions = regions;

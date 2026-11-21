@@ -43,7 +43,7 @@ public class DirectoryStore implements Resettable {
 
     @Inject
     public DirectoryStore(StorageFactory storageFactory, ObjectMapper mapper, RegionResolver regionResolver) {
-        this.storage = storageFactory.create("ds", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("ds", "directoryservice-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.regionResolver = regionResolver;
     }

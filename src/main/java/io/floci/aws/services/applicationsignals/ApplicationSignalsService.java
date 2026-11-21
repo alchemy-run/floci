@@ -69,7 +69,7 @@ public class ApplicationSignalsService implements Resettable {
     public ApplicationSignalsService(StorageFactory storageFactory, ObjectMapper mapper,
                                      Provider<XRayServiceMap> services, Provider<CloudWatchMetricsService> metrics,
                                      Provider<IamService> iam) {
-        this.state = storageFactory.create("application-signals", "state.json",
+        this.state = storageFactory.create("application-signals", "applicationsignals-state.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.services = services;

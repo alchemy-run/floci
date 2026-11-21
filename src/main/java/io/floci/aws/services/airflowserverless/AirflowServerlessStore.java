@@ -42,7 +42,7 @@ public class AirflowServerlessStore implements Resettable {
 
     @Inject
     public AirflowServerlessStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("airflowserverless", "resources.json",
+        this.storage = storageFactory.create("airflowserverless", "airflowserverless-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

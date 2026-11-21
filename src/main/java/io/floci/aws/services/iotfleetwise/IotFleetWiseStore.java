@@ -49,7 +49,7 @@ public class IotFleetWiseStore implements Resettable {
 
     @Inject
     public IotFleetWiseStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "iotfleetwise-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

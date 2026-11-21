@@ -53,7 +53,7 @@ public class NeptuneGraphStore implements Resettable {
 
     @Inject
     public NeptuneGraphStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("neptunegraph", "resources.json",
+        this.storage = storageFactory.create("neptunegraph", "neptunegraph-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.frames = storageFactory.create("neptunegraph", "snapshots.json", new TypeReference<Map<String, String>>() {});
         this.mapper = mapper;

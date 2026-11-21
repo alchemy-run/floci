@@ -82,9 +82,9 @@ public class SchemasService implements Resettable, EventBusObserver {
     @Inject
     public SchemasService(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config,
                           Provider<EventBridgeService> eventBridge) {
-        this.registries = storageFactory.create("schemas", "registries.json",
+        this.registries = storageFactory.create("schemas", "schemas-registries.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
-        this.schemas = storageFactory.create("schemas", "schemas.json",
+        this.schemas = storageFactory.create("schemas", "schemas-schemas.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.discoverers = storageFactory.create("schemas", "discoverers.json",
                 new TypeReference<Map<String, ObjectNode>>() {});

@@ -56,7 +56,7 @@ public class KendraStore implements Resettable {
 
     @Inject
     public KendraStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "kendra-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.documents = storageFactory.create(SERVICE, "documents.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;

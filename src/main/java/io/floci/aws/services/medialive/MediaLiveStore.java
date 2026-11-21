@@ -54,7 +54,7 @@ public class MediaLiveStore implements Resettable {
 
     @Inject
     public MediaLiveStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("medialive", "resources.json",
+        this.storage = storageFactory.create("medialive", "medialive-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

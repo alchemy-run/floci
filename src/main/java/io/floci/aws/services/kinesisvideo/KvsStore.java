@@ -39,7 +39,7 @@ public class KvsStore implements Resettable {
     @Inject
     public KvsStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
         TypeReference<Map<String, ObjectNode>> type = new TypeReference<>() {};
-        this.resources = storageFactory.create(SERVICE, "resources.json", type);
+        this.resources = storageFactory.create(SERVICE, "kinesisvideo-resources.json", type);
         this.fragments = storageFactory.create(SERVICE, "fragments.json", type);
         this.mapper = mapper;
         this.config = config;

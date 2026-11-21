@@ -67,7 +67,7 @@ public class FmsService {
     @Inject
     public FmsService(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config,
                       Instance<OrganizationsService> organizations, Instance<SnsService> sns, IamService iam) {
-        this.storage = storageFactory.create("fms", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("fms", "fms-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
         this.organizations = organizations;

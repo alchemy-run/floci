@@ -46,7 +46,7 @@ public class EmrContainersStore implements Resettable {
 
     @Inject
     public EmrContainersStore(StorageFactory storageFactory, ObjectMapper mapper) {
-        this.storage = storageFactory.create("emr-containers", "resources.json",
+        this.storage = storageFactory.create("emr-containers", "emrcontainers-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
     }

@@ -40,7 +40,7 @@ public class ForecastStore implements Resettable {
 
     @Inject
     public ForecastStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("forecast", "resources.json",
+        this.storage = storageFactory.create("forecast", "forecast-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

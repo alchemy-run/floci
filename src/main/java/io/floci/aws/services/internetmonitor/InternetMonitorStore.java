@@ -41,7 +41,7 @@ public class InternetMonitorStore implements Resettable {
 
     @Inject
     public InternetMonitorStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "internetmonitor-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

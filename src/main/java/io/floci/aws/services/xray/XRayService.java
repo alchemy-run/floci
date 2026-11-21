@@ -70,7 +70,7 @@ public class XRayService implements Resettable {
     public XRayService(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config,
                        Provider<KmsService> kms, Provider<CloudWatchLogsService> logs) {
         this.traces = storageFactory.create("xray", "traces.json", new TypeReference<Map<String, ObjectNode>>() {});
-        this.state = storageFactory.create("xray", "state.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.state = storageFactory.create("xray", "xray-state.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
         this.kms = kms;

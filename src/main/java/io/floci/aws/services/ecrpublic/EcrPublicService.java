@@ -64,7 +64,7 @@ public class EcrPublicService {
     @Inject
     public EcrPublicService(StorageFactory storageFactory, ObjectMapper mapper, EcrService ecr,
                             EcrJsonHandler ecrHandler, EmulatorConfig config) {
-        this.storage = storageFactory.create("ecr-public", "resources.json",
+        this.storage = storageFactory.create("ecr-public", "ecrpublic-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.ecr = ecr;

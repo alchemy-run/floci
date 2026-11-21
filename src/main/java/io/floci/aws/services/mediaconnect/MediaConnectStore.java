@@ -54,7 +54,7 @@ public class MediaConnectStore implements Resettable {
 
     @Inject
     public MediaConnectStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("mediaconnect", "resources.json",
+        this.storage = storageFactory.create("mediaconnect", "mediaconnect-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

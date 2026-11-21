@@ -76,9 +76,9 @@ public class SignerService implements Resettable, CodeSignatureVerifier {
     @Inject
     public SignerService(StorageFactory storageFactory, ObjectMapper mapper, Provider<S3Service> s3,
                          Provider<AcmService> acm, Provider<EventBridgeService> events) {
-        this.profiles = storageFactory.create("signer", "profiles.json",
+        this.profiles = storageFactory.create("signer", "signer-profiles.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
-        this.jobs = storageFactory.create("signer", "jobs.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.jobs = storageFactory.create("signer", "signer-jobs.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.s3 = s3;
         this.acm = acm;

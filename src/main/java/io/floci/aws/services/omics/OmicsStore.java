@@ -70,8 +70,8 @@ public class OmicsStore implements Resettable {
 
     @Inject
     public OmicsStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("omics", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
-        this.blobs = storageFactory.create("omics", "data.json", new TypeReference<Map<String, String>>() {});
+        this.storage = storageFactory.create("omics", "omics-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.blobs = storageFactory.create("omics", "omics-data.json", new TypeReference<Map<String, String>>() {});
         this.mapper = mapper;
         this.config = config;
     }

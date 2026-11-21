@@ -53,7 +53,7 @@ public class MediaConvertStore implements Resettable {
 
     @Inject
     public MediaConvertStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("mediaconvert", "resources.json",
+        this.storage = storageFactory.create("mediaconvert", "mediaconvert-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

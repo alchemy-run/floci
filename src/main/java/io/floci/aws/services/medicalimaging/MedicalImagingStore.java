@@ -50,7 +50,7 @@ public class MedicalImagingStore implements Resettable {
 
     @Inject
     public MedicalImagingStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("medicalimaging", "resources.json",
+        this.storage = storageFactory.create("medicalimaging", "medicalimaging-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.frames = storageFactory.create("medicalimaging", "frames.json", new TypeReference<Map<String, String>>() {});
         this.mapper = mapper;

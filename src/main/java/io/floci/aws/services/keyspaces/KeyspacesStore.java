@@ -47,7 +47,7 @@ public class KeyspacesStore implements Resettable {
     @Inject
     public KeyspacesStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
         TypeReference<Map<String, ObjectNode>> type = new TypeReference<>() {};
-        this.resources = storageFactory.create("keyspaces", "resources.json", type);
+        this.resources = storageFactory.create("keyspaces", "keyspaces-resources.json", type);
         this.rows = storageFactory.create("keyspaces", "rows.json", type);
         this.changes = storageFactory.create("keyspaces", "changes.json", type);
         this.mapper = mapper;

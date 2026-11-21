@@ -41,9 +41,9 @@ public class GlacierStore implements Resettable {
 
     @Inject
     public GlacierStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.records = storageFactory.create("glacier", "resources.json",
+        this.records = storageFactory.create("glacier", "glacier-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
-        this.blobs = storageFactory.create("glacier", "data.json", new TypeReference<Map<String, String>>() {},
+        this.blobs = storageFactory.create("glacier", "glacier-data.json", new TypeReference<Map<String, String>>() {},
                 WriteProfile.APPEND_HEAVY);
         this.mapper = mapper;
         this.config = config;

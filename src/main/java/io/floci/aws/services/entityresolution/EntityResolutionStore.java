@@ -48,7 +48,7 @@ public class EntityResolutionStore implements Resettable {
 
     @Inject
     public EntityResolutionStore(StorageFactory storageFactory, ObjectMapper mapper) {
-        this.storage = storageFactory.create("entityresolution", "resources.json",
+        this.storage = storageFactory.create("entityresolution", "entityresolution-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
     }

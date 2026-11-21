@@ -115,7 +115,7 @@ public class VpcLatticeService implements Resettable {
                              Provider<Ec2Service> ec2, Provider<LambdaService> lambda, Provider<ElbV2Service> elbv2,
                              Provider<S3Service> s3, Provider<CloudWatchLogsService> logs,
                              Provider<FirehoseService> firehose, Provider<Route53Service> route53) {
-        this.resources = storageFactory.create("vpc-lattice", "resources.json",
+        this.resources = storageFactory.create("vpc-lattice", "vpclattice-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

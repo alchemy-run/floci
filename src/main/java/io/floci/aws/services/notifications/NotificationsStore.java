@@ -52,7 +52,7 @@ public class NotificationsStore implements Resettable {
 
     @Inject
     public NotificationsStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("notifications", "resources.json",
+        this.storage = storageFactory.create("notifications", "notifications-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

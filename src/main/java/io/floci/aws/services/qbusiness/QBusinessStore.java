@@ -64,7 +64,7 @@ public class QBusinessStore implements Resettable {
 
     @Inject
     public QBusinessStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("qbusiness", "resources.json",
+        this.storage = storageFactory.create("qbusiness", "qbusiness-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

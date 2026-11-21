@@ -44,7 +44,7 @@ public class DeadlineStore implements Resettable {
 
     @Inject
     public DeadlineStore(StorageFactory storageFactory, ObjectMapper mapper, RegionResolver regionResolver) {
-        this.storage = storageFactory.create("deadline", "resources.json",
+        this.storage = storageFactory.create("deadline", "deadline-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.regionResolver = regionResolver;

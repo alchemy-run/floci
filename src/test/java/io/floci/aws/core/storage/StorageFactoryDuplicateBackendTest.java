@@ -16,6 +16,8 @@ import java.util.Map;
 
 import static io.floci.aws.testing.PerServicePersistentStorageProfile.STORAGE_DIR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Reproduces issue #1921: two components request the same storage file, the factory hands out
@@ -47,6 +49,21 @@ class StorageFactoryDuplicateBackendTest {
     @AfterEach
     void clearPlaceholders() throws IOException {
         reset();
+    }
+
+    /**
+     * Two services naming one file read each other's records: Signer's jobs.json once held Glue's jobs,
+     * and a signing job failed casting a Glue Job. The factory refuses the second service.
+     */
+    @Test
+    void aFileAnotherServiceStoresInIsRefused() {
+        TypeReference<Map<String, String>> typeRef = new TypeReference<>() {};
+        storageFactory.create("glue", "shared-by-mistake.json", typeRef);
+
+        IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> storageFactory.create("signer", "shared-by-mistake.json", typeRef));
+        assertTrue(refused.getMessage().contains("glue") && refused.getMessage().contains("signer"),
+                refused.getMessage());
     }
 
     @Test

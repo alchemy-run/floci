@@ -63,7 +63,7 @@ public class RolesAnywhereService implements Resettable {
     @Inject
     public RolesAnywhereService(StorageFactory storageFactory, ObjectMapper mapper, Provider<IamService> iam,
                                 Provider<AcmPcaService> pca) {
-        this.store = storageFactory.create("rolesanywhere", "resources.json",
+        this.store = storageFactory.create("rolesanywhere", "rolesanywhere-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.iam = iam;

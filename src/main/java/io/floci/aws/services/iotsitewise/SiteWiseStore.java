@@ -59,7 +59,7 @@ public class SiteWiseStore implements Resettable {
 
     @Inject
     public SiteWiseStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create(SERVICE, "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create(SERVICE, "iotsitewise-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.values = storageFactory.create(SERVICE, "values.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

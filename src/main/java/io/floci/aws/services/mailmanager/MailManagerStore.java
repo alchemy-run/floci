@@ -63,7 +63,7 @@ public class MailManagerStore implements Resettable {
 
     @Inject
     public MailManagerStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("mailmanager", "resources.json",
+        this.storage = storageFactory.create("mailmanager", "mailmanager-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

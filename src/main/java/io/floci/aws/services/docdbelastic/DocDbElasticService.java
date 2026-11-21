@@ -93,7 +93,7 @@ public class DocDbElasticService {
     public DocDbElasticService(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config,
                                Ec2Service ec2, KmsService kms, SecretsManagerService secrets,
                                DocDbElasticBackend backend) {
-        this.storage = storageFactory.create("docdb-elastic", "resources.json",
+        this.storage = storageFactory.create("docdb-elastic", "docdbelastic-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
