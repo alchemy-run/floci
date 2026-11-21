@@ -181,6 +181,57 @@ quarkus:
       - --initialize-at-run-time=org.xerial.snappy.SnappyLoader
       - --initialize-at-run-time=org.postgresql.util.PasswordUtil$SecureRandomHolder
       - --initialize-at-run-time=org.postgresql.util.LazyCleanerImpl
+      # A static SecureRandom seeded at build time would hand every native process the same sequence.
+      - --initialize-at-run-time=io.floci.aws.services.airflowserverless.AirflowServerlessService
+      - --initialize-at-run-time=io.floci.aws.services.emrcontainers.EmrContainersService
+      - --initialize-at-run-time=io.floci.aws.services.glacier.GlacierService
+      - --initialize-at-run-time=io.floci.aws.services.grafana.GrafanaService
+      - --initialize-at-run-time=io.floci.aws.services.healthlake.HealthLakeService
+      - --initialize-at-run-time=io.floci.aws.services.healthlake.HealthLakeTransformService
+      - --initialize-at-run-time=io.floci.aws.services.iotfleetwise.IotFleetWiseModels
+      - --initialize-at-run-time=io.floci.aws.services.iotmanagedintegrations.IotMiStore
+      - --initialize-at-run-time=io.floci.aws.services.iotwireless.WirelessFleet
+      - --initialize-at-run-time=io.floci.aws.services.iotwireless.WirelessNetwork
+      - --initialize-at-run-time=io.floci.aws.services.iotwireless.WirelessService
+      - --initialize-at-run-time=io.floci.aws.services.ivs.IvsStore
+      - --initialize-at-run-time=io.floci.aws.services.ivschat.IvsChatService
+      - --initialize-at-run-time=io.floci.aws.services.ivschat.IvsChatStore
+      - --initialize-at-run-time=io.floci.aws.services.keyspaces.CqlExecutor
+      - --initialize-at-run-time=io.floci.aws.services.keyspaces.CqlServer
+      - --initialize-at-run-time=io.floci.aws.services.lexv2.LexStore
+      - --initialize-at-run-time=io.floci.aws.services.licensemanager.LicenseManagerStore
+      - --initialize-at-run-time=io.floci.aws.services.mailmanager.MailManagerStore
+      - --initialize-at-run-time=io.floci.aws.services.mediaconnect.MediaConnectStore
+      - --initialize-at-run-time=io.floci.aws.services.mediaconvert.MediaConvertStore
+      - --initialize-at-run-time=io.floci.aws.services.medialive.MediaLiveStore
+      - --initialize-at-run-time=io.floci.aws.services.mediapackagev2.MediaPackageStore
+      - --initialize-at-run-time=io.floci.aws.services.mediatailor.MediaTailorStore
+      - --initialize-at-run-time=io.floci.aws.services.medicalimaging.MedicalImagingStore
+      - --initialize-at-run-time=io.floci.aws.services.neptunegraph.NeptuneGraphStore
+      - --initialize-at-run-time=io.floci.aws.services.notifications.NotificationsStore
+      - --initialize-at-run-time=io.floci.aws.services.notificationscontacts.NotificationsContactsStore
+      - --initialize-at-run-time=io.floci.aws.services.observabilityadmin.ObservabilityAdminStore
+      - --initialize-at-run-time=io.floci.aws.services.omics.OmicsStore
+      - --initialize-at-run-time=io.floci.aws.services.opensearchserverless.AossStore
+      - --initialize-at-run-time=io.floci.aws.services.osis.OsisStore
+      - --initialize-at-run-time=io.floci.aws.services.personalize.PersonalizeStore
+      - --initialize-at-run-time=io.floci.aws.services.pinpointsmsvoicev2.SmsVoiceStore
+      - --initialize-at-run-time=io.floci.aws.services.qbusiness.QBusinessStore
+      - --initialize-at-run-time=io.floci.aws.services.rbin.RbinService
+      - --initialize-at-run-time=io.floci.aws.services.repostspace.RePostSpaceService
+      - --initialize-at-run-time=io.floci.aws.services.route53profiles.Route53ProfilesService
+      - --initialize-at-run-time=io.floci.aws.services.s3.S3ControlResourceService
+      - --initialize-at-run-time=io.floci.aws.services.s3files.S3FilesService
+      - --initialize-at-run-time=io.floci.aws.services.securitylake.SecurityLakeService
+      - --initialize-at-run-time=io.floci.aws.services.signer.SignerCrypto
+      - --initialize-at-run-time=io.floci.aws.services.signer.SignerService
+      - --initialize-at-run-time=io.floci.aws.services.socialmessaging.SocialMessagingService
+      - --initialize-at-run-time=io.floci.aws.services.ssmcontacts.SsmContactsService
+      - --initialize-at-run-time=io.floci.aws.services.synthetics.SyntheticsService
+      - --initialize-at-run-time=io.floci.aws.services.vpclattice.VpcLatticeDataPlane
+      - --initialize-at-run-time=io.floci.aws.services.vpclattice.VpcLatticeService
+      - --initialize-at-run-time=io.floci.aws.services.xray.XRaySampling
+      - --initialize-at-run-time=io.floci.aws.services.xray.XRayService
       # Build-time property. The MySQL driver's AbandonedConnectionCleanupThread starts an
       # executor thread in its static initializer unless this is set, and a started thread
       # in the image heap fails the build.
