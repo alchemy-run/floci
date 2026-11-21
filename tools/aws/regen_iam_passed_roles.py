@@ -94,6 +94,8 @@ NOT_COVERED = {
     "chatbot": "REST routes no rule maps yet: channel configurations pass IamRoleArn",
     "backup-search": "REST routes no rule maps yet: StartSearchResultExportJob passes RoleArn",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
+    "wafv2": "not read yet: AWS lists iam:PassRole on CreateWebACL and UpdateWebACL, but no member of "
+             "botocore's model of their requests names a role",
     "aiops": "REST routes no rule maps yet",
     "amplify": "REST routes no rule maps yet",
     "appflow": "REST routes no rule maps yet",
@@ -263,6 +265,19 @@ URI_LABEL = "the role is a label of the request URI, which PassedRoles does not 
 
 # Operations whose request names no role this file can read.
 NOT_READ = {
+    "dms:CreateReplicationTask": NO_ROLE_MEMBER,
+    "dms:ModifyReplicationTask": NO_ROLE_MEMBER,
+    "logs:StartQuery": NO_ROLE_MEMBER,
+    "events:CreateEventSource": "botocore's model has no such operation",
+    "events:UpdateEventSource": "botocore's model has no such operation",
+    "glue:CreateDataQualityEvaluationConfig": "botocore's model has no such operation",
+    "glue:UpdateDataQualityEvaluationConfig": "botocore's model has no such operation",
+    "kinesisanalytics:ExportSnapshot": "botocore's model has no such operation",
+    "kinesisanalytics:ImportSnapshot": "botocore's model has no such operation",
+    "observabilityadmin:CreateConnector": "botocore's model has no such operation",
+    "sagemaker:CreateGlobalInferenceGateway": "botocore's model has no such operation",
+    "secretsmanager:AssociateCrossAccountReplica": "botocore's model has no such operation",
+    "ssm:RegisterDefaultHostManagementConfiguration": "botocore's model has no such operation",
     "omics:CreateConfiguration": NO_ROLE_MEMBER,
     "observabilityadmin:CreateTelemetryPipeline": "the role is the source's aws.sts_role_arn inside the YAML "
                                                    "configuration body",
@@ -298,8 +313,6 @@ NOT_READ = {
     "s3:PutBucketReplication": XML_BODY,
     "redshift:ModifyLakehouseConfiguration": NO_ROLE_MEMBER,
     "redshift-serverless:UpdateLakehouseConfiguration": NO_ROLE_MEMBER,
-    "sagemaker:CreateTrainingSession": "the reference passes the role to sagemaker or training-session.sagemaker "
-                                       "and nothing says which",
     "sagemaker:CreateTransformJob": NO_ROLE_MEMBER,
     "sagemaker:ImportHubContent": NO_ROLE_MEMBER,
     "ssm:CreateDocument": NO_ROLE_MEMBER,
@@ -432,9 +445,6 @@ MEMBER_SERVICES = {
         "taskRoleArn": ECS_TASKS,
         "infrastructureRoleArn": ECS_INFRASTRUCTURE,
     },
-    # "Amazon EMR uses this role" for the session. The reference also lists
-    # managed-compute.elasticmapreduce, but the request cannot say which compute it runs on.
-    "elasticmapreduce:StartSession": {"ExecutionRoleArn": "elasticmapreduce"},
     # rds-preview is the principal of RDS's preview environment; PassedRoles' RDS cases pass to rds.
     "rds:*": {"*": "rds"},
 }
