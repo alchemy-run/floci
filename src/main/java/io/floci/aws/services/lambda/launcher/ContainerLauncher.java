@@ -245,6 +245,9 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         String image;
         if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
             image = fn.getResolvedImageUri() != null ? fn.getResolvedImageUri() : fn.getImageUri();
+        } else if (fn.usesCustomRuntime()) {
+            // The .zip runs on the image of the version the alias points to at this cold start.
+            image = customRuntimeImage(fn);
         } else {
             image = imageResolver.resolve(fn.getRuntime(), requestedDockerPlatform(fn, dockerFlags).orElse(null));
         }
@@ -341,7 +344,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
 
         specBuilder.withEmbeddedDns();
         // A container image's runtime is its own, Java as likely as any.
-        if (isJavaRuntime(fn.getRuntime()) || "Image".equals(fn.getPackageType())) {
+        if (isJavaRuntime(fn.getRuntime()) || "Image".equals(fn.getPackageType()) || fn.usesCustomRuntime()) {
             specBuilder.withJavaTrustStore();
         }
 
@@ -1429,6 +1432,20 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
             }
         }
         return false;
+    }
+
+    /** Customer-managed runtimes; absent outside CDI. */
+    @jakarta.inject.Inject
+    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
+
+    private String customRuntimeImage(LambdaFunction fn) {
+        if (runtimesServiceInstance == null || runtimesServiceInstance.isUnsatisfied()) {
+            throw new IllegalStateException("Customer-managed runtimes are not available");
+        }
+        String region = io.floci.aws.core.common.AwsArnUtils.regionOrDefault(fn.getFunctionArn(), "");
+        return runtimesServiceInstance.get()
+                .resolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
+                .imageUri();
     }
 
     private static boolean isProvidedRuntime(String runtime) {

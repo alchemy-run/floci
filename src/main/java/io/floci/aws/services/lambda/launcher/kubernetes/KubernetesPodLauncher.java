@@ -171,7 +171,9 @@ public class KubernetesPodLauncher implements LambdaRuntimeLauncher {
             boolean imagePackage = "Image".equals(fn.getPackageType()) && fn.getImageUri() != null;
             // No emulated-ECR rewrite here: the kubelet pulls images, and Floci's loopback
             // registry is not reachable from cluster nodes. URIs pass through unchanged.
-            String image = imagePackage ? fn.getImageUri() : imageResolver.resolve(fn.getRuntime());
+            String image = imagePackage ? fn.getImageUri()
+                    : fn.usesCustomRuntime() ? customRuntimeImage(fn)
+                    : imageResolver.resolve(fn.getRuntime());
 
             String shortId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
             podName = LambdaPodSpecFactory.podName(fn.getFunctionName(), shortId);
@@ -566,5 +568,20 @@ public class KubernetesPodLauncher implements LambdaRuntimeLauncher {
 
     private static boolean isProvidedRuntime(String runtime) {
         return runtime != null && runtime.startsWith("provided");
+    }
+
+    /** Customer-managed runtimes; absent outside CDI. */
+    @jakarta.inject.Inject
+    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
+
+    /** The image of the version the function's runtime alias points to at this cold start. */
+    private String customRuntimeImage(LambdaFunction fn) {
+        if (runtimesServiceInstance == null || runtimesServiceInstance.isUnsatisfied()) {
+            throw new IllegalStateException("Customer-managed runtimes are not available");
+        }
+        String region = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), config.defaultRegion());
+        return runtimesServiceInstance.get()
+                .resolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
+                .imageUri();
     }
 }

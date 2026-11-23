@@ -17,6 +17,9 @@ public class LambdaFunction {
     private String functionArn;
     private String accountId;
     private String runtime;
+    /** Customer-managed runtime ({@code Runtime: custom}): the runtime ARN and alias the function runs on. */
+    private String runtimeConfigArn;
+    private String runtimeConfigAlias;
     private String role;
     private String handler;
     private String description;
@@ -96,6 +99,15 @@ public class LambdaFunction {
 
     public String getRuntime() { return runtime; }
     public void setRuntime(String runtime) { this.runtime = runtime; }
+
+    public String getRuntimeConfigArn() { return runtimeConfigArn; }
+    public void setRuntimeConfigArn(String runtimeConfigArn) { this.runtimeConfigArn = runtimeConfigArn; }
+
+    public String getRuntimeConfigAlias() { return runtimeConfigAlias; }
+    public void setRuntimeConfigAlias(String runtimeConfigAlias) { this.runtimeConfigAlias = runtimeConfigAlias; }
+
+    /** True when the function runs on a customer-managed runtime. */
+    public boolean usesCustomRuntime() { return "custom".equals(runtime); }
 
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }

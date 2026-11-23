@@ -10,6 +10,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -58,6 +59,12 @@ public class LambdaTagController {
     @GET
     @Path("/tags/{arn: .+}")
     public Response listTags(@PathParam("arn") String arn) {
+        if (LambdaRuntimesService.ownsArn(arn)) {
+            ObjectNode rtRoot = objectMapper.createObjectNode();
+            ObjectNode rtTags = rtRoot.putObject("Tags");
+            runtimesService.listTags(arnRegion(arn), arn).forEach(rtTags::put);
+            return Response.ok(rtRoot).build();
+        }
         if (LambdaMicrovmsService.ownsArn(arn)) {
             ObjectNode mvRoot = objectMapper.createObjectNode();
             ObjectNode mvTags = mvRoot.putObject("Tags");
@@ -83,7 +90,9 @@ public class LambdaTagController {
             if (tags == null) {
                 throw new AwsException("InvalidParameterValueException", "Tags is required", 400);
             }
-            if (microvmImageService.isMicrovmImageArn(arn)) {
+            if (LambdaRuntimesService.ownsArn(arn)) {
+                runtimesService.tagResource(arnRegion(arn), arn, tags);
+            } else if (microvmImageService.isMicrovmImageArn(arn)) {
                 microvmImageService.tagResource(regionFromArn(arn), arn, tags);
             } else if (LambdaMicrovmsService.ownsArn(arn)) {
                 microvmsService.tagResource(arnRegion(arn), arn, tags);
@@ -102,7 +111,9 @@ public class LambdaTagController {
     @Path("/tags/{arn: .+}")
     public Response untagResource(@PathParam("arn") String arn,
                                   @QueryParam("tagKeys") List<String> tagKeys) {
-        if (microvmImageService.isMicrovmImageArn(arn)) {
+        if (LambdaRuntimesService.ownsArn(arn)) {
+            runtimesService.untagResource(arnRegion(arn), arn, tagKeys);
+        } else if (microvmImageService.isMicrovmImageArn(arn)) {
             microvmImageService.untagResource(regionFromArn(arn), arn, tagKeys);
         } else if (LambdaMicrovmsService.ownsArn(arn)) {
             microvmsService.untagResource(arnRegion(arn), arn, tagKeys);
@@ -114,6 +125,9 @@ public class LambdaTagController {
 
     @Inject
     MicrovmImageService microvmImageService;
+
+    @Inject
+    LambdaRuntimesService runtimesService;
 
     /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
     private static String regionFromArn(String arn) {

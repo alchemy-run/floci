@@ -51,7 +51,7 @@ class PartitionCrossServiceSmokeIntegrationTest {
             "configservice", "connect", "controlcatalog", "datasync", "dlm", "dms", "dsql", "dynamodb", "ec2", "ecr",
             "ecs", "efs", "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "emrserverless",
             "eventbridge", "eventbridgev2", "firehose", "fis", "glue", "iot", "kinesis", "kinesisanalytics",
-            "lambda", "lambdaweb", "memorydb", "msk", "mwaa", "oam", "opensearch", "organizations",
+            "lambda", "lambdaruntimes", "lambdaweb", "memorydb", "msk", "mwaa", "oam", "opensearch", "organizations",
             "paymentcryptography", "pipes", "quicksight", "ram", "rds", "redshift", "resourceexplorer2", "resourcegroups",
             "s3tables", "s3vectors", "scheduler", "secretsmanager", "ses", "sns", "sqs", "stepfunctions",
             "timestreaminfluxdb", "transfer", "verifiedpermissions", "wafv2");
@@ -1292,6 +1292,21 @@ class PartitionCrossServiceSmokeIntegrationTest {
                     + "\"Role\":\"arn:" + partitionCase.partition() + ":iam::000000000000:role/lambda-role\"}")
         .when().post("/2015-03-31/functions").then().statusCode(201)
             .extract().jsonPath().getString("FunctionArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void lambdaCustomerManagedRuntimeArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "lambda");
+        String name = unique("smoke-runtime", partitionCase);
+        // By name, before the create: a failure reading the response then leaves nothing behind.
+        cleanup.register(() -> signed(region, "lambda").when().delete("/2026-10-01/runtimes/" + name));
+        String arn = signed(region, "lambda")
+            .contentType(JSON)
+            .body("{\"Name\":\"" + name + "\"}")
+        .when().post("/2026-10-01/runtimes").then().statusCode(201)
+            .extract().jsonPath().getString("Arn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

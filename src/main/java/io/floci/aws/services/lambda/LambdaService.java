@@ -22,6 +22,7 @@ import io.floci.aws.core.resource.SupportedResourceType;
 import io.floci.aws.core.storage.StorageBackedMap;
 import io.floci.aws.core.storage.StorageFactory;
 import io.floci.aws.services.ec2.Ec2Service;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import io.floci.aws.services.ec2.model.NetworkInterface;
 import io.floci.aws.services.ec2.model.SecurityGroup;
 import io.floci.aws.services.ec2.model.Subnet;
@@ -165,7 +166,7 @@ public class LambdaService implements ResourceProvider {
             "dotnetcore1.0", "dotnetcore2.0", "dotnetcore2.1", "dotnetcore3.1", "dotnet6", "dotnet8", "dotnet10",
             "nodejs4.3-edge", "go1.x", "ruby2.5", "ruby2.7", "ruby3.2", "ruby3.3", "ruby3.4", "ruby4.0",
             "provided", "provided.al2", "provided.al2023",
-            "java8.al2023", "java11.al2023", "java17.al2023");
+            "java8.al2023", "java11.al2023", "java17.al2023", "custom");
     static final List<String> ARCHITECTURE_VALUES = List.of("x86_64", "arm64");
     private static final List<String> FUNCTION_URL_AUTH_TYPE_VALUES = List.of("NONE", "AWS_IAM");
     private static final List<String> INVOKE_MODE_VALUES = List.of("BUFFERED", "RESPONSE_STREAM");
@@ -585,6 +586,7 @@ public class LambdaService implements ResourceProvider {
         fn.setFunctionName(functionName);
         fn.setFunctionArn(regionResolver.buildArn("lambda", region, "function:" + functionName));
         fn.setRuntime(runtime);
+        applyRuntimeConfig(fn, region, runtime, structureMember(request, "RuntimeConfig"));
         fn.setRole(role);
         fn.setHandler(handler);
         fn.setDescription(description);
@@ -1149,6 +1151,9 @@ public class LambdaService implements ResourceProvider {
         }
         if (request.containsKey("Runtime")) {
             fn.setRuntime((String) request.get("Runtime"));
+        }
+        if (request.containsKey("Runtime") || request.containsKey("RuntimeConfig")) {
+            applyRuntimeConfig(fn, region, fn.getRuntime(), structureMember(request, "RuntimeConfig"));
         }
         if (request.containsKey("Timeout")) {
             fn.setTimeout(timeout);
@@ -2680,6 +2685,8 @@ public class LambdaService implements ResourceProvider {
             snapshot.setVersion(String.valueOf(version));
             snapshot.setFunctionArn(fn.getFunctionArn().replace(":$LATEST", "") + ":" + version);
             snapshot.setRuntime(fn.getRuntime());
+            snapshot.setRuntimeConfigArn(fn.getRuntimeConfigArn());
+            snapshot.setRuntimeConfigAlias(fn.getRuntimeConfigAlias());
             snapshot.setRole(fn.getRole());
             snapshot.setHandler(fn.getHandler());
             snapshot.setDescription(description != null ? description : fn.getDescription());
@@ -4592,6 +4599,37 @@ public class LambdaService implements ResourceProvider {
                 LOG.warnv("Deploying untrusted code to {0}: {1}", fn.getFunctionName(), rejection.get());
             }
         }
+    }
+
+    /** Customer-managed runtimes; absent outside CDI. */
+    @Inject
+    Instance<LambdaRuntimesService> runtimesServiceInstance;
+
+    /**
+     * Records a function's customer-managed runtime. {@code Runtime: custom} needs a
+     * {@code RuntimeConfig} whose alias resolves to a live version; any other runtime ignores
+     * {@code RuntimeConfig}, as Lambda does when a function moves back to a managed runtime.
+     */
+    private void applyRuntimeConfig(LambdaFunction fn, String region, String runtime,
+                                    Map<String, Object> runtimeConfig) {
+        if (!"custom".equals(runtime)) {
+            fn.setRuntimeConfigArn(null);
+            fn.setRuntimeConfigAlias(null);
+            return;
+        }
+        String runtimeArn = runtimeConfig == null ? fn.getRuntimeConfigArn()
+                : (String) runtimeConfig.get("RuntimeArn");
+        String alias = runtimeConfig == null ? fn.getRuntimeConfigAlias()
+                : (String) runtimeConfig.get("RuntimeAlias");
+        if (runtimesServiceInstance == null || runtimesServiceInstance.isUnsatisfied()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Customer-managed runtimes are not available", 400);
+        }
+        LambdaRuntimesService runtimes = runtimesServiceInstance.get();
+        runtimes.resolve(region, runtimeArn, alias);
+        // Lambda stores the full runtime ARN even when the caller gave the name.
+        fn.setRuntimeConfigArn(runtimes.getRuntime(region, runtimeArn).arn);
+        fn.setRuntimeConfigAlias(alias);
     }
 
     /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */

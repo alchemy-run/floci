@@ -21,6 +21,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [DynamoDB Streams](dynamodb.md#streams) | `POST /` + `X-Amz-Target: DynamoDBStreams_20120810.*` | JSON 1.1 | 4 |
 | [Lambda](lambda.md) | `/2015-03-31/functions/...` + `/2025-12-01/durable-executions/...` | REST JSON | 55 |
 | [Lambda MicroVMs](lambda-microvms.md) | `/2025-09-09/...` + `/2026-04-04/...` | REST JSON | 22 |
+| [Lambda Customer-Managed Runtimes](lambda-runtimes.md) | `/2026-10-01/runtimes/...` + `/2026-07-09/resource-policy/...` | REST JSON | 19 |
 | [Lambda Web Functions](lambda-web-functions.md) | `/2025-03-07/web-functions/...` | REST JSON | 20 |
 | [API Gateway v1](api-gateway.md) | `/restapis/...` | REST JSON | 80 |
 | [API Gateway v2](api-gateway.md#v2) | `/v2/apis/...` | REST JSON | 53 + data-plane |

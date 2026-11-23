@@ -744,6 +744,11 @@ public class LambdaController {
         node.put("FunctionName", fn.getFunctionName());
         node.put("FunctionArn", fn.getFunctionArn());
         if (fn.getRuntime() != null) node.put("Runtime", fn.getRuntime());
+        if (fn.usesCustomRuntime() && fn.getRuntimeConfigArn() != null) {
+            node.putObject("RuntimeConfig")
+                    .put("RuntimeArn", fn.getRuntimeConfigArn())
+                    .put("RuntimeAlias", fn.getRuntimeConfigAlias());
+        }
         node.put("Role", fn.getRole());
         node.put("Handler", fn.getHandler());
         if (fn.getDescription() != null) node.put("Description", fn.getDescription());
@@ -911,12 +916,25 @@ public class LambdaController {
         if ("Image".equals(fn.getPackageType()) || fn.getRuntime() == null || fn.getRuntime().isBlank()) {
             return;
         }
-        node.putObject("RuntimeVersionConfig")
-                .put("RuntimeVersionArn", runtimeVersionArn(fn));
+        String versionArn = runtimeVersionArn(fn);
+        if (versionArn != null) {
+            node.putObject("RuntimeVersionConfig").put("RuntimeVersionArn", versionArn);
+        }
     }
+
+    /** Customer-managed runtimes; absent outside CDI. */
+    @jakarta.inject.Inject
+    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
 
     private String runtimeVersionArn(LambdaFunction fn) {
         String region = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), regionResolver.getDefaultRegion());
+        // A customer-managed runtime reports the version its alias points to now.
+        if (fn.usesCustomRuntime() && runtimesServiceInstance != null && !runtimesServiceInstance.isUnsatisfied()) {
+            return runtimesServiceInstance.get()
+                    .tryResolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
+                    .map(io.floci.aws.services.lambdaruntimes.LambdaRuntimesService.ResolvedRuntime::versionArn)
+                    .orElse(null);
+        }
         return AwsArnUtils.Arn.of("lambda", region, "", "runtime:" + runtimeVersionId(fn.getRuntime())).toString();
     }
 

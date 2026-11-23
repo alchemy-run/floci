@@ -120,6 +120,11 @@ services:
       - TagResourceByBody
       - TagResourcePut
       - UntagResourceByQuery
+  - service: lambdaruntimes
+    doc: docs/services/lambda-runtimes.md
+    sources:
+      - { path: services/lambdaruntimes/LambdaRuntimesController.java, mode: rest }
+      - { path: services/lambdaruntimes/LambdaResourcePolicyController.java, mode: rest }
   - service: lambdaweb
     doc: docs/services/lambda-web-functions.md
     sources:
