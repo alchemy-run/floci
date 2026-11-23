@@ -29,9 +29,11 @@ import io.floci.aws.services.lambda.model.LambdaFunction;
 import io.floci.aws.services.lambda.model.LambdaLayerVersion;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServer;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServerFactory;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -128,7 +130,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     private final ImageResolver imageResolver;
     private final RuntimeApiServerFactory runtimeApiServerFactory;
     private final DockerHostResolver dockerHostResolver;
-    @jakarta.inject.Inject
+    @Inject
     ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final EcrRegistryManager ecrRegistryManager;
@@ -245,6 +247,9 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         String image;
         if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
             image = fn.getResolvedImageUri() != null ? fn.getResolvedImageUri() : fn.getImageUri();
+        } else if (fn.usesCustomRuntime()) {
+            // The .zip runs on the image of the version the alias points to at this cold start.
+            image = customRuntimeImage(fn);
         } else {
             image = imageResolver.resolve(fn.getRuntime(), requestedDockerPlatform(fn, dockerFlags).orElse(null));
         }
@@ -341,7 +346,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
 
         specBuilder.withEmbeddedDns();
         // A container image's runtime is its own, Java as likely as any.
-        if (isJavaRuntime(fn.getRuntime()) || "Image".equals(fn.getPackageType())) {
+        if (isJavaRuntime(fn.getRuntime()) || "Image".equals(fn.getPackageType()) || fn.usesCustomRuntime()) {
             specBuilder.withJavaTrustStore();
         }
 
@@ -1429,6 +1434,20 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
             }
         }
         return false;
+    }
+
+    /** Customer-managed runtimes; absent outside CDI. */
+    @Inject
+    Instance<LambdaRuntimesService> runtimesServiceInstance;
+
+    private String customRuntimeImage(LambdaFunction fn) {
+        if (runtimesServiceInstance == null || runtimesServiceInstance.isUnsatisfied()) {
+            throw new IllegalStateException("Customer-managed runtimes are not available");
+        }
+        String region = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), "");
+        return runtimesServiceInstance.get()
+                .resolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
+                .imageUri();
     }
 
     private static boolean isProvidedRuntime(String runtime) {
