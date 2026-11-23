@@ -67,6 +67,7 @@ PACKAGE_NOTES = {
     "finspace": "a request filter answering FinSpace's data API as it answers after end of support",
     "floci": "Floci's own control surface, not an AWS service",
     "lambdamicrovms": "controllers attached to the lambda descriptor",
+    "lambdaruntimes": "controllers attached to the lambda descriptor",
     "lambdaweb": "controller attached to the lambda descriptor",
     "opensearchserverless": "registered under the AWS signing name, aoss",
     "resourcegroupstagging": "registered under the AWS signing name, tagging",

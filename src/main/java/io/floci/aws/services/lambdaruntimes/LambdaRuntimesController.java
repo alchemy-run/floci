@@ -31,6 +31,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -300,7 +301,7 @@ public class LambdaRuntimesController {
         } catch (AwsException e) {
             version = null;
         }
-        putCompatibility(node, version == null ? java.util.List.of() : version.architectures);
+        putCompatibility(node, version == null ? List.of() : version.architectures);
         // An alias without its own lifecycle reports its runtime's.
         Lifecycle lifecycle = alias.releaseLifecycle;
         if (lifecycle == null) {
@@ -316,7 +317,7 @@ public class LambdaRuntimesController {
         return node;
     }
 
-    private static void putCompatibility(ObjectNode node, java.util.List<String> architectures) {
+    private static void putCompatibility(ObjectNode node, List<String> architectures) {
         ObjectNode compatibility = node.putObject("Compatibility");
         compatibility.putArray("IntegrationModels").add("RuntimeAPI");
         ArrayNode archs = compatibility.putArray("Architectures");

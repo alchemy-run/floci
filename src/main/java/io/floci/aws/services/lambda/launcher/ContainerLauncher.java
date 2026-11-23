@@ -29,9 +29,11 @@ import io.floci.aws.services.lambda.model.LambdaFunction;
 import io.floci.aws.services.lambda.model.LambdaLayerVersion;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServer;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServerFactory;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -128,7 +130,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     private final ImageResolver imageResolver;
     private final RuntimeApiServerFactory runtimeApiServerFactory;
     private final DockerHostResolver dockerHostResolver;
-    @jakarta.inject.Inject
+    @Inject
     ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final EcrRegistryManager ecrRegistryManager;
@@ -1435,14 +1437,14 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     }
 
     /** Customer-managed runtimes; absent outside CDI. */
-    @jakarta.inject.Inject
-    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
+    @Inject
+    Instance<LambdaRuntimesService> runtimesServiceInstance;
 
     private String customRuntimeImage(LambdaFunction fn) {
         if (runtimesServiceInstance == null || runtimesServiceInstance.isUnsatisfied()) {
             throw new IllegalStateException("Customer-managed runtimes are not available");
         }
-        String region = io.floci.aws.core.common.AwsArnUtils.regionOrDefault(fn.getFunctionArn(), "");
+        String region = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), "");
         return runtimesServiceInstance.get()
                 .resolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
                 .imageUri();

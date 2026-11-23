@@ -21,9 +21,11 @@ import io.floci.aws.services.lambda.model.LambdaFunction;
 import io.floci.aws.services.lambda.model.LambdaLayerVersion;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServer;
 import io.floci.aws.services.lambda.runtime.RuntimeApiServerFactory;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import io.floci.aws.services.s3.PreSignedUrlGenerator;
 import io.floci.aws.services.s3.S3Service;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -571,8 +573,8 @@ public class KubernetesPodLauncher implements LambdaRuntimeLauncher {
     }
 
     /** Customer-managed runtimes; absent outside CDI. */
-    @jakarta.inject.Inject
-    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
+    @Inject
+    Instance<LambdaRuntimesService> runtimesServiceInstance;
 
     /** The image of the version the function's runtime alias points to at this cold start. */
     private String customRuntimeImage(LambdaFunction fn) {

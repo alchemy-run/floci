@@ -16,8 +16,10 @@ import io.floci.aws.services.lambda.model.InvocationType;
 import io.floci.aws.services.lambda.model.InvokeResult;
 import io.floci.aws.services.lambda.model.LambdaAlias;
 import io.floci.aws.services.lambda.model.LambdaFunction;
+import io.floci.aws.services.lambdaruntimes.LambdaRuntimesService;
 import io.floci.aws.services.s3.PreSignedUrlGenerator;
 import io.smallrye.common.annotation.RunOnVirtualThread;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -923,8 +925,8 @@ public class LambdaController {
     }
 
     /** Customer-managed runtimes; absent outside CDI. */
-    @jakarta.inject.Inject
-    jakarta.enterprise.inject.Instance<io.floci.aws.services.lambdaruntimes.LambdaRuntimesService> runtimesServiceInstance;
+    @Inject
+    Instance<LambdaRuntimesService> runtimesServiceInstance;
 
     private String runtimeVersionArn(LambdaFunction fn) {
         String region = AwsArnUtils.regionOrDefault(fn.getFunctionArn(), regionResolver.getDefaultRegion());
@@ -932,7 +934,7 @@ public class LambdaController {
         if (fn.usesCustomRuntime() && runtimesServiceInstance != null && !runtimesServiceInstance.isUnsatisfied()) {
             return runtimesServiceInstance.get()
                     .tryResolve(region, fn.getRuntimeConfigArn(), fn.getRuntimeConfigAlias())
-                    .map(io.floci.aws.services.lambdaruntimes.LambdaRuntimesService.ResolvedRuntime::versionArn)
+                    .map(LambdaRuntimesService.ResolvedRuntime::versionArn)
                     .orElse(null);
         }
         return AwsArnUtils.Arn.of("lambda", region, "", "runtime:" + runtimeVersionId(fn.getRuntime())).toString();
