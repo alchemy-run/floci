@@ -611,7 +611,6 @@ If a task would require broad architectural changes, stop and surface the tradeo
 - Prefer upstream's code. Where the fork rewrote a service, replace it with upstream's and rebuild only the gaps Alchemy's floci suites reveal (`node scripts/test-aws-floci.ts` in alchemy), one commit per gap so each one can go upstream.
 - Put fork-only behavior behind opt-in configuration (for example `floci.services.rds.endpoint-domain`) or in new files. `src/main/resources/application.yml` turns it on for Alchemy's image; `src/test/resources/application.yml` keeps upstream's defaults so upstream's tests run unchanged. The compatibility workflow runs upstream's defaults too.
 - After adopting upstream code, refresh the fork-only gates: `make partition-baseline`, `make docs-sync` (and the Service Matrix counts in `docs/services/index.md`), `make cfn-schema-surface-sync`, the gap files under `src/test/resources/cloudformation/`, and `src/test/resources/partition/smoke-exemptions.tsv`.
-- The PR hygiene check fails on unsigned commits. That is not a code problem and does not block a merge.
 
 ### Releasing Alchemy's image
 
