@@ -35,6 +35,7 @@ class ImageResolverTest {
             "python3.11, public.ecr.aws/lambda/python:3.11",
             "python3.10, public.ecr.aws/lambda/python:3.10",
             "python3.9, public.ecr.aws/lambda/python:3.9",
+            "nodejs26.x, public.ecr.aws/lambda/nodejs:26",
             "nodejs24.x, public.ecr.aws/lambda/nodejs:24",
             "nodejs22.x, public.ecr.aws/lambda/nodejs:22",
             "nodejs20.x, public.ecr.aws/lambda/nodejs:20",
